@@ -3,7 +3,7 @@ id: doc-1
 title: 'Colony Framework architecture spec (v1), part 1 of 2'
 type: specification
 created_date: '2026-10-31 01:46'
-updated_date: '2026-10-31 01:46'
+updated_date: '2026-10-31 02:35'
 tags:
   - architecture
   - spec
@@ -67,7 +67,8 @@ Dependency rules, enforced by a CI dependency check:
 - `Fields`, `Persistence`, `Plugins` depend on `Core`.
 - `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state).
 - `Diagnostics` plugs into `Core` through hook interfaces and struct callbacks; `Core` never references it.
-- Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery.
+- Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery. Exceptions, decided at implementation: `Native` depends on `Plugins` (it hosts the C ABI, whose host lives in `Plugins`) and on whatever `Plugins` depends on; `Testing` may depend on `Core`, `Fields`, `Persistence` and `Plugins` (it exercises them); the `Colony` meta-package references `Core`, `Fields`, `Persistence`, `Pathfinding`, `Colony` and `ProcGen`, not `Plugins`, `Diagnostics` or `Testing`.
+- `Abstractions` depends only on the BCL. `Diagnostics` depends on `Core`, `Fields` and `Persistence` (it reads their counters and the replay log) and on nothing else; `Generators` depends only on Roslyn.
 
 Public vs internal: the public API is safe by default (typed handles, ref structs, Span views, generated typed queries). `unsafe` appears only in `internal` code, plus a small documented `[Experimental]` `Colony.Unsafe` namespace (raw chunk pointers for custom SIMD). `InternalsVisibleTo` is for tests only. No runtime reflection anywhere; no static state or singletons, so many Worlds can coexist in a process.
 
