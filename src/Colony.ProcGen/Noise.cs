@@ -12,7 +12,7 @@ namespace Colony.ProcGen;
 /// sample; span overloads evaluate a structure-of-arrays batch through the SIMD kernels and allocate nothing.
 /// Outputs are in [-1, 1].
 /// </summary>
-public static class Noise
+public static partial class Noise
 {
     internal static KernelPath ActivePath { get; } = Vector256.IsHardwareAccelerated ? KernelPath.Vector256 : KernelPath.Vector128;
 
