@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The debug-validation scenarios poke freed native memory on purpose. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Committed golden hashes, one file per scenario (GoldenHashStore); located by source path, not copied. -->
+    <None Include="Golden\**" />
+  </ItemGroup>
+
+</Project>
