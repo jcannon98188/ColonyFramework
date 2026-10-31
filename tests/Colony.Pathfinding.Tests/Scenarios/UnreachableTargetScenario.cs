@@ -1,4 +1,4 @@
-﻿using Colony.Numerics;
+using Colony.Numerics;
 using Colony.Fields;
 using Colony.Testing;
 

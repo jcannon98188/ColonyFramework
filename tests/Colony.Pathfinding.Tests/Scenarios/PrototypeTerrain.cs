@@ -1,4 +1,4 @@
-﻿using Colony.Fields;
+using Colony.Fields;
 using Colony.Hashing;
 
 namespace Colony.Pathfinding.Tests.Scenarios;
