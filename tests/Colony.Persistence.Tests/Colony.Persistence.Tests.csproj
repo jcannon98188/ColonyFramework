@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Corruption tests flip bytes inside native chunk copies. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <!-- The determinism harness and the shared scenarios drive the save/load round trips (spec section 6). -->
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <!-- The Claims scenario covers Relations, Resources, event queues and buffers in one round trip. -->
+    <ProjectReference Include="..\..\src\Colony.Colony\Colony.Colony.csproj" />
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistHarnessScenario.cs" Link="Scenarios\ColonistHarnessScenario.cs" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
+    <Compile Include="..\Colony.Colony.Tests\Scenarios\ClaimScenario.cs" Link="Scenarios\ClaimScenario.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Committed golden saves, one folder per container version; located by source path, not copied. -->
+    <None Include="Golden\**" />
+  </ItemGroup>
+
+</Project>

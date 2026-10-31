@@ -16,6 +16,8 @@
     <InternalsVisibleTo Include="Colony.Core.Tests" />
     <!-- The debug-validation failing-on-purpose scenarios rent and poke native memory directly (TASK-10). -->
     <InternalsVisibleTo Include="Colony.Testing.Tests" />
+    <!-- Additive seam (TASK-14): Persistence reads and restores chunk memory, the Entity index, Resources and tables. -->
+    <InternalsVisibleTo Include="Colony.Persistence" />
   </ItemGroup>
 
 </Project>

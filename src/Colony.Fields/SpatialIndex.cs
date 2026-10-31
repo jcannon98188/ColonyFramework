@@ -546,6 +546,9 @@ public sealed class SpatialIndex : IWorldExtension
     {
     }
 
+    /// <summary>Derived state is not saved (spec section 7.1); a load rebuilds the index from the loaded Entities.</summary>
+    void IWorldExtension.Load(ExtensionStateReader reader) => Rebuild();
+
     public void Dispose()
     {
     }

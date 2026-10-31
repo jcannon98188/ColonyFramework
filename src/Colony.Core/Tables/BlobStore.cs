@@ -74,6 +74,36 @@ public sealed class BlobStore : IDisposable
         return MemoryMarshal.Cast<byte, T>(_bytes.Slice(_offsets[index], _lengths[index] * _elementSizes[index]));
     }
 
+    // ---- Save/load seams (TASK-14): the saved form is (element size, length, bytes) per blob in id order. ----
+
+    internal int ElementSizeAt(int index) => _elementSizes[index];
+
+    internal int LengthAt(int index) => _lengths[index];
+
+    internal ReadOnlySpan<byte> BytesAt(int index) => _bytes.Slice(_offsets[index], _lengths[index] * _elementSizes[index]);
+
+    /// <summary>Stores a blob from its saved bytes under the next id, with the element size it was stored with.</summary>
+    internal void RestoreBlob(int elementSize, int length, ReadOnlySpan<byte> bytes)
+    {
+        if (elementSize <= 0 || length < 0 || bytes.Length != length * elementSize)
+        {
+            throw new ArgumentException($"A blob of {length} x {elementSize} byte elements needs {length * elementSize} bytes, not {bytes.Length}.", nameof(bytes));
+        }
+
+        if (_count == _offsets.Length)
+        {
+            Array.Resize(ref _offsets, _count * 2);
+            Array.Resize(ref _lengths, _count * 2);
+            Array.Resize(ref _elementSizes, _count * 2);
+        }
+
+        _offsets[_count] = _bytes.Append(bytes, Alignment);
+        _lengths[_count] = length;
+        _elementSizes[_count] = elementSize;
+        Bytes += bytes.Length;
+        _count++;
+    }
+
     /// <summary>Appends every blob in id order: the saved form of the store.</summary>
     internal void Hash(ref Hash64State state)
     {

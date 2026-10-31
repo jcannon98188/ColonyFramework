@@ -297,6 +297,57 @@ internal sealed unsafe class Archetype
     }
 
     /// <summary>
+    /// Save/load seam (TASK-14): appends a full-size chunk holding <paramref name="rows"/> rows whose bytes
+    /// the loader writes next (enable bits included; call <see cref="RecountEnabled"/> afterwards). Only
+    /// valid while the last chunk is full, i.e. when restoring chunks in saved order.
+    /// </summary>
+    public int AppendChunk(SlabAllocator allocator, int rows)
+    {
+        if (rows <= 0 || rows > Capacity || (ChunkCount > 0 && _counts[ChunkCount - 1] != Capacity))
+        {
+            throw new ArgumentException($"A restored chunk holds 1..{Capacity} rows and follows only full chunks ({rows} rows requested).", nameof(rows));
+        }
+
+        if (ChunkCount == _chunks.Length)
+        {
+            Array.Resize(ref _chunks, _chunks.Length * 2);
+            Array.Resize(ref _counts, _counts.Length * 2);
+            Array.Resize(ref _versions, _versions.Length * 2);
+            Array.Resize(ref _asleep, _asleep.Length * 2);
+            Array.Resize(ref _columnVersions, _columnVersions.Length * 2);
+            Array.Resize(ref _enabledCounts, _enabledCounts.Length * 2);
+        }
+
+        byte* rented = allocator.Rent();
+        NativeMemory.Clear(rented, (nuint)UsedBytesPerChunk);
+        int chunk = ChunkCount++;
+        _chunks[chunk] = (nint)rented;
+        _counts[chunk] = rows;
+        _asleep[chunk] = false;
+        _versions[chunk]++;
+        Array.Clear(_enabledCounts, chunk * Columns, Columns);
+        EntityCount += rows;
+        return chunk;
+    }
+
+    /// <summary>Recomputes the per-column enabled counts of a chunk from its bits (after a loader wrote them).</summary>
+    public void RecountEnabled(int chunk)
+    {
+        int rows = _counts[chunk];
+        for (int i = 0; i < ComponentIds.Length; i++)
+        {
+            int count = 0;
+            ulong* bits = EnabledBits(chunk, i);
+            for (int w = 0; w < EnabledWords(rows); w++)
+            {
+                count += BitOperations.PopCount(bits[w]);
+            }
+
+            _enabledCounts[(chunk * Columns) + i] = count;
+        }
+    }
+
+    /// <summary>
     /// Removes a row by moving the archetype's last row into it. Returns the id of the Entity that
     /// moved (its index record must be updated), or <see cref="EntityId.Null"/> when none moved.
     /// </summary>
