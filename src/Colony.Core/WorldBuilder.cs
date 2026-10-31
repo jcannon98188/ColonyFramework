@@ -42,6 +42,27 @@ public sealed class WorldBuilder
         return this;
     }
 
+    /// <summary>
+    /// The first registered extension of type <typeparamref name="T"/>, or null: lets a Plugin find an
+    /// extension the Game registered (for example the generation pipeline) without holding its builder.
+    /// </summary>
+    public T? FindExtension<T>()
+        where T : WorldExtensionDefinition
+    {
+        foreach (var extension in _extensions)
+        {
+            if (extension is T match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
+    public string? CurrentPluginId => _currentPlugin >= 0 ? _plugins[_currentPlugin].Id : null;
+
     public WorldBuilder()
     {
         // Resource 0 in every schema: the queue that structural ops losing a conflict are reported on

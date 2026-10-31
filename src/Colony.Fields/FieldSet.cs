@@ -120,6 +120,53 @@ public sealed class FieldSet : IWorldExtension
         where T : unmanaged
         => _storage[Validate(field)];
 
+    /// <summary>
+    /// Replaces every cell of one chunk of the Field <paramref name="fieldId"/> with <paramref name="cells"/>
+    /// (<see cref="FieldChunk.CellCount"/> cells in storage order, raw bytes). Untyped, for whole-chunk producers
+    /// such as the generation pipeline and streaming loads: a chunk whose cells are all equal is stored uniform,
+    /// and storing a uniform chunk's own value again is a no-op (no expansion, no version stamp); otherwise the
+    /// chunk is written dense and its change version advances. Host side, between Ticks (or from a serial hook).
+    /// </summary>
+    public void WriteChunkCells(int fieldId, int ordinal, ReadOnlySpan<byte> cells)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fieldId);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(fieldId, _fields.Length);
+        ArgumentOutOfRangeException.ThrowIfNegative(ordinal);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(ordinal, _layout.ChunkCount);
+        var storage = _storage[fieldId];
+        int size = storage.CellSize;
+        if (cells.Length != FieldChunk.CellCount * size)
+        {
+            throw new ArgumentException($"A chunk of Field '{_fields[fieldId].Name}' is {FieldChunk.CellCount * size} bytes, not {cells.Length}.", nameof(cells));
+        }
+
+        var first = cells[..size];
+        bool uniform = true;
+        for (int offset = size; offset < cells.Length; offset += size)
+        {
+            if (!cells.Slice(offset, size).SequenceEqual(first))
+            {
+                uniform = false;
+                break;
+            }
+        }
+
+        if (uniform)
+        {
+            if (storage.IsUniform(ordinal) && storage.UniformValue(ordinal).SequenceEqual(first))
+            {
+                return;
+            }
+
+            MarkWritten(fieldId, ordinal);
+            storage.Fill(ordinal, first);
+            return;
+        }
+
+        MarkWritten(fieldId, ordinal);
+        cells.CopyTo(storage.WriteCells(ordinal));
+    }
+
     internal ChunkLayout Layout => _layout;
 
     internal FieldStorage StorageAt(int fieldId) => _storage[fieldId];
