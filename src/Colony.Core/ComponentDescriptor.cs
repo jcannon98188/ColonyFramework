@@ -14,4 +14,7 @@ public readonly record struct ComponentDescriptor(
     ComponentOptions Flags)
 {
     public bool IsNonFragmenting => (Flags & ComponentOptions.NonFragmenting) != 0;
+
+    /// <summary>The fields of the layout (spec section 4.1); empty when the Component was registered by name only.</summary>
+    public System.Collections.Immutable.ImmutableArray<ComponentField> Fields { get; init; } = System.Collections.Immutable.ImmutableArray<ComponentField>.Empty;
 }
