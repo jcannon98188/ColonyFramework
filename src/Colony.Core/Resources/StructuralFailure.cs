@@ -6,6 +6,9 @@ public enum StructuralOp : byte
     Destroy = 1,
     Add = 2,
     Remove = 3,
+
+    /// <summary>A <see cref="CommandBuffer.Relate"/> whose target was dead: <see cref="StructuralFailure.Entity"/> names the target.</summary>
+    Relate = 4,
 }
 
 /// <summary>Why a structural op was not applied.</summary>

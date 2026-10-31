@@ -41,6 +41,7 @@ public sealed class CommandBuffer
         AddDefault = 4,
         Remove = 5,
         Emit = 6,
+        Relate = 7,
     }
 
     internal World World { get; }
@@ -87,6 +88,11 @@ public sealed class CommandBuffer
             throw new ArgumentException($"{typeof(T).Name} is {Unsafe.SizeOf<T>()} bytes but Component '{_schema.Describe(type).Name}' is {size} bytes.", nameof(T));
         }
 
+        if (_schema.Components[type.Id].IsBuffer && Unsafe.As<T, BufferHeader>(ref Unsafe.AsRef(in value)).Handle != 0)
+        {
+            throw new ArgumentException($"The buffer Component value owns overflow storage and cannot be copied; add elements through World.GetBuffer or ChunkView.Buffer instead.", nameof(value));
+        }
+
         byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
         *p = (byte)Kind.Add;
         Unsafe.WriteUnaligned(p + 1, entity.Value);
@@ -115,6 +121,36 @@ public sealed class CommandBuffer
         Unsafe.WriteUnaligned(p + 9, type.Id);
         Count++;
     }
+
+    /// <summary>
+    /// Records that <paramref name="source"/> relates to <paramref name="target"/> in <paramref name="relation"/>
+    /// (spec section 4.1), replacing any earlier target. Either may be a deferred handle from this buffer. At
+    /// playback a dead target skips the op and reports a <see cref="StructuralFailure"/> with
+    /// <see cref="StructuralOp.Relate"/>; a <see cref="EntityId.Null"/> target is an <see cref="Unrelate"/>.
+    /// </summary>
+    public unsafe void Relate(EntityId source, RelationType relation, EntityId target)
+    {
+        _schema.ValidateRelation(relation);
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + sizeof(ulong));
+        *p = (byte)Kind.Relate;
+        Unsafe.WriteUnaligned(p + 1, source.Value);
+        Unsafe.WriteUnaligned(p + 9, relation.Component.Id);
+        Unsafe.WriteUnaligned(p + 13, target.Value);
+        Count++;
+    }
+
+    /// <summary>Records that <paramref name="source"/> leaves <paramref name="relation"/> (drops its link; a no-op when it has none).</summary>
+    public void Unrelate(EntityId source, RelationType relation)
+    {
+        _schema.ValidateRelation(relation);
+        Remove(source, relation.Component);
+    }
+
+    /// <summary>Puts <paramref name="child"/> under <paramref name="parent"/> in the built-in hierarchy (<see cref="WorldBuilder.AddHierarchy"/>).</summary>
+    public void SetParent(EntityId child, EntityId parent) => Relate(child, _schema.Hierarchy, parent);
+
+    /// <summary>Detaches <paramref name="child"/> from its parent in the built-in hierarchy.</summary>
+    public void ClearParent(EntityId child) => Unrelate(child, _schema.Hierarchy);
 
     /// <summary>
     /// Records an event for the typed queue <paramref name="queue"/> (spec section 4.3). Appended to the
@@ -233,6 +269,10 @@ public sealed class CommandBuffer
                 p += sizeof(int);
                 switch (kind)
                 {
+                    case Kind.Relate:
+                        World.Relate(target, componentId, Target(Unsafe.ReadUnaligned<ulong>(p), resolved));
+                        p += sizeof(ulong);
+                        break;
                     case Kind.Add:
                         World.AddComponent(target, componentId, p);
                         p += _schema.Sizes[componentId];

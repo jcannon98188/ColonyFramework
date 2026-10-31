@@ -40,8 +40,10 @@ public sealed partial class World : IDisposable
         DebugValidation = schema.DebugValidation;
         Allocator = new SlabAllocator(poison: DebugValidation);
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
+        _bufferHeap = new BufferHeap(Allocator);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
+        _relations = new RelationIndex(schema.RelationCount, _entities.Capacity);
         _resources = new ResourceStore(schema);
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
@@ -444,11 +446,16 @@ public sealed partial class World : IDisposable
         archetype.MarkChanged(chunk, ChangeCounter);
         var id = _entities.Allocate(archetype.Id, chunk, row);
         _nonFragmenting.EnsureCapacity(_entities.Capacity);
+        _relations.EnsureCapacity(_entities.Capacity);
         ((ulong*)archetype.ChunkPointer(chunk))[row] = id.Value;
         _creates++;
         return id;
     }
 
+    /// <summary>
+    /// Destroys an Entity and, through cascading Relations (<see cref="RelationOptions.CascadeDelete"/>),
+    /// its descendants: an explicit work list, no recursion, no allocation once it has grown.
+    /// </summary>
     internal bool DestroyEntity(EntityId id)
     {
         if (!_entities.IsAlive(id))
@@ -457,17 +464,45 @@ public sealed partial class World : IDisposable
             return false;
         }
 
-        int index = id.Index;
+        DestroyCore(id.Index);
+        while (_cascadeCount > 0)
+        {
+            var next = _cascade[--_cascadeCount];
+            if (_entities.IsAlive(next))
+            {
+                DestroyCore(next.Index);
+            }
+        }
+
+        return true;
+    }
+
+    private void DestroyCore(int index)
+    {
+        if (Schema.RelationCount > 0)
+        {
+            DetachRelations(index);
+        }
+
+        if (Schema.HasBufferComponents)
+        {
+            FreeBuffers(index);
+        }
+
         RemoveFromArchetype(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), _entities.RowOf(index));
         _nonFragmenting.ClearEntity(index);
         _entities.Free(index, StructuralEpoch);
         _destroys++;
-        return true;
     }
 
     /// <summary>Adds (or overwrites) a Component; <paramref name="source"/> null means zero-initialised.</summary>
     internal unsafe bool AddComponent(EntityId id, int componentId, byte* source)
     {
+        if (Schema.RelationOfComponent[componentId] >= 0)
+        {
+            return Relate(id, componentId, source is null ? EntityId.Null : Unsafe.ReadUnaligned<RelationLink>(source).Target);
+        }
+
         if (!_entities.IsAlive(id))
         {
             ReportFailure(id, StructuralOp.Add, componentId);
@@ -476,8 +511,14 @@ public sealed partial class World : IDisposable
 
         int index = id.Index;
         int slot = Schema.NonFragmentingSlots[componentId];
+        bool isBuffer = Schema.Components[componentId].IsBuffer;
         if (slot >= 0)
         {
+            if (isBuffer && _nonFragmenting.Has(slot, index))
+            {
+                FreeBuffer(_nonFragmenting.Pointer(slot, index));
+            }
+
             _nonFragmenting.Set(slot, index, source);
             _adds++;
             return true;
@@ -487,6 +528,10 @@ public sealed partial class World : IDisposable
         if (!archetype.Has(componentId))
         {
             archetype = MoveTo(index, archetype, GetOrCreateArchetype(archetype.Signature.With(new ComponentType(componentId))));
+        }
+        else if (isBuffer)
+        {
+            FreeBuffer(archetype.ChunkPointer(_entities.ChunkOf(index)) + archetype.OffsetOf(componentId) + (long)_entities.RowOf(index) * Schema.Sizes[componentId]);
         }
 
         int size = Schema.Sizes[componentId];
@@ -505,7 +550,7 @@ public sealed partial class World : IDisposable
         return true;
     }
 
-    internal bool RemoveComponent(EntityId id, int componentId)
+    internal unsafe bool RemoveComponent(EntityId id, int componentId)
     {
         if (!_entities.IsAlive(id))
         {
@@ -517,6 +562,17 @@ public sealed partial class World : IDisposable
         int slot = Schema.NonFragmentingSlots[componentId];
         if (slot >= 0)
         {
+            int relation = Schema.RelationOfComponent[componentId];
+            if (relation >= 0)
+            {
+                UnlinkOutgoing(relation, slot, index);
+            }
+
+            if (Schema.Components[componentId].IsBuffer && _nonFragmenting.Has(slot, index))
+            {
+                FreeBuffer(_nonFragmenting.Pointer(slot, index));
+            }
+
             _nonFragmenting.Remove(slot, index);
         }
         else
@@ -524,6 +580,11 @@ public sealed partial class World : IDisposable
             var archetype = _archetypes[_entities.ArchetypeOf(index)];
             if (archetype.Has(componentId))
             {
+                if (Schema.Components[componentId].IsBuffer)
+                {
+                    FreeBuffer(archetype.ChunkPointer(_entities.ChunkOf(index)) + archetype.OffsetOf(componentId) + (long)_entities.RowOf(index) * Schema.Sizes[componentId]);
+                }
+
                 MoveTo(index, archetype, GetOrCreateArchetype(archetype.Signature.Without(new ComponentType(componentId))));
             }
         }
@@ -589,7 +650,7 @@ public sealed partial class World : IDisposable
             return archetype;
         }
 
-        archetype = new Archetype(_archetypeCount, signature, Schema);
+        archetype = new Archetype(_archetypeCount, signature, Schema, _bufferHeap);
         if (_archetypeCount == _archetypes.Length)
         {
             Array.Resize(ref _archetypes, _archetypes.Length * 2);
@@ -627,6 +688,9 @@ public sealed partial class World : IDisposable
         }
 
         Scratch.Dispose();
+        _bufferHeap.Dispose();
+        Strings.Dispose();
+        Blobs.Dispose();
         _nonFragmenting.Dispose();
         _resources.Dispose();
         var report = new LeakReport(Allocator.ChunksInUse, (long)Allocator.ChunksInUse * SlabAllocator.ChunkSize);

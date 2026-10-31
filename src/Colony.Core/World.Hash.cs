@@ -11,9 +11,11 @@ public sealed partial class World
     /// The World hash (spec section 6): <see cref="Hash64"/> over the schema hash, the Tick, every
     /// archetype's chunks in archetype id then chunk order (the Entity column and each Component column
     /// over the live rows only, each with its enable bits), the non-fragmenting Components of every live
-    /// Entity in slot order, the persistent Resources in id order, every extension's state in registration
-    /// order (<see cref="IWorldExtension.Hash"/>), and the RNG state. Padding rows, change versions, the
-    /// asleep bit, transient Resources (including non-persistent event queues) and caches are excluded. Linear in the
+    /// Entity in slot order (buffer Components by length and elements, never by heap handle), the persistent
+    /// Resources in id order, the string table and the blob store in id order, every extension's state in
+    /// registration order (<see cref="IWorldExtension.Hash"/>), and the RNG state. Padding rows, change versions,
+    /// the asleep bit, transient Resources (including non-persistent event queues), the rebuildable relation
+    /// index and caches are excluded. Linear in the
     /// live data, so it is cheap enough to run every few Ticks in a test. Equal on 1 or N threads, JIT or
     /// Native AOT, for the same seed and inputs (Tier 1 determinism, ADR 0002).
     /// </summary>
@@ -44,12 +46,21 @@ public sealed partial class World
             }
 
             int size = Schema.Sizes[id];
+            ref readonly var descriptor = ref Schema.Components[id];
             for (int index = 0; index < _entities.HighWater; index++)
             {
                 if (_entities.IsAliveSlot(index) && _nonFragmenting.Has(slot, index))
                 {
                     state.Append(index);
-                    state.Append(new ReadOnlySpan<byte>(_nonFragmenting.Pointer(slot, index), size));
+                    if (descriptor.IsBuffer)
+                    {
+                        HashBuffer(ref state, _nonFragmenting.Pointer(slot, index), in descriptor);
+                    }
+                    else
+                    {
+                        state.Append(new ReadOnlySpan<byte>(_nonFragmenting.Pointer(slot, index), size));
+                    }
+
                     state.Append(_nonFragmenting.IsEnabled(slot, index) ? (byte)1 : (byte)0);
                 }
             }
@@ -75,6 +86,9 @@ public sealed partial class World
             }
         }
 
+        Strings.Hash(ref state);
+        Blobs.Hash(ref state);
+
         foreach (var extension in _extensions)
         {
             extension.Hash(ref state);
@@ -99,7 +113,7 @@ public sealed partial class World
         return state.Finish();
     }
 
-    private static unsafe void AppendArchetype(ref Hash64State state, Archetype archetype)
+    private unsafe void AppendArchetype(ref Hash64State state, Archetype archetype)
     {
         var signature = archetype.Signature;
         state.Append(in signature);
@@ -111,7 +125,20 @@ public sealed partial class World
             state.Append(new ReadOnlySpan<byte>(chunk, rows * Archetype.EntityColumnElementSize));
             for (int i = 0; i < archetype.ComponentIds.Length; i++)
             {
-                state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                ref readonly var descriptor = ref Schema.Components[archetype.ComponentIds[i]];
+                if (descriptor.IsBuffer)
+                {
+                    // Logical content only: heap handles depend on thread timing and never reach the hash.
+                    for (int row = 0; row < rows; row++)
+                    {
+                        HashBuffer(ref state, chunk + archetype.Offsets[i] + (long)row * descriptor.Size, in descriptor);
+                    }
+                }
+                else
+                {
+                    state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                }
+
                 state.Append(new ReadOnlySpan<byte>(chunk + archetype.EnabledOffsets[i], (rows + 7) / 8));
             }
         }

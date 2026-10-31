@@ -40,4 +40,17 @@ public enum ComponentOptions
     /// Components are not part of archetype signatures and do not take part in chunk queries.
     /// </summary>
     NonFragmenting = 1,
+
+    /// <summary>
+    /// Set by <see cref="WorldBuilder.AddRelation"/> on the non-fragmenting Component that stores a
+    /// Relation's forward link (<see cref="RelationLink"/>). Not for direct registration.
+    /// </summary>
+    Relation = 2,
+
+    /// <summary>
+    /// Set by the builder's buffer Component registration: the Component's elements live inline up to a
+    /// declared capacity and overflow to the World's size-class allocator. Hashed logically (length and
+    /// elements), never by raw bytes. Not for direct registration.
+    /// </summary>
+    Buffer = 4,
 }

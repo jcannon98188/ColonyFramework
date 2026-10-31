@@ -80,6 +80,33 @@ public readonly ref struct ChunkView
         return Span<T>(Offset<T>(type), PaddedCount);
     }
 
+    /// <summary>
+    /// The buffer Component (<see cref="WorldBuilder.AddBufferComponent{TElement, TInline}"/>) of one row.
+    /// Grow or shrink it only from the job that owns this chunk, with the Component in your Writes.
+    /// </summary>
+    public unsafe BufferAccessor<TElement> Buffer<TElement>(ComponentType type, int row) where TElement : unmanaged
+    {
+        Validate();
+        if ((uint)row >= (uint)Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(row));
+        }
+
+        int offset = _archetype.OffsetOf(type.Id);
+        if (offset < 0)
+        {
+            throw new InvalidOperationException($"The chunk has no column for {type}.");
+        }
+
+        var descriptor = _archetype.Schema.Components[type.Id];
+        if (!descriptor.IsBuffer || descriptor.ElementSize != Unsafe.SizeOf<TElement>())
+        {
+            throw new ArgumentException($"Component '{descriptor.Name}' is not a buffer of {Unsafe.SizeOf<TElement>()} byte elements.", nameof(type));
+        }
+
+        return new BufferAccessor<TElement>((byte*)_pointer + offset + (long)row * descriptor.Size, descriptor.InlineOffset, descriptor.InlineCapacity, _archetype.Heap);
+    }
+
     // ---- Enable bits (spec section 4.1): per Component, per row. Spans above cover every live row; use these to honour the bits. ----
 
     /// <summary>True when the Component is enabled on <paramref name="row"/>.</summary>

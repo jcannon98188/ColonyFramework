@@ -68,7 +68,10 @@ public sealed class FieldHashTests
         expected.Append(schema.SchemaHash);
         expected.Append(world.CurrentTick);
         // No Entities, so the archetype and non-fragmenting sections are empty; the persistent Resources follow:
-        // only the built-in StructuralFailure queue (id 0), empty, hashed as its record count. Then the extensions.
+        // only the built-in StructuralFailure queue (id 0), empty, hashed as its record count. Then the string table
+        // and the blob store (TASK-9), both empty, hashed as their counts. Then the extensions.
+        expected.Append(0);
+        expected.Append(0);
         expected.Append(0);
         var cells = new int[FieldChunk.CellCount];
         for (int ordinal = 0; ordinal < 4; ordinal++)

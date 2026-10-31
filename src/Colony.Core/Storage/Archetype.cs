@@ -33,19 +33,35 @@ internal sealed unsafe class Archetype
     private int[] _enabledCounts;
     private bool[] _asleep = new bool[4];
 
-    public Archetype(int id, ComponentMask signature, WorldSchema schema)
+    public Archetype(int id, ComponentMask signature, WorldSchema schema, BufferHeap heap)
     {
         Id = id;
         Signature = signature;
+        Heap = heap;
+        Schema = schema;
         var ids = new int[signature.Count];
         signature.CopyIds(ids);
         ComponentIds = ids;
         Sizes = new int[ids.Length];
         Offsets = new int[ids.Length];
         EnabledOffsets = new int[ids.Length];
+        int buffers = 0;
         for (int i = 0; i < ids.Length; i++)
         {
             Sizes[i] = schema.Sizes[ids[i]];
+            if (schema.Components[ids[i]].IsBuffer)
+            {
+                buffers++;
+            }
+        }
+
+        BufferColumns = new int[buffers];
+        for (int i = 0, b = 0; i < ids.Length; i++)
+        {
+            if (schema.Components[ids[i]].IsBuffer)
+            {
+                BufferColumns[b++] = i;
+            }
         }
 
         long bytesPerEntity = EntityColumnElementSize;
@@ -95,6 +111,25 @@ internal sealed unsafe class Archetype
     public int Id { get; }
 
     public ComponentMask Signature { get; }
+
+    /// <summary>The World's buffer heap, for <see cref="ChunkView.Buffer{TElement}"/>.</summary>
+    public BufferHeap Heap { get; }
+
+    public WorldSchema Schema { get; }
+
+    /// <summary>Column indices (into <see cref="ComponentIds"/>) of the buffer Components; their overflow blocks are freed with the row.</summary>
+    public int[] BufferColumns { get; }
+
+    /// <summary>Releases the overflow blocks of a row's buffer Components (before the row's bytes are dropped).</summary>
+    public void FreeBuffers(int chunk, int row)
+    {
+        foreach (int column in BufferColumns)
+        {
+            var header = (BufferHeader*)((byte*)_chunks[chunk] + Offsets[column] + (long)row * Sizes[column]);
+            Heap.Free(header->Handle);
+            header->Handle = 0;
+        }
+    }
 
     /// <summary>Component ids in ascending order; parallel to <see cref="Sizes"/>, <see cref="Offsets"/> and <see cref="EnabledOffsets"/>.</summary>
     public int[] ComponentIds { get; }
