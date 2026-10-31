@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 
 namespace Colony.Generators;
 
@@ -51,6 +52,12 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
         "GetHashCode on a reference type in System code",
         "'{0}' hashes a reference type, which varies per process; hash unmanaged Component data or Entity IDs instead (spec section 6)");
 
+    /// <summary>COL1006: enumerating an unordered managed collection.</summary>
+    public static readonly DiagnosticDescriptor UnorderedEnumeration = Rule(
+        "COL1006",
+        "Enumeration of an unordered collection in System code",
+        "Enumerating '{0}' yields an unspecified order; iterate an ordered collection and end every ordering with an Entity ID tiebreak (spec section 6)");
+
     /// <summary>COL1007: System.Random.</summary>
     public static readonly DiagnosticDescriptor SystemRandom = Rule(
         "COL1007",
@@ -59,7 +66,8 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
 
     // Declared after the descriptors: static field initializers run in textual order.
     private static readonly ImmutableArray<DiagnosticDescriptor> All =
-        ImmutableArray.Create(NonDeterministicMath, VariableWidthVector, WallClockTime, NewGuid, ReferenceTypeHashCode, SystemRandom);
+        ImmutableArray.Create(
+            NonDeterministicMath, VariableWidthVector, WallClockTime, NewGuid, ReferenceTypeHashCode, UnorderedEnumeration, SystemRandom);
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => All;
@@ -84,8 +92,66 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
                 nodeContext => AnalyzeName(nodeContext, scope),
                 SyntaxKind.IdentifierName,
                 SyntaxKind.GenericName);
+            startContext.RegisterOperationAction(
+                operationContext => AnalyzeEnumeration(operationContext, scope),
+                OperationKind.Loop,
+                OperationKind.Conversion,
+                OperationKind.Invocation);
         });
     }
+
+    /// <summary>
+    /// COL1006: a foreach over an unordered collection, an implicit conversion of one to IEnumerable (LINQ, collection
+    /// constructors) or an explicit GetEnumerator call.
+    /// </summary>
+    private static void AnalyzeEnumeration(OperationAnalysisContext context, SystemScope scope)
+    {
+        if (!scope.IsSystemCode(context.ContainingSymbol))
+        {
+            return;
+        }
+
+        switch (context.Operation)
+        {
+            case IForEachLoopOperation loop:
+                ReportIfUnordered(context, Unwrap(loop.Collection));
+                break;
+
+            case IConversionOperation conversion
+                when conversion.IsImplicit && IsEnumerableInterface(conversion.Type) && conversion.Parent is not IForEachLoopOperation:
+                ReportIfUnordered(context, Unwrap(conversion.Operand));
+                break;
+
+            case IInvocationOperation { TargetMethod.Name: "GetEnumerator", Instance: { } receiver } invocation
+                when UnorderedCollections.IsUnordered(receiver.Type):
+                var location = invocation.Syntax is InvocationExpressionSyntax call ? call.Expression.GetLocation() : invocation.Syntax.GetLocation();
+                context.ReportDiagnostic(Diagnostic.Create(UnorderedEnumeration, location, DisplayName(receiver.Type!)));
+                break;
+        }
+    }
+
+    private static void ReportIfUnordered(OperationAnalysisContext context, IOperation collection)
+    {
+        if (UnorderedCollections.IsUnordered(collection.Type))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(UnorderedEnumeration, collection.Syntax.GetLocation(), DisplayName(collection.Type!)));
+        }
+    }
+
+    private static IOperation Unwrap(IOperation operation)
+    {
+        while (operation is IConversionOperation { IsImplicit: true, Operand: var inner })
+        {
+            operation = inner;
+        }
+
+        return operation;
+    }
+
+    private static bool IsEnumerableInterface(ITypeSymbol? type) =>
+        type?.OriginalDefinition.SpecialType is SpecialType.System_Collections_IEnumerable or SpecialType.System_Collections_Generic_IEnumerable_T;
+
+    private static string DisplayName(ISymbol symbol) => symbol.ToDisplayString(SymbolDisplayFormat.CSharpShortErrorMessageFormat);
 
     private static void AnalyzeName(SyntaxNodeAnalysisContext context, SystemScope scope)
     {
@@ -286,19 +352,43 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
 
         public static DiagnosticDescriptor? ForType(ITypeSymbol type) =>
             type.OriginalDefinition is INamedTypeSymbol named
-            && named.ContainingNamespace is { } ns
-            && Types.TryGetValue(QualifiedMetadataName(ns, named.MetadataName), out var rule)
+            && Types.TryGetValue(MetadataFullName(named), out var rule)
                 ? rule
                 : null;
 
         public static DiagnosticDescriptor? ForMember(ISymbol member) =>
-            member.ContainingType is { ContainingNamespace: { } ns } owner
-            && Members.TryGetValue(QualifiedMetadataName(ns, owner.MetadataName) + "." + member.Name, out var rule)
+            member.ContainingType is { } owner
+            && Members.TryGetValue(MetadataFullName(owner) + "." + member.Name, out var rule)
                 ? rule
                 : null;
+    }
 
-        private static string QualifiedMetadataName(INamespaceSymbol ns, string metadataName) =>
-            ns.IsGlobalNamespace ? metadataName : ns.ToDisplayString() + "." + metadataName;
+    /// <summary>Spec section 6: managed collections whose enumeration order is unspecified.</summary>
+    private static class UnorderedCollections
+    {
+        private static readonly ImmutableHashSet<string> Types = ImmutableHashSet.Create(
+            StringComparer.Ordinal,
+            "System.Collections.Generic.Dictionary`2",
+            "System.Collections.Generic.Dictionary`2.KeyCollection",
+            "System.Collections.Generic.Dictionary`2.ValueCollection",
+            "System.Collections.Generic.HashSet`1",
+            "System.Collections.Concurrent.ConcurrentDictionary`2",
+            "System.Collections.Concurrent.ConcurrentBag`1");
+
+        public static bool IsUnordered(ITypeSymbol? type) =>
+            type?.OriginalDefinition is INamedTypeSymbol named && Types.Contains(MetadataFullName(named));
+    }
+
+    /// <summary>"System.Collections.Generic.Dictionary`2.KeyCollection": namespace, then containing types, then the type.</summary>
+    private static string MetadataFullName(INamedTypeSymbol type)
+    {
+        string name = type.MetadataName;
+        for (var outer = type.ContainingType; outer is not null; outer = outer.ContainingType)
+        {
+            name = outer.MetadataName + "." + name;
+        }
+
+        return type.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() + "." + name : name;
     }
 
     /// <summary>Spec section 6: transcendentals on Math, MathF and the generic-math statics of double/float/Half.</summary>

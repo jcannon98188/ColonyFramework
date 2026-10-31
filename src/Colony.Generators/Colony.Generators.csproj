@@ -11,6 +11,8 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- The Roslyn packages are PrivateAssets=all; an analyzer package has no lib/ and no dependency group (NU5128). -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <DevelopmentDependency>true</DevelopmentDependency>
     <RootNamespace>Colony.Generators</RootNamespace>
     <!-- Roslyn components target netstandard2.0; the AOT/trim flags from src/Directory.Build.props do not apply. -->
