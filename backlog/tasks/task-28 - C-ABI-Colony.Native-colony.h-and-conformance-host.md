@@ -1,9 +1,11 @@
 ---
 id: TASK-28
 title: 'C ABI: Colony.Native, colony.h and conformance host'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 20:49'
 labels:
   - ready-for-agent
   - implementation
