@@ -11,6 +11,8 @@
     <IsRoslynComponent>true</IsRoslynComponent>
     <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
     <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- The Roslyn packages are PrivateAssets=all; an analyzer package has no lib/ and no dependency group (NU5128). -->
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <DevelopmentDependency>true</DevelopmentDependency>
     <RootNamespace>Colony.Generators</RootNamespace>
     <!-- Roslyn components target netstandard2.0; the AOT/trim flags from src/Directory.Build.props do not apply. -->
@@ -24,6 +26,12 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Roslyn release tracking (RS2008): every diagnostic id is listed in these tables. -->
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
   </ItemGroup>
 
   <ItemGroup>
