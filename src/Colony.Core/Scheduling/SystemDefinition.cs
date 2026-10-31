@@ -33,7 +33,7 @@ public sealed class SystemDefinition
 
     /// <summary>
     /// Resources the System reads (spec section 4.1): values through <see cref="SystemContext.ReadResource{T}"/>,
-    /// event queues through <c>SystemContext.Events&lt;T&gt;</c>. A value Resource conflicts like a Component:
+    /// event queues through <see cref="SystemContext.Events{T}"/>. A value Resource conflicts like a Component:
     /// a writer must be ordered against every reader and writer in its Phase. Event queues never conflict:
     /// readers see the queue as merged at the previous Phase boundary.
     /// </summary>
@@ -41,7 +41,7 @@ public sealed class SystemDefinition
 
     /// <summary>
     /// Resources the System writes: values through <see cref="SystemContext.Resource{T}"/> (serial hooks only),
-    /// event queues through <c>SystemContext.Emit&lt;T&gt;</c> from any hook or chunk job.
+    /// event queues through <see cref="SystemContext.Emit{T}"/> from any hook or chunk job.
     /// </summary>
     public ResourceMask WritesResources { get; init; }
 

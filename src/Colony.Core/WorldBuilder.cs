@@ -162,6 +162,20 @@ public sealed class WorldBuilder
         return this;
     }
 
+    /// <summary>
+    /// Registers a typed event queue (spec section 4.3): a Resource holding pending <typeparamref name="T"/>
+    /// events. Systems emit through their command buffer (<see cref="CommandBuffer.Emit{T}"/>), so events
+    /// merge at the Phase boundary in System, job then record order and are readable from the next Phase.
+    /// Every queue is cleared at the End Phase boundary, before the End Phase's own buffers merge; events
+    /// emitted in End are therefore delivered through the whole next Tick. Only
+    /// <see cref="EventOptions.Persistent"/> queues are saved and hashed. There are no callbacks.
+    /// </summary>
+    public WorldBuilder AddEvent<T>(string name, EventOptions options = EventOptions.None) where T : unmanaged
+    {
+        AddResourceCore<T>(name, ResourceKind.EventQueue, persistent: (options & EventOptions.Persistent) != 0);
+        return this;
+    }
+
     /// <summary>The handle for the already-registered Resource of CLR type <typeparamref name="T"/>.</summary>
     public ResourceType Resource<T>() where T : unmanaged
     {

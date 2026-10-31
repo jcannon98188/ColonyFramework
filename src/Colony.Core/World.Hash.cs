@@ -77,6 +77,12 @@ public sealed partial class World
             {
                 state.Append(new ReadOnlySpan<byte>(_resources.Pointer(id), descriptor.Size));
             }
+            else
+            {
+                int count = _resources.Count(id);
+                state.Append(count);
+                state.Append(new ReadOnlySpan<byte>(_resources.QueuePointer(id), count * descriptor.Size));
+            }
         }
 
         state.Append(_sharedRandom.Stream.Seed);

@@ -54,6 +54,32 @@ public readonly ref struct SystemContext
         return ref World.Resource<T>(type);
     }
 
+    /// <summary>
+    /// Records an event on a queue this System declared in <see cref="SystemDefinition.WritesResources"/>.
+    /// Goes through this job's command buffer, so events from parallel chunk jobs merge in System, job then
+    /// record order at the Phase boundary and are readable from the next Phase. Safe from any hook or job.
+    /// </summary>
+    public void Emit<T>(ResourceType queue, in T value) where T : unmanaged
+    {
+        if (!_definition.WritesResources.Contains(queue))
+        {
+            throw new InvalidOperationException($"System '{_definition.Name}' emits {World.Schema.DescribeResource(queue).Name} without declaring it in WritesResources.");
+        }
+
+        Commands.Emit(queue, in value);
+    }
+
+    /// <summary>The pending events of a queue this System declared in <see cref="SystemDefinition.ReadsResources"/> (or writes), as merged at the last Phase boundary.</summary>
+    public ReadOnlySpan<T> Events<T>(ResourceType queue) where T : unmanaged
+    {
+        if (!_definition.ReadsResources.Contains(queue) && !_definition.WritesResources.Contains(queue))
+        {
+            throw new InvalidOperationException($"System '{_definition.Name}' reads {World.Schema.DescribeResource(queue).Name} without declaring it in ReadsResources.");
+        }
+
+        return World.Events<T>(queue);
+    }
+
     public World World { get; }
 
     /// <summary>This job's command buffer. Serial hooks share job 0's buffer.</summary>

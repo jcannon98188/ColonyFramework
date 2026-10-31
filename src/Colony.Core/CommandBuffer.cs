@@ -40,6 +40,7 @@ public sealed class CommandBuffer
         Add = 3,
         AddDefault = 4,
         Remove = 5,
+        Emit = 6,
     }
 
     internal World World { get; }
@@ -113,6 +114,22 @@ public sealed class CommandBuffer
     }
 
     /// <summary>
+    /// Records an event for the typed queue <paramref name="queue"/> (spec section 4.3). Appended to the
+    /// queue at playback, so events merge with the same System, job then record order as structural ops
+    /// and become readable from the next Phase.
+    /// </summary>
+    public unsafe void Emit<T>(ResourceType queue, in T value) where T : unmanaged
+    {
+        _schema.ValidateResource<T>(queue, ResourceKind.EventQueue);
+        int size = Unsafe.SizeOf<T>();
+        byte* p = Reserve(1 + sizeof(int) + size);
+        *p = (byte)Kind.Emit;
+        Unsafe.WriteUnaligned(p + 1, queue.Id);
+        Unsafe.WriteUnaligned(p + 5, value);
+        Count++;
+    }
+
+    /// <summary>
     /// The real id of an Entity created by this buffer's last playback. Valid until the next playback or
     /// until the World resets its scratch arena.
     /// </summary>
@@ -177,6 +194,15 @@ public sealed class CommandBuffer
             while (p < end)
             {
                 var kind = (Kind)(*p++);
+                if (kind == Kind.Emit)
+                {
+                    int queue = Unsafe.ReadUnaligned<int>(p);
+                    p += sizeof(int);
+                    World.AppendEvent(queue, p);
+                    p += _schema.ResourceSizes[queue];
+                    continue;
+                }
+
                 if (kind == Kind.Create)
                 {
                     var signature = Unsafe.ReadUnaligned<ComponentMask>(p);

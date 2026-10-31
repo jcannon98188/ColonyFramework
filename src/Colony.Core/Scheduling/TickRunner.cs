@@ -52,6 +52,13 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
                 RunWave(plan, wave);
             }
 
+            if (plan.Phase == Phase.End)
+            {
+                // The stated clearing point (spec section 4.3): End Systems saw this Tick's events; what the
+                // End Phase itself emits merges into empty queues and is delivered through the next Tick.
+                _world.ClearEvents();
+            }
+
             Playback(plan);
         }
 

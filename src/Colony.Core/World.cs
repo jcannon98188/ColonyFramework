@@ -226,6 +226,22 @@ public sealed partial class World : IDisposable
         return ref Unsafe.AsRef<T>(_resources.Pointer(type.Id));
     }
 
+    /// <summary>
+    /// The pending events of a typed queue (spec section 4.3), in merge order: System order, then job
+    /// order, then record order. Inside a System use <see cref="SystemContext.Events{T}"/>, which checks the
+    /// declared access. The span is valid until the next playback or the End Phase boundary.
+    /// </summary>
+    public unsafe ReadOnlySpan<T> Events<T>(ResourceType queue) where T : unmanaged
+    {
+        Schema.ValidateResource<T>(queue, ResourceKind.EventQueue);
+        return new ReadOnlySpan<T>(_resources.QueuePointer(queue.Id), _resources.Count(queue.Id));
+    }
+
+    /// <summary>Clears every event queue: the End Phase boundary does this before the End Phase's buffers merge.</summary>
+    internal void ClearEvents() => _resources.ClearAllQueues();
+
+    internal unsafe void AppendEvent(int queue, byte* source) => _resources.Append(queue, source);
+
     /// <summary>Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of <paramref name="none"/>.</summary>
     public ChunkQuery Query(ComponentMask all, ComponentMask none = default)
         => new(_archetypes, _archetypeCount, all, none, DebugValidation);
