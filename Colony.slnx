@@ -22,6 +22,10 @@
     <Project Path="tests/Colony.Testing.AotHost/Colony.Testing.AotHost.csproj" />
     <Project Path="tests/Colony.Testing.Tests/Colony.Testing.Tests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Colony.TickHarness/Colony.TickHarness.csproj" />
+    <Project Path="benchmarks/Colony.TickHarness.Tests/Colony.TickHarness.Tests.csproj" />
+  </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Colony.DependencyCheck/Colony.DependencyCheck.csproj" />
     <Project Path="tools/Colony.DependencyCheck.Tests/Colony.DependencyCheck.Tests.csproj" />
