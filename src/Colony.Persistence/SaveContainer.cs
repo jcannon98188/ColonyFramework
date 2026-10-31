@@ -171,6 +171,19 @@ internal static class SaveContainer
 
         public bool Has(string name) => _byName.ContainsKey(name);
 
+        /// <summary>Where a section's stored bytes lie in the image (tests corrupt them in place).</summary>
+        internal TocEntry Entry(string name) => _entries[_byName[name]];
+
+        /// <summary>Offset and length of the table of contents inside the image.</summary>
+        internal (int Offset, int Length) TocRange
+        {
+            get
+            {
+                var bytes = _image.Span;
+                return ((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes[24..]), (int)BinaryPrimitives.ReadUInt64LittleEndian(bytes[32..]));
+            }
+        }
+
         public SaveManifest Manifest => _manifest ??= SaveManifest.Decode(Section(ManifestSection), ContainerVersion);
 
         /// <summary>Every section name starting with <paramref name="prefix"/>, in container order.</summary>
