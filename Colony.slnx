@@ -1,12 +1,14 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Colony.Core/Colony.Core.csproj" />
+    <Project Path="src/Colony.Fields/Colony.Fields.csproj" />
     <Project Path="src/Colony.Generators/Colony.Generators.csproj" />
     <Project Path="src/Colony.ProcGen/Colony.ProcGen.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Colony.Core.AotHost/Colony.Core.AotHost.csproj" />
     <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
+    <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
     <Project Path="tests/Colony.ProcGen.Tests/Colony.ProcGen.Tests.csproj" />
   </Folder>
