@@ -174,6 +174,33 @@ public readonly ref struct ChunkView
     /// <summary>True while the chunk has had no structural change since the view was taken.</summary>
     public bool IsCurrent => ChunkIndex < _archetype.ChunkCount && _archetype.Version(ChunkIndex) == _version;
 
+    // ---- Raw column access (TASK-28): the C ABI hands read-only column pointers to Native Plugin Systems. ----
+
+    /// <summary>Address of the Entity id column (live rows first).</summary>
+    internal unsafe EntityId* EntitiesAddress
+    {
+        get
+        {
+            Validate();
+            return (EntityId*)_pointer;
+        }
+    }
+
+    /// <summary>Address of the Component's column and its element size, or null (size 0) when the chunk has no column for it.</summary>
+    internal unsafe byte* ColumnAddress(ComponentType type, out int size)
+    {
+        Validate();
+        int offset = (uint)type.Id < (uint)_archetype.Schema.Components.Length ? _archetype.OffsetOf(type.Id) : -1;
+        if (offset < 0)
+        {
+            size = 0;
+            return null;
+        }
+
+        size = _archetype.Schema.Sizes[type.Id];
+        return (byte*)_pointer + offset;
+    }
+
     private int Offset<T>(ComponentType type) where T : unmanaged
     {
         if (_checkAccess && !_access.Contains(type))

@@ -18,6 +18,8 @@
     <InternalsVisibleTo Include="Colony.Testing.Tests" />
     <!-- Additive seam (TASK-14): Persistence reads and restores chunk memory, the Entity index, Resources and tables. -->
     <InternalsVisibleTo Include="Colony.Persistence" />
+    <!-- Additive seam (TASK-28): the C ABI host registers Components by layout and reads chunk columns, Resources and inputs as raw bytes. -->
+    <InternalsVisibleTo Include="Colony.Plugins" />
   </ItemGroup>
 
 </Project>
