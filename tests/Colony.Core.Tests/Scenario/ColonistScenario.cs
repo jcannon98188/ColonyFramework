@@ -75,8 +75,16 @@ public static class ColonistScenario
 
     /// <summary>Builds the schema and Systems. The scenario's scratch state is per schema, so create one World per schema.</summary>
     public static WorldSchema BuildSchema(bool sabotage = false, int foodTarget = DefaultFood)
+        => Compose(new WorldBuilder(), sabotage, foodTarget).Build();
+
+    /// <summary>
+    /// Adds the scenario's Components, Resources and Systems to <paramref name="builder"/> without building it:
+    /// the Colony.Testing harness composes its own builder (see Colony.Testing.Tests' ColonistHarnessScenario).
+    /// </summary>
+    public static WorldBuilder Compose(WorldBuilder builder, bool sabotage = false, int foodTarget = DefaultFood)
     {
-        var builder = new WorldBuilder()
+        ArgumentNullException.ThrowIfNull(builder);
+        builder
             .AddComponent<ColonistPosition>("colonist.position")
             .AddComponent<ColonistTarget>("colonist.target")
             .AddComponent<ColonistHunger>("colonist.hunger")
@@ -220,12 +228,11 @@ public static class ColonistScenario
                 All = colonist,
                 Reads = ComponentMask.Of(health),
                 ForEachChunk = (in SystemContext context, in ChunkView chunk) => Churn(in context, in chunk, colonist, position, target, hunger, health),
-            })
-            .Build();
+            });
     }
 
     /// <summary>Creates a World on <paramref name="workers"/> threads populated with colonists and food, ready to Tick.</summary>
-    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood)
+    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood, Colony.Diagnostics.DiagnosticsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         var world = schema.CreateWorld(new WorldOptions
@@ -233,7 +240,17 @@ public static class ColonistScenario
             Seed = seed,
             WorkerThreads = workers,
             InitialEntityCapacity = (colonists + food) * 2,
+            Diagnostics = options ?? Colony.Diagnostics.DiagnosticsOptions.Default,
         });
+        Populate(world, colonists, food);
+        return world;
+    }
+
+    /// <summary>Fills a freshly created World with <paramref name="colonists"/> colonists and <paramref name="food"/> food items and resets its scratch arena.</summary>
+    public static void Populate(World world, int colonists = DefaultColonists, int food = DefaultFood)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        var schema = world.Schema;
         var position = schema.Component<ColonistPosition>();
         var target = schema.Component<ColonistTarget>();
         var hunger = schema.Component<ColonistHunger>();
@@ -263,7 +280,6 @@ public static class ColonistScenario
 
         world.Playback(buffer);
         world.ResetScratch();
-        return world;
     }
 
     /// <summary>Runs <paramref name="ticks"/> Ticks and returns the World hash after each Tick listed in <paramref name="checkpoints"/>, plus the final hash last.</summary>

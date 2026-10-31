@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- The debug-validation scenarios poke freed native memory on purpose. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <!-- The colonist scenario (TASK-7's acceptance oracle) stays in Core.Tests; ColonistHarnessScenario wraps it. -->
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Committed golden hashes, one file per scenario (GoldenHashStore); located by source path, not copied. -->
+    <None Include="Golden\**" />
+  </ItemGroup>
+
+</Project>

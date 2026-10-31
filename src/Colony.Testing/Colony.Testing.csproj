@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Testing: the determinism harness, the allocation harness and the harness host that Plugins and
+    Games run against their own scenarios (spec section 10.3). It may depend on Core, Fields, Persistence
+    and Plugins (spec section 3); nothing depends on it. No test-framework dependency: results are plain
+    data with a Describe() and a ThrowIfFailed(), so any runner can assert on them.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework testing: determinism and allocation harnesses for seeded World scenarios.</Description>
+    <RootNamespace>Colony.Testing</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Testing.Tests" />
+  </ItemGroup>
+
+</Project>

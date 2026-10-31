@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Console host for the TASK-18 sinks until the headless sample host (TASK-30) exists: runs the colonist
+    scenario with the MeterBridge and a TraceCapture attached so dotnet-counters can be pointed at it and a
+    Perfetto trace written at the end.
+    Run:      dotnet run -c Release (project tests/Colony.Diagnostics.CountersHost) [ticks 600] [workers 4] [trace path.json] [level Detailed]; see Program.cs for the option names.
+    Observe:  dotnet-counters monitor (process-id = the pid printed at start, counters = Colony and Colony-Diagnostics); the exact command is printed at start.
+    Not a test project: it links the scenario source from Colony.Core.Tests instead of referencing it.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>Colony.CountersHost</RootNamespace>
+    <!-- CA1515 wants internal types; the scenario types are public so the test project can share the file. -->
+    <NoWarn>$(NoWarn);CA1515;CA1051;CA1815</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Diagnostics\Colony.Diagnostics.csproj" />
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenario\ColonistScenario.cs" />
+  </ItemGroup>
+
+</Project>

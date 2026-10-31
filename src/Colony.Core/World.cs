@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Colony.Diagnostics;
 using Colony.Numerics;
 
 namespace Colony;
@@ -46,6 +47,7 @@ public sealed partial class World : IDisposable
         _resources = new ResourceStore(schema);
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
+        Diagnostics = new WorldDiagnostics(this, schema, options.Diagnostics, ResolveWorkerCount());
         _extensions = new IWorldExtension[schema.Extensions.Length];
         for (int i = 0; i < _extensions.Length; i++)
         {
@@ -82,9 +84,12 @@ public sealed partial class World : IDisposable
         ArgumentNullException.ThrowIfNull(job);
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ThrowIfDisposed();
-        _runner ??= new TickRunner(this, Schema.Schedule, ResolveWorkerCount());
+        _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
         _runner.RunParallel(count, job);
     }
+
+    /// <summary>Per-Tick records, logs, counters and the hash trail of this World (spec section 10.1). Reading allocates nothing.</summary>
+    public WorldDiagnostics Diagnostics { get; }
 
     /// <summary>Stream key of the World's root <see cref="RandomSource"/> ("WRLD").</summary>
     private const ulong RootRandomKey = 0x5752_4C44UL;
@@ -145,7 +150,8 @@ public sealed partial class World : IDisposable
             return false;
         }
 
-        _runner ??= new TickRunner(this, Schema.Schedule, ResolveWorkerCount());
+        _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
+        Diagnostics.BeforeTick(CurrentTick);
         try
         {
             _runner.RunTick(CurrentTick);
@@ -157,6 +163,7 @@ public sealed partial class World : IDisposable
         }
 
         CurrentTick++;
+        Diagnostics.AfterTick(CurrentTick);
         return true;
     }
 
