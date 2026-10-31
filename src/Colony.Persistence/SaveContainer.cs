@@ -32,15 +32,18 @@ internal static class SaveContainer
 
     private static ReadOnlySpan<byte> Magic => "CLNYSAVE"u8;
 
+    /// <summary>Header flag: the container is a replay log (spec section 7.2), not a World save.</summary>
+    public const uint ReplayFlag = 1;
+
     /// <summary>Lays out the sections into one container image.</summary>
-    public static byte[] Encode(IReadOnlyList<ContainerSection> sections, SaveOptions options)
+    public static byte[] Encode(IReadOnlyList<ContainerSection> sections, SaveOptions options, uint flags = 0)
     {
         var w = new ByteWriter(4096);
         w.WriteBytes(Magic);
         w.WriteUInt32(Version);
         w.WriteUInt32(HeaderSize);
         w.WriteUInt32((uint)sections.Count);
-        w.WriteUInt32(0);
+        w.WriteUInt32(flags);
         int tocFields = w.Position;
         w.Skip(24);
 
@@ -122,6 +125,7 @@ internal static class SaveContainer
 
             uint headerSize = BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..]);
             uint sectionCount = BinaryPrimitives.ReadUInt32LittleEndian(bytes[16..]);
+            Flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes[20..]);
             ulong tocOffset = BinaryPrimitives.ReadUInt64LittleEndian(bytes[24..]);
             ulong tocLength = BinaryPrimitives.ReadUInt64LittleEndian(bytes[32..]);
             ulong tocHash = BinaryPrimitives.ReadUInt64LittleEndian(bytes[40..]);
@@ -162,6 +166,9 @@ internal static class SaveContainer
         }
 
         public int ContainerVersion { get; }
+
+        /// <summary>Header flags (<see cref="ReplayFlag"/>).</summary>
+        public uint Flags { get; }
 
         public int SectionCount => _entries.Length;
 
