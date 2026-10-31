@@ -4,6 +4,7 @@
     <Project Path="src/Colony.Generators/Colony.Generators.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Colony.Core.AotHost/Colony.Core.AotHost.csproj" />
     <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
   </Folder>

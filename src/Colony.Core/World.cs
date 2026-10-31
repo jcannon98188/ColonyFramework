@@ -11,7 +11,7 @@ namespace Colony;
 /// with <see cref="Playback"/>; between sync points refs and chunk views stay valid.
 /// Many Worlds can coexist in a process; nothing here is static.
 /// </summary>
-public sealed class World : IDisposable
+public sealed partial class World : IDisposable
 {
     private readonly WorldOptions _options;
     private readonly EntityIndex _entities;

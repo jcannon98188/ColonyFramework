@@ -122,6 +122,29 @@ public sealed class WorldBuilder
         return this;
     }
 
+    /// <summary>The handle for the already-registered Component of CLR type <typeparamref name="T"/>, for use in System definitions before <see cref="Build"/>.</summary>
+    public ComponentType Component<T>() where T : unmanaged
+    {
+        if (!_byClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as a Component; call AddComponent first.", nameof(T));
+        }
+
+        return new ComponentType(id);
+    }
+
+    /// <summary>The handle for the already-registered Component named <paramref name="name"/>.</summary>
+    public ComponentType Component(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_byName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Component named '{name}' is registered; call AddComponent first.", nameof(name));
+        }
+
+        return new ComponentType(id);
+    }
+
     /// <summary>
     /// Turns debug validation on or off for Worlds of this schema: structural-version checks on chunk
     /// views and refs, poisoning of freed memory and a leak report on dispose (spec section 4.2). The

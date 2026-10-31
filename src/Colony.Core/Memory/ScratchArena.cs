@@ -8,6 +8,9 @@ namespace Colony;
 /// <see cref="Reset"/> rewinds everything at once while keeping the chunks, so after warm-up a Tick
 /// allocates nothing. One allocation cannot exceed a chunk. Each reset bumps <see cref="Generation"/>,
 /// which lets owners of arena memory detect that their slices are gone.
+/// <see cref="Alloc"/> may be called from any worker thread during a wave (chunk jobs rent command
+/// buffer pages); it is serialised by a lock, so callers take coarse slices (pages), never per-record
+/// ones. <see cref="Reset"/> and <see cref="Dispose"/> are sync-point operations for the owning thread.
 /// </summary>
 internal sealed unsafe class ScratchArena : IDisposable
 {
@@ -16,6 +19,7 @@ internal sealed unsafe class ScratchArena : IDisposable
 
     private readonly SlabAllocator _allocator;
     private readonly bool _poison;
+    private readonly Lock _lock = new();
     private nint[] _chunks = new nint[4];
     private int _chunkCount;
     private int _current = -1;
@@ -44,21 +48,24 @@ internal sealed unsafe class ScratchArena : IDisposable
             throw new ArgumentOutOfRangeException(nameof(bytes), bytes, $"A scratch allocation must be between 1 and {MaxAllocation} bytes.");
         }
 
-        if (_current < 0)
+        lock (_lock)
         {
-            Advance();
-        }
+            if (_current < 0)
+            {
+                Advance();
+            }
 
-        int aligned = (_offset + alignment - 1) & ~(alignment - 1);
-        if (aligned + bytes > SlabAllocator.ChunkSize)
-        {
-            Advance();
-            aligned = 0;
-        }
+            int aligned = (_offset + alignment - 1) & ~(alignment - 1);
+            if (aligned + bytes > SlabAllocator.ChunkSize)
+            {
+                Advance();
+                aligned = 0;
+            }
 
-        byte* result = (byte*)_chunks[_current] + aligned;
-        _offset = aligned + bytes;
-        return result;
+            byte* result = (byte*)_chunks[_current] + aligned;
+            _offset = aligned + bytes;
+            return result;
+        }
     }
 
     /// <summary>Rewinds the arena, keeping its chunks. Poisons the used region in debug mode.</summary>

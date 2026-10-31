@@ -32,6 +32,55 @@ public sealed class ScratchArenaTests
     }
 
     [Fact]
+    public unsafe void Concurrent_allocations_from_worker_threads_never_overlap()
+    {
+        // Chunk jobs record into per-job command buffers from any worker, so page rentals race on the arena.
+        using var allocator = new SlabAllocator(poison: false);
+        using var arena = new ScratchArena(allocator, poison: false);
+        const int threads = 8;
+        const int perThread = 2000;
+        var slices = new nint[threads * perThread];
+        using var start = new ManualResetEventSlim();
+        var workers = new Thread[threads];
+        for (int t = 0; t < threads; t++)
+        {
+            int thread = t;
+            workers[t] = new Thread(() =>
+            {
+                start.Wait();
+                for (int i = 0; i < perThread; i++)
+                {
+                    byte* p = arena.Alloc(48 + ((thread * 7 + i) % 5 * 16));
+                    slices[(thread * perThread) + i] = (nint)p;
+                    new Span<byte>(p, 48).Fill((byte)thread);
+                }
+            });
+            workers[t].Start();
+        }
+
+        start.Set();
+        foreach (var worker in workers)
+        {
+            worker.Join();
+        }
+
+        for (int t = 0; t < threads; t++)
+        {
+            for (int i = 0; i < perThread; i++)
+            {
+                Assert.Equal((byte)t, *(byte*)slices[(t * perThread) + i]);
+            }
+        }
+
+        var sorted = (nint[])slices.Clone();
+        Array.Sort(sorted);
+        for (int i = 1; i < sorted.Length; i++)
+        {
+            Assert.True(sorted[i] - sorted[i - 1] >= 48, "two allocations overlap");
+        }
+    }
+
+    [Fact]
     public unsafe void Allocations_larger_than_a_chunk_are_rejected()
     {
         using var allocator = new SlabAllocator(poison: false);

@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Native AOT host for the TASK-7 acceptance oracle: runs the colonist scenario and prints its World hashes
+    so ColonistScenarioTests can compare a Native AOT build against the JIT run (spec section 6, Tier 1).
+    Publish:  dotnet publish tests/Colony.Core.AotHost -c Release -r win-x64   (or linux-x64)
+    Output:   artifacts/publish/Colony.Core.AotHost/release_<rid>/Colony.Core.AotHost(.exe)
+    Run:      Colony.Core.AotHost [ticks 30] [workers 1,4] [checkpoints 1,10,30]; see Program.cs for the option names.
+    Not a test project: it links the scenario source from Colony.Core.Tests instead of referencing it.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>Colony.AotHost</RootNamespace>
+    <!-- CA1515 wants internal types; the scenario types are public so the test project can share the file. -->
+    <NoWarn>$(NoWarn);CA1515;CA1051;CA1815</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Core\Colony.Core.csproj" />
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenario\ColonistScenario.cs" />
+  </ItemGroup>
+
+</Project>
