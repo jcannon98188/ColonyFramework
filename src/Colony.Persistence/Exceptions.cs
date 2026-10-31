@@ -51,6 +51,37 @@ public sealed class SaveCorruptionException : SaveFormatException
     public string? Section { get; }
 }
 
+/// <summary>
+/// The save was made with a Plugin the loading schema does not have (spec section 8). Loading fails by default;
+/// <see cref="LoadOptions.DropUnknownComponents"/> drops the Components the save knows and the schema does not and
+/// continues without them.
+/// </summary>
+public sealed class MissingPluginException : InvalidOperationException
+{
+    public MissingPluginException()
+    {
+    }
+
+    public MissingPluginException(string message)
+        : base(message)
+    {
+    }
+
+    public MissingPluginException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    public MissingPluginException(string pluginId, string message)
+        : base(message)
+    {
+        PluginId = pluginId;
+    }
+
+    /// <summary>The id of the first missing Plugin, in the save's load order.</summary>
+    public string? PluginId { get; }
+}
+
 /// <summary>A saved Component's layout differs from the schema's and no registered migration chain connects them (spec section 7.1).</summary>
 public sealed class MigrationException : InvalidOperationException
 {

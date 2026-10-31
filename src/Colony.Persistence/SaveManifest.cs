@@ -10,9 +10,25 @@ public readonly record struct SavedExtension(string Name, ulong LayoutHash);
 
 public readonly record struct SavedRelation(string Name, RelationOptions Options);
 
+/// <summary>An Overridable System another Plugin replaced (spec section 8): the System's name and the Plugin that registered the original.</summary>
+public readonly record struct SavedSystemOverride(string System, string OriginalPlugin);
+
+/// <summary>
+/// One Plugin of the saved World's Plugin set, in load order: its id and version, whether it is deterministic,
+/// the Components and Resources it registered (names into <see cref="SaveManifest.Components"/> and
+/// <see cref="SaveManifest.Resources"/>) and the Systems it replaced.
+/// </summary>
+public sealed record SavedPlugin(
+    string Id,
+    string Version,
+    bool Deterministic,
+    ImmutableArray<string> Components,
+    ImmutableArray<string> Resources,
+    ImmutableArray<SavedSystemOverride> Overrides);
+
 /// <summary>
 /// The manifest section of a save (spec section 7.1): the embedded schema table (every Component with its
-/// layout hash, the Resources, extensions and Relations), the Plugin set (a placeholder until Plugins exist),
+/// layout hash, the Resources, extensions and Relations), the Plugin set the World ran with (spec section 8),
 /// the Tick, the World hash and the seed. Readable without loading the World.
 /// </summary>
 public sealed class SaveManifest
@@ -27,7 +43,7 @@ public sealed class SaveManifest
         ImmutableArray<SavedResource> resources,
         ImmutableArray<SavedExtension> extensions,
         ImmutableArray<SavedRelation> relations,
-        ImmutableArray<string> plugins)
+        ImmutableArray<SavedPlugin> plugins)
     {
         ContainerVersion = containerVersion;
         SchemaHash = schemaHash;
@@ -60,8 +76,25 @@ public sealed class SaveManifest
 
     public ImmutableArray<SavedRelation> Relations { get; }
 
-    /// <summary>The Plugin set the World ran with; empty until the Plugins package exists.</summary>
-    public ImmutableArray<string> Plugins { get; }
+    /// <summary>The Plugin set the World ran with, in load order; empty for a World built without Plugins.</summary>
+    public ImmutableArray<SavedPlugin> Plugins { get; }
+
+    /// <summary>False when any Plugin declared itself non-deterministic: the World's hash and replay carry no guarantee (<see cref="World.IsDeterministic"/>).</summary>
+    public bool IsDeterministic
+    {
+        get
+        {
+            foreach (var plugin in Plugins)
+            {
+                if (!plugin.Deterministic)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+    }
 
     internal static SaveManifest Capture(World world, ulong worldHash)
     {
@@ -100,7 +133,45 @@ public sealed class SaveManifest
             resources.MoveToImmutable(),
             extensions.MoveToImmutable(),
             relations.MoveToImmutable(),
-            ImmutableArray<string>.Empty);
+            CapturePlugins(schema));
+    }
+
+    private static ImmutableArray<SavedPlugin> CapturePlugins(WorldSchema schema)
+    {
+        var plugins = ImmutableArray.CreateBuilder<SavedPlugin>(schema.Plugins.Length);
+        foreach (var plugin in schema.Plugins)
+        {
+            var components = ImmutableArray.CreateBuilder<string>();
+            foreach (ref readonly var c in schema.Components)
+            {
+                if (schema.ComponentOwner(c.Type) == plugin.Index)
+                {
+                    components.Add(c.Name);
+                }
+            }
+
+            var resources = ImmutableArray.CreateBuilder<string>();
+            foreach (ref readonly var r in schema.Resources)
+            {
+                if (schema.ResourceOwner(schema.Resource(r.Name)) == plugin.Index)
+                {
+                    resources.Add(r.Name);
+                }
+            }
+
+            var overrides = ImmutableArray.CreateBuilder<SavedSystemOverride>();
+            foreach (var o in schema.SystemOverrides)
+            {
+                if (string.Equals(o.ReplacingPlugin, plugin.Id, StringComparison.Ordinal))
+                {
+                    overrides.Add(new SavedSystemOverride(o.System, o.OriginalPlugin));
+                }
+            }
+
+            plugins.Add(new SavedPlugin(plugin.Id, plugin.Version, plugin.Deterministic, components.ToImmutable(), resources.ToImmutable(), overrides.ToImmutable()));
+        }
+
+        return plugins.MoveToImmutable();
     }
 
     internal byte[] Encode()
@@ -146,10 +217,31 @@ public sealed class SaveManifest
             w.WriteUInt32((uint)r.Options);
         }
 
+        // Everything about a Plugin sits inside its entry, so a save without Plugins encodes exactly as before.
         w.WriteInt32(Plugins.Length);
         foreach (var p in Plugins)
         {
-            w.WriteString(p);
+            w.WriteString(p.Id);
+            w.WriteString(p.Version);
+            w.WriteByte(p.Deterministic ? (byte)1 : (byte)0);
+            w.WriteInt32(p.Components.Length);
+            foreach (var name in p.Components)
+            {
+                w.WriteString(name);
+            }
+
+            w.WriteInt32(p.Resources.Length);
+            foreach (var name in p.Resources)
+            {
+                w.WriteString(name);
+            }
+
+            w.WriteInt32(p.Overrides.Length);
+            foreach (var o in p.Overrides)
+            {
+                w.WriteString(o.System);
+                w.WriteString(o.OriginalPlugin);
+            }
         }
 
         return w.ToArray();
@@ -206,13 +298,41 @@ public sealed class SaveManifest
         }
 
         count = r.ReadCount(1);
-        var plugins = ImmutableArray.CreateBuilder<string>(count);
+        var plugins = ImmutableArray.CreateBuilder<SavedPlugin>(count);
         for (int i = 0; i < count; i++)
         {
-            plugins.Add(r.ReadString());
+            string id = r.ReadString();
+            string version = r.ReadString();
+            bool deterministic = r.ReadByte() != 0;
+            plugins.Add(new SavedPlugin(id, version, deterministic, ReadNames(ref r), ReadNames(ref r), ReadOverrides(ref r)));
         }
 
         r.ExpectEnd();
         return new SaveManifest(containerVersion, schemaHash, tick, worldHash, seed, components.MoveToImmutable(), resources.MoveToImmutable(), extensions.MoveToImmutable(), relations.MoveToImmutable(), plugins.MoveToImmutable());
+    }
+
+    private static ImmutableArray<string> ReadNames(ref ByteReader r)
+    {
+        int count = r.ReadCount(1);
+        var names = ImmutableArray.CreateBuilder<string>(count);
+        for (int i = 0; i < count; i++)
+        {
+            names.Add(r.ReadString());
+        }
+
+        return names.MoveToImmutable();
+    }
+
+    private static ImmutableArray<SavedSystemOverride> ReadOverrides(ref ByteReader r)
+    {
+        int count = r.ReadCount(1);
+        var overrides = ImmutableArray.CreateBuilder<SavedSystemOverride>(count);
+        for (int i = 0; i < count; i++)
+        {
+            string system = r.ReadString();
+            overrides.Add(new SavedSystemOverride(system, r.ReadString()));
+        }
+
+        return overrides.MoveToImmutable();
     }
 }
