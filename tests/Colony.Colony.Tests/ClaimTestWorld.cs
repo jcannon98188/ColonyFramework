@@ -10,22 +10,61 @@ public struct TargetTag
     public int Kind;
 }
 
+/// <summary>
+/// Records the resolve events of the latest Tick: queues are cleared at the End boundary, so a host cannot read
+/// Begin-Phase events after <see cref="World.Tick"/>; a Simulate-Phase probe System copies them here instead.
+/// </summary>
+internal sealed class ClaimEventLog
+{
+    public List<ClaimGranted> Granted { get; } = [];
+
+    public List<ClaimDenied> Denied { get; } = [];
+
+    public List<ClaimLost> Lost { get; } = [];
+
+    public void Record(in SystemContext context, ClaimSet claims)
+    {
+        Granted.Clear();
+        Denied.Clear();
+        Lost.Clear();
+        Granted.AddRange(context.Events<ClaimGranted>(claims.Granted));
+        Denied.AddRange(context.Events<ClaimDenied>(claims.Denied));
+        Lost.AddRange(context.Events<ClaimLost>(claims.Lost));
+    }
+}
+
 /// <summary>Shared fixture: a schema with agents, targets and Claims, plus host-side helpers to spawn and propose between Ticks.</summary>
 internal static class ClaimTestWorld
 {
-    public static WorldBuilder Builder(out ClaimSet claims, ClaimOptions? options = null)
+    public static WorldBuilder Builder(out ClaimSet claims, ClaimOptions? options = null, ClaimEventLog? log = null)
     {
         var builder = new WorldBuilder()
             .AddComponent<AgentTag>("test.agent")
             .AddComponent<TargetTag>("test.target")
             .DebugValidation(false);
         claims = builder.AddClaims(options);
+        if (log is not null)
+        {
+            var set = claims;
+            builder.AddSystem(new SystemDefinition
+            {
+                Name = "test.probe",
+                Phase = Phase.Simulate,
+                ReadsResources = ResourceMask.Of(set.Granted, set.Denied, set.Lost),
+                Begin = (in SystemContext context) => log.Record(in context, set),
+            });
+        }
+
         return builder;
     }
 
     public static World Create(out ClaimSet claims, ClaimOptions? options = null, int workers = 1)
+        => Create(out claims, out _, options, workers);
+
+    public static World Create(out ClaimSet claims, out ClaimEventLog log, ClaimOptions? options = null, int workers = 1)
     {
-        var schema = Builder(out claims, options).Build();
+        log = new ClaimEventLog();
+        var schema = Builder(out claims, options, log).Build();
         return schema.CreateWorld(new WorldOptions { WorkerThreads = workers, Seed = 7 });
     }
 
