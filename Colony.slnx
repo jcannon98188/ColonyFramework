@@ -37,5 +37,6 @@
   <Folder Name="/tools/">
     <Project Path="tools/Colony.DependencyCheck/Colony.DependencyCheck.csproj" />
     <Project Path="tools/Colony.DependencyCheck.Tests/Colony.DependencyCheck.Tests.csproj" />
+    <Project Path="tools/Colony.Inspect/Colony.Inspect.csproj" />
   </Folder>
 </Solution>

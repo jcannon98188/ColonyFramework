@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Diagnostics\Colony.Diagnostics.csproj" />
+    <!-- TASK-29 AC #5: Plugin-registered inspectors reach colony-inspect. -->
+    <ProjectReference Include="..\..\src\Colony.Plugins\Colony.Plugins.csproj" />
     <!-- The colonist scenario (TASK-7's acceptance oracle) is the workload for the hash-trail and logging tests. -->
     <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenario\ColonistScenario.cs" />
   </ItemGroup>

@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    colony-inspect (spec section 10.2): the command-line client of the inspection protocol. All logic lives in
+    Colony.Diagnostics (InspectCli); this is the executable around it.
+    Run it with dotnet run on this project, passing the command after the argument separator, for example
+    "schema" plus the port and token the host printed; the command list is InspectCli.Usage (help flag).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>colony-inspect</AssemblyName>
+    <RootNamespace>Colony.Tools.Inspect</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Diagnostics\Colony.Diagnostics.csproj" />
+  </ItemGroup>
+
+</Project>
