@@ -31,6 +31,8 @@ public sealed class CounterScenario : Scenario
 
     public long AllocateFromTick { get; init; } = long.MaxValue;
 
+    public long StopAllocatingAtTick { get; init; } = long.MaxValue;
+
     public override void Compose(WorldBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
@@ -47,7 +49,7 @@ public sealed class CounterScenario : Scenario
                     throw new InvalidOperationException("on purpose");
                 }
 
-                if (context.Tick >= AllocateFromTick - 1)
+                if (context.Tick >= AllocateFromTick - 1 && context.Tick < StopAllocatingAtTick - 1)
                 {
                     Sink = new byte[64];
                 }
