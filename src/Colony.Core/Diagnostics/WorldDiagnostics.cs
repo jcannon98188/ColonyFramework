@@ -25,6 +25,7 @@ public sealed class WorldDiagnostics
     private readonly WorkerRecord[] _workers;
     private readonly JobRecord[] _jobs;
     private readonly long[] _counters;
+    private readonly long[] _hostCounters;
     private readonly ulong[] _archetypeHashes;
     private readonly SystemRecord[] _topSystems;
     private readonly long[] _lastBusy;
@@ -60,6 +61,7 @@ public sealed class WorldDiagnostics
         _workers = new WorkerRecord[_capacity * workerCount];
         _jobs = new JobRecord[_capacity * _jobCapacity];
         _counters = new long[_capacity * _counterCount];
+        _hostCounters = new long[_counterCount];
         _archetypeHashes = new ulong[_capacity * _phaseCount * _archetypeStride];
         _topSystems = new SystemRecord[Math.Clamp(options.SlowTickTopSystems, 0, _systemCount)];
         _lastBusy = new long[workerCount];
@@ -209,7 +211,7 @@ public sealed class WorldDiagnostics
     }
 
     /// <summary>Adds to a registered counter from host code or serial hooks; the Tick record sums every thread's contribution.</summary>
-    public void AddToCounter(CounterId counter, long delta) => Slots[0].Counters[counter.Id] += delta;
+    public void AddToCounter(CounterId counter, long delta) => _hostCounters[counter.Id] += delta;
 
     // ---- Internal hooks, called by the scheduler on the Tick thread (or, for the slots, by the owning worker). ----
 
@@ -452,7 +454,8 @@ public sealed class WorldDiagnostics
 
         var workers = WorkerSpan(_head);
         var counters = CounterSpan(_head);
-        counters.Clear();
+        _hostCounters.AsSpan().CopyTo(counters);
+        Array.Clear(_hostCounters);
         for (int w = 0; w < workers.Length; w++)
         {
             var slot = Slots[w];
