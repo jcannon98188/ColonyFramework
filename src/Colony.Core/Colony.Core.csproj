@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Colony.Core.Tests" />
+    <!-- The debug-validation failing-on-purpose scenarios rent and poke native memory directly (TASK-10). -->
+    <InternalsVisibleTo Include="Colony.Testing.Tests" />
   </ItemGroup>
 
 </Project>

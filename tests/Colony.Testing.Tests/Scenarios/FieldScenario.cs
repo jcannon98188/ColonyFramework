@@ -1,22 +1,28 @@
 using Colony.Fields;
-using Colony.Numerics;
+using Colony.Testing;
 
-namespace Colony.Fields.Tests.Scenario;
+namespace Colony.Testing.Tests.Scenarios;
 
 /// <summary>
-/// The determinism oracle for the Fields package (AC #2, pattern of TASK-7's ColonistScenario): a
+/// The determinism oracle for the Fields package (TASK-12 AC #2, pattern of TASK-7's ColonistScenario): a
 /// double-buffered integer diffusion stencil over a "heat" Field and an in-place coloured cellular
 /// automaton over a "life" Field, seeded from the World RNG, run for N Ticks on any thread count.
-/// Integer-only kernels; the World hash at checkpoints is the evidence.
+/// Integer-only kernels; the World hash at checkpoints is the evidence. No test-framework dependency:
+/// the Native AOT host compiles it as well.
 /// </summary>
-public static class FieldScenario
+public sealed class FieldScenario : Scenario
 {
     public const ulong DefaultSeed = 777;
     public static readonly WorldSize Size = new(80, 64, 32); // 5 x 4 x 2 chunks, non-power-of-two
 
-    public static WorldSchema BuildSchema()
+    public override string Name => "fields";
+
+    public override ulong Seed { get; init; } = DefaultSeed;
+
+    public override void Compose(WorldBuilder builder)
     {
-        var builder = new WorldBuilder().DebugValidation(false);
+        ArgumentNullException.ThrowIfNull(builder);
+        builder.DebugValidation(false);
         var fields = builder.AddFields(Size);
         var heat = fields.AddField<int>("heat");
         var life = fields.AddField<byte>("life");
@@ -24,13 +30,11 @@ public static class FieldScenario
         builder
             .AddSystem(Stencil.DoubleBuffered("Diffuse", heat, Diffuse, boundary: 0))
             .AddSystem(Stencil.InPlace("Life", life, LifeStep, boundary: (byte)0, phase: Phase.Late));
-        return builder.Build();
     }
 
-    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed)
+    public override void Populate(World world)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        var world = schema.CreateWorld(new WorldOptions { WorkerThreads = workers, Seed = seed });
+        ArgumentNullException.ThrowIfNull(world);
         var fields = world.Fields();
         var heat = fields.Accessor(fields.Field<int>("heat"));
         var life = fields.Accessor(fields.Field<byte>("life"));
@@ -53,26 +57,6 @@ public static class FieldScenario
             int z = random.Int32At(counter + 2, 0, Size.Z);
             life[x, y, z] = 1;
         }
-
-        return world;
-    }
-
-    /// <summary>Runs <paramref name="ticks"/> Ticks and returns the World hash after each checkpoint Tick (1-based).</summary>
-    public static ulong[] Run(World world, int ticks, ReadOnlySpan<int> checkpoints)
-    {
-        ArgumentNullException.ThrowIfNull(world);
-        var hashes = new ulong[checkpoints.Length];
-        int next = 0;
-        for (int t = 1; t <= ticks; t++)
-        {
-            world.Tick();
-            if (next < checkpoints.Length && checkpoints[next] == t)
-            {
-                hashes[next++] = world.Hash();
-            }
-        }
-
-        return hashes;
     }
 
     /// <summary>Six-neighbour integer diffusion: new = old + (sum(neighbours) - 6 old) / 8, exact in ints.</summary>

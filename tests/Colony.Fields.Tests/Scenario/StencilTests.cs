@@ -2,74 +2,12 @@ using Colony.Fields;
 
 namespace Colony.Fields.Tests.Scenario;
 
-/// <summary>AC #2: double-buffered and in-place coloured stencils are bit-identical across thread counts; plus stencil semantics and zero allocation.</summary>
+/// <summary>
+/// Stencil semantics (AC #2). The cross-thread hash equality and zero-allocation evidence for the stencil
+/// scenario runs through Colony.Testing's harnesses in tests/Colony.Testing.Tests (FieldScenarioTests).
+/// </summary>
 public sealed class StencilTests
 {
-    private const int Ticks = 30;
-    private static readonly int[] Checkpoints = [1, 5, 15, 30];
-
-    [Fact]
-    public void Both_stencil_modes_hash_identically_on_1_2_4_and_N_threads()
-    {
-        int n = Math.Max(4, Environment.ProcessorCount);
-        ulong[]? baseline = null;
-        foreach (int workers in new[] { 1, 2, 4, n })
-        {
-            using var world = FieldScenario.CreateWorld(FieldScenario.BuildSchema(), workers);
-            Assert.Equal(workers, world.WorkerCount);
-            var hashes = FieldScenario.Run(world, Ticks, Checkpoints);
-            Assert.Equal(Checkpoints.Length, hashes.Distinct().Count()); // the Fields really evolve
-
-            if (baseline is null)
-            {
-                baseline = hashes;
-            }
-            else
-            {
-                Assert.Equal(baseline, hashes);
-            }
-        }
-    }
-
-    [Fact]
-    public void The_scenario_changes_field_state_every_tick()
-    {
-        using var world = FieldScenario.CreateWorld(FieldScenario.BuildSchema(), 2);
-        var fields = world.Fields();
-        world.Tick();
-        Assert.NotEmpty(fields.LastTickChanges.ToArray());
-        Assert.Contains(fields.LastTickChanges.ToArray(), c => c.FieldId == fields.Field<int>("heat").Id);
-        Assert.Contains(fields.LastTickChanges.ToArray(), c => c.FieldId == fields.Field<byte>("life").Id);
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(4)]
-    public void A_steady_state_tick_with_stencils_allocates_nothing(int workers)
-    {
-        using var world = FieldScenario.CreateWorld(FieldScenario.BuildSchema(), workers);
-        for (int i = 0; i < 20; i++)
-        {
-            world.Tick();
-        }
-
-        world.Hash();
-        long mainBefore = GC.GetAllocatedBytesForCurrentThread();
-        long workersBefore = world.WorkerAllocatedBytes;
-        for (int i = 0; i < 10; i++)
-        {
-            world.Tick();
-            foreach (var change in world.Fields().ChangedSince(world.Fields().CurrentVersion - 1))
-            {
-                _ = change;
-            }
-        }
-
-        world.Hash();
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - mainBefore);
-        Assert.Equal(0, world.WorkerAllocatedBytes - workersBefore);
-    }
-
     [Fact]
     public void A_double_buffered_stencil_reads_only_the_previous_state_and_marks_only_changed_chunks()
     {
