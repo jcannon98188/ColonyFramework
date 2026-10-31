@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The custom Tick harness of spec section 10.3: runs the colonist scenario (100k and 1M colonists, 1% churn,
+    the Field stencils, a save/load round trip) for N measured Ticks and writes a JSON report (machine, commit,
+    scenario, ms/Tick percentiles, allocations, chunks visited, hash) that a nightly machine compares across
+    runs. Deterministic counts are gates (exit 1); timing is report-only. See benchmarks/README.md.
+    Run:  dotnet run -c Release (project benchmarks/Colony.TickHarness) [scenario colonist-100k|colonist-1m] [out file.json] [baseline file.json]; see TickHarness.cs for the option names.
+    Not a test project: it links the shared scenario sources from tests/ instead of referencing test projects.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Colony.Benchmarks.TickHarness</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <Compile Include="..\..\tests\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\..\tests\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
+  </ItemGroup>
+
+</Project>

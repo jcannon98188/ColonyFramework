@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    BenchmarkDotNet micro-benchmarks of spec section 10.3: storage (churn, archetype moves, query iteration),
+    scheduler (the colonist Tick on 1 and N workers), Fields (stencil Tick, accessor writes), hashing (Hash64,
+    Philox, World.Hash) and save/load (Colony.Persistence), plus the Off-vs-Standard diagnostics overhead
+    deferred here by TASK-17. One command runs them all (see benchmarks/README.md):
+      dotnet run -c Release (project benchmarks/Colony.Benchmarks)        [all benchmarks; add BenchmarkDotNet options such as a filter after a double dash]
+    Benchmarks run in-process (InProcessEmitToolchain): results land in BenchmarkDotNet.Artifacts/ (gitignored) as Markdown and full JSON.
+    Not a test project: Colony.Benchmarks.Tests smoke-runs every benchmark once so the suite cannot rot unnoticed.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Colony.Benchmarks</RootNamespace>
+    <!-- CA1001: benchmark classes own Worlds whose lifetime is GlobalSetup/GlobalCleanup, BenchmarkDotNet's contract, not IDisposable.
+         CA1822: benchmark methods must be instance methods. -->
+    <NoWarn>$(NoWarn);CA1001;CA1822</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <Compile Include="..\..\tests\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\..\tests\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
+  </ItemGroup>
+
+</Project>

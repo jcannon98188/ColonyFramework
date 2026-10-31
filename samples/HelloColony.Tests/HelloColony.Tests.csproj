@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Colony.Samples.Hello.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HelloColony\HelloColony.csproj" />
+    <!-- PublishedHost finds the Native AOT build of the sample under artifacts/publish/HelloColony/. -->
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+  </ItemGroup>
+
+</Project>
