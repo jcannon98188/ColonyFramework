@@ -1,9 +1,11 @@
 ---
 id: TASK-9
 title: 'Relations, hierarchy, buffer Components, string table and blob store'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 08:05'
 labels:
   - ready-for-agent
   - implementation
