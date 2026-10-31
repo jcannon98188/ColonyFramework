@@ -207,7 +207,7 @@ public sealed partial class InspectionServer
     private InspectValue Entity(InspectValue request)
     {
         var world = InspectedWorld;
-        var id = new EntityId((ulong)Required(request, "id").AsWhole);
+        var id = new EntityId((ulong)Required(request, "entity").AsWhole);
         if (!world.IsAlive(id))
         {
             return InspectValue.Map(P("id", InspectValue.From(id.Value)), P("alive", false));
