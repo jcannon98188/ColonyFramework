@@ -13,6 +13,7 @@ public sealed class WorldSchema
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
     private readonly Phase[] _phases;
+    private readonly WorldExtensionDefinition[] _extensions;
     private readonly string[] _logMessages;
     private readonly string[] _counters;
 
@@ -22,6 +23,7 @@ public sealed class WorldSchema
         Dictionary<string, int> byName,
         List<Phase> phases,
         SystemSchedule schedule,
+        List<WorldExtensionDefinition> extensions,
         bool debugValidation,
         List<string> logMessages,
         List<string> counters)
@@ -30,6 +32,7 @@ public sealed class WorldSchema
         _byClrType = byClrType;
         _byName = byName;
         _phases = [.. phases];
+        _extensions = [.. extensions];
         _logMessages = [.. logMessages];
         _counters = [.. counters];
         Schedule = schedule;
@@ -44,6 +47,11 @@ public sealed class WorldSchema
             sizes[i] = _components[i].Size;
             slots[i] = _components[i].IsNonFragmenting ? nonFragmenting++ : -1;
             hash = Hashing.Hash64.Combine(hash, _components[i].LayoutHash);
+        }
+
+        foreach (var extension in _extensions)
+        {
+            hash = Hashing.Hash64.Combine(hash, extension.LayoutHash);
         }
 
         Sizes = sizes;
@@ -135,6 +143,9 @@ public sealed class WorldSchema
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
     public ReadOnlySpan<Phase> Phases => _phases;
+
+    /// <summary>Registered World extensions in registration order (their layout hashes are part of <see cref="SchemaHash"/>).</summary>
+    public ReadOnlySpan<WorldExtensionDefinition> Extensions => _extensions;
 
     /// <summary>Log message templates by <see cref="Colony.Diagnostics.LogMessageId"/> (spec section 10.1).</summary>
     public ReadOnlySpan<string> LogMessages => _logMessages;

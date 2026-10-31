@@ -52,7 +52,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             _access[i] = schedule.Definitions[i].Reads.Union(schedule.Definitions[i].Writes);
         }
 
-        _pool = new WorkerPool(workerCount, this, _timing);
+        _pool = new WorkerPool(workerCount, _timing);
         _workerErrors = new Exception?[_pool.WorkerCount];
         _workerErrorJobs = new int[_pool.WorkerCount];
     }
@@ -65,6 +65,12 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     {
         _tick = tick;
         _diagnostics.BeginTick(tick);
+        var extensions = _world.Extensions;
+        for (int i = 0; i < extensions.Length; i++)
+        {
+            extensions[i].BeginTick(tick);
+        }
+
         var phases = _schedule.Phases;
         for (int p = 0; p < phases.Length; p++)
         {
@@ -92,13 +98,39 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             }
 
             Playback(plan);
+            for (int i = 0; i < extensions.Length; i++)
+            {
+                extensions[i].EndPhase(plan.Phase);
+            }
+
             _diagnostics.EndPhase(plan.Phase.Id);
+        }
+
+        for (int i = 0; i < extensions.Length; i++)
+        {
+            extensions[i].EndTick(tick);
         }
 
         long scratchUsed = _world.Scratch.UsedBytes;
         int scratchChunks = _world.Scratch.ChunkCount;
         _world.ResetScratch();
         _diagnostics.EndTick(_pool.Clocks, scratchUsed, scratchChunks);
+    }
+
+    /// <summary>Runs an index-keyed job on the pool (see <see cref="World.RunParallel"/>); fails when the pool is mid-wave.</summary>
+    public void RunParallel(int count, IIndexedJob job)
+    {
+        _parallel.Job = job;
+        _pool.Run(count, _parallel);
+    }
+
+    private readonly IndexedJobSource _parallel = new();
+
+    private sealed class IndexedJobSource : WorkerPool.IJobSource
+    {
+        public IIndexedJob? Job;
+
+        public void Run(int job, int worker) => Job!.Execute(job);
     }
 
     /// <summary>Runs the Systems of one wave, or only <paramref name="only"/> when it is a System id.</summary>
@@ -141,7 +173,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             }
         }
 
-        _pool.Run(_jobCount);
+        _pool.Run(_jobCount, this);
         ThrowIfJobFaulted(plan.Phase);
 
         for (int k = 0; k < plan.Systems.Length; k++)

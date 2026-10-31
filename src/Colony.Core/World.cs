@@ -27,6 +27,7 @@ public sealed partial class World : IDisposable
     private long _removes;
     private long _staleSkipped;
     private bool _disposed;
+    private readonly IWorldExtension[] _extensions;
     private TickRunner? _runner;
     private RandomSequence _sharedRandom;
 
@@ -42,6 +43,44 @@ public sealed partial class World : IDisposable
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
         Diagnostics = new WorldDiagnostics(this, schema, options.Diagnostics, ResolveWorkerCount());
+        _extensions = new IWorldExtension[schema.Extensions.Length];
+        for (int i = 0; i < _extensions.Length; i++)
+        {
+            _extensions[i] = schema.Extensions[i].Create(this);
+        }
+    }
+
+    /// <summary>The per-World state of a registered extension (<see cref="WorldBuilder.AddExtension"/>) by its CLR type.</summary>
+    public T Extension<T>() where T : class, IWorldExtension
+    {
+        foreach (var extension in _extensions)
+        {
+            if (extension is T match)
+            {
+                return match;
+            }
+        }
+
+        throw new InvalidOperationException($"No extension of type {typeof(T).Name} is registered in this World's schema.");
+    }
+
+    /// <summary>Extensions in registration order, for the Tick runner and the hash.</summary>
+    internal ReadOnlySpan<IWorldExtension> Extensions => _extensions;
+
+    /// <summary>
+    /// Runs <paramref name="job"/> for every index in <c>[0, count)</c> on the World's worker pool and
+    /// returns when all have finished. Jobs are keyed by index, never by thread, so results do not depend on
+    /// <see cref="WorkerCount"/>. Call it from the Tick thread only: between Ticks, or from a System's
+    /// <see cref="SystemDefinition.Begin"/>/<see cref="SystemDefinition.End"/> hook; from inside a chunk job
+    /// (the pool is busy) it throws.
+    /// </summary>
+    public void RunParallel(int count, IIndexedJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ThrowIfDisposed();
+        _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
+        _runner.RunParallel(count, job);
     }
 
     /// <summary>Per-Tick records, logs, counters and the hash trail of this World (spec section 10.1). Reading allocates nothing.</summary>
@@ -431,6 +470,11 @@ public sealed partial class World : IDisposable
 
         _disposed = true;
         _runner?.Dispose();
+        foreach (var extension in _extensions)
+        {
+            extension.Dispose();
+        }
+
         for (int i = 0; i < _archetypeCount; i++)
         {
             _archetypes[i].ReturnAllChunks(Allocator);

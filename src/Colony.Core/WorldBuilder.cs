@@ -18,6 +18,25 @@ public sealed class WorldBuilder
     private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
+    private readonly List<WorldExtensionDefinition> _extensions = [];
+
+    /// <summary>
+    /// Registers a World extension (Fields, spatial index, ...). Extensions are frozen at <see cref="Build"/>,
+    /// hashed into the schema and created once per World, in registration order.
+    /// </summary>
+    public WorldBuilder AddExtension(WorldExtensionDefinition extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        ThrowIfBuilt();
+        ArgumentException.ThrowIfNullOrWhiteSpace(extension.Name, nameof(extension));
+        if (_extensions.Exists(e => string.Equals(e.Name, extension.Name, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"An extension named '{extension.Name}' is already registered.", nameof(extension));
+        }
+
+        _extensions.Add(extension);
+        return this;
+    }
 
     /// <summary>
     /// Registers a System (spec section 4.3). Its id is the registration order, which breaks ordering ties.
@@ -197,7 +216,12 @@ public sealed class WorldBuilder
         ThrowIfBuilt();
         _built = true;
         var schedule = SystemSchedule.Build(_systems, _phases, _components.Count);
-        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _debugValidation, _logMessages, _counters);
+        foreach (var extension in _extensions)
+        {
+            extension.Freeze();
+        }
+
+        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _extensions, _debugValidation, _logMessages, _counters);
     }
 
     private void ThrowIfBuilt()

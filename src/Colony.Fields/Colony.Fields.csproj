@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Fields: Field chunks, stencils, the World change feed (spec section 5.1 and 5.2); later tickets add the
+    spatial index (TASK-13), ChunkProvider and the streaming residency manager (TASK-25/26).
+    Depends on Colony.Core only; enforced by tools/Colony.DependencyCheck.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework Fields: chunked tile grids, stencils and the World change feed.</Description>
+    <!-- Cell storage is native memory; unsafe is confined to internal code (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Fields.Tests" />
+  </ItemGroup>
+
+</Project>
