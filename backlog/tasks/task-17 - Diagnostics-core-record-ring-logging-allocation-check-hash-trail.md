@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-10-31 03:51'
+updated_date: '2026-10-31 08:01'
 labels:
   - ready-for-agent
   - implementation
@@ -37,3 +37,9 @@ Spec section 10.1 (decided in the profiling and diagnostics ticket): always-on n
 - [ ] #5 With the hash trail enabled, two runs that diverge report the first differing Tick, Phase and System
 - [ ] #6 Record layout is versioned and Core has no reference to Colony.Diagnostics (verified by the dependency check)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Merge attempt 1 (2026-10-31) bounced: full-solution Release test run failed 4/4 attempts. LogDrainTests.Entries_are_formatted_on_drain_in_tick_system_job_order_regardless_of_thread_count fails ~1/3 in isolation (drain order follows worker completion, not JobIndex) - violates AC #3. Also flaky under load: Structured_logging_allocates_nothing..., AllocationTests.A_100k_entity..., StandardLevelOverheadTests (5% timing gate). Sent back to implementer; integration/v1 reset to 955b6a4.
+<!-- SECTION:NOTES:END -->
