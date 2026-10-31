@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Diagnostics\Colony.Diagnostics.csproj" />
+    <!-- The colonist scenario (TASK-7's acceptance oracle) is the workload for the hash-trail and logging tests. -->
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenario\ColonistScenario.cs" />
+  </ItemGroup>
+
+</Project>

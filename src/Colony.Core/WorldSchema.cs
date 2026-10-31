@@ -17,6 +17,8 @@ public sealed class WorldSchema
     private readonly Dictionary<string, int> _resourceByName;
     private readonly Phase[] _phases;
     private readonly WorldExtensionDefinition[] _extensions;
+    private readonly string[] _logMessages;
+    private readonly string[] _counters;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
@@ -28,7 +30,9 @@ public sealed class WorldSchema
         List<Phase> phases,
         SystemSchedule schedule,
         List<WorldExtensionDefinition> extensions,
-        bool debugValidation)
+        bool debugValidation,
+        List<string> logMessages,
+        List<string> counters)
     {
         _components = [.. components];
         _byClrType = byClrType;
@@ -38,6 +42,8 @@ public sealed class WorldSchema
         _resourceByName = resourceByName;
         _phases = [.. phases];
         _extensions = [.. extensions];
+        _logMessages = [.. logMessages];
+        _counters = [.. counters];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
@@ -206,6 +212,12 @@ public sealed class WorldSchema
 
     /// <summary>Registered World extensions in registration order (their layout hashes are part of <see cref="SchemaHash"/>).</summary>
     public ReadOnlySpan<WorldExtensionDefinition> Extensions => _extensions;
+
+    /// <summary>Log message templates by <see cref="Colony.Diagnostics.LogMessageId"/> (spec section 10.1).</summary>
+    public ReadOnlySpan<string> LogMessages => _logMessages;
+
+    /// <summary>Registered counter names by <see cref="Colony.Diagnostics.CounterId"/>.</summary>
+    public ReadOnlySpan<string> Counters => _counters;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);

@@ -25,6 +25,9 @@ public sealed class WorldOptions
     /// use. When null, a leak throws <see cref="InvalidOperationException"/> from <see cref="World.Dispose"/>.
     /// </summary>
     public IDebugListener? DebugListener { get; init; }
+
+    /// <summary>Profiling level, record ring, allocation check, Tick budget, logging and hash trail (spec section 10.1).</summary>
+    public Colony.Diagnostics.DiagnosticsOptions Diagnostics { get; init; } = Colony.Diagnostics.DiagnosticsOptions.Default;
 }
 
 /// <summary>Sink for debug-validation findings (spec section 4.2). Release builds never call it.</summary>

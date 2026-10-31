@@ -14,6 +14,9 @@ public readonly ref struct ChunkView
     private readonly nint _pointer;
     private readonly uint _version;
     private readonly bool _validate;
+    private readonly bool _checkAccess;
+    private readonly ComponentMask _access;
+    private readonly string? _systemName;
 
     internal ChunkView(Archetype archetype, int chunkIndex, bool validate)
     {
@@ -23,6 +26,15 @@ public readonly ref struct ChunkView
         Count = archetype.RowCount(chunkIndex);
         _version = archetype.Version(chunkIndex);
         _validate = validate;
+    }
+
+    /// <summary>A view for a System job that also checks every column taken against the System's declared access set (spec section 10.1, validation switches).</summary>
+    internal ChunkView(Archetype archetype, int chunkIndex, bool validate, ComponentMask access, string systemName)
+        : this(archetype, chunkIndex, validate)
+    {
+        _checkAccess = true;
+        _access = access;
+        _systemName = systemName;
     }
 
     /// <summary>Index of the chunk inside its archetype.</summary>
@@ -137,6 +149,11 @@ public readonly ref struct ChunkView
 
     private int Offset<T>(ComponentType type) where T : unmanaged
     {
+        if (_checkAccess && !_access.Contains(type))
+        {
+            throw new InvalidOperationException($"System '{_systemName}' takes the column of {type}, which it declares in neither Reads nor Writes.");
+        }
+
         int offset = _archetype.OffsetOf(type.Id);
         if (offset < 0)
         {

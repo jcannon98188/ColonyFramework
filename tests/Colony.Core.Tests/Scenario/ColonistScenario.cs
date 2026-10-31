@@ -225,7 +225,7 @@ public static class ColonistScenario
     }
 
     /// <summary>Creates a World on <paramref name="workers"/> threads populated with colonists and food, ready to Tick.</summary>
-    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood)
+    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood, Colony.Diagnostics.DiagnosticsOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         var world = schema.CreateWorld(new WorldOptions
@@ -233,6 +233,7 @@ public static class ColonistScenario
             Seed = seed,
             WorkerThreads = workers,
             InitialEntityCapacity = (colonists + food) * 2,
+            Diagnostics = options ?? Colony.Diagnostics.DiagnosticsOptions.Default,
         });
         var position = schema.Component<ColonistPosition>();
         var target = schema.Component<ColonistTarget>();

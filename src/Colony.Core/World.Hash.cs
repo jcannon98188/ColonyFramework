@@ -32,20 +32,7 @@ public sealed partial class World
                 continue;
             }
 
-            var signature = archetype.Signature;
-            state.Append(in signature);
-            for (int c = 0; c < archetype.ChunkCount; c++)
-            {
-                int rows = archetype.RowCount(c);
-                byte* chunk = archetype.ChunkPointer(c);
-                state.Append(rows);
-                state.Append(new ReadOnlySpan<byte>(chunk, rows * Archetype.EntityColumnElementSize));
-                for (int i = 0; i < archetype.ComponentIds.Length; i++)
-                {
-                    state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
-                    state.Append(new ReadOnlySpan<byte>(chunk + archetype.EnabledOffsets[i], (rows + 7) / 8));
-                }
-            }
+            AppendArchetype(ref state, archetype);
         }
 
         for (int id = 0; id < Schema.ComponentCount; id++)
@@ -97,5 +84,36 @@ public sealed partial class World
         state.Append(_sharedRandom.Stream.Key);
         state.Append(_sharedRandom.Counter);
         return state.Finish();
+    }
+
+    /// <summary>Hash of one archetype's live rows (its part of <see cref="Hash"/>), for the diagnostics hash trail. Empty archetypes hash to the seed alone.</summary>
+    internal ulong HashArchetype(int index)
+    {
+        var state = new Hash64State(WorldHashSeed);
+        var archetype = _archetypes[index];
+        if (archetype.ChunkCount > 0)
+        {
+            AppendArchetype(ref state, archetype);
+        }
+
+        return state.Finish();
+    }
+
+    private static unsafe void AppendArchetype(ref Hash64State state, Archetype archetype)
+    {
+        var signature = archetype.Signature;
+        state.Append(in signature);
+        for (int c = 0; c < archetype.ChunkCount; c++)
+        {
+            int rows = archetype.RowCount(c);
+            byte* chunk = archetype.ChunkPointer(c);
+            state.Append(rows);
+            state.Append(new ReadOnlySpan<byte>(chunk, rows * Archetype.EntityColumnElementSize));
+            for (int i = 0; i < archetype.ComponentIds.Length; i++)
+            {
+                state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                state.Append(new ReadOnlySpan<byte>(chunk + archetype.EnabledOffsets[i], (rows + 7) / 8));
+            }
+        }
     }
 }
