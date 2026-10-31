@@ -682,6 +682,8 @@ public sealed partial class World : IDisposable
 
         Scratch.Dispose();
         _bufferHeap.Dispose();
+        Strings.Dispose();
+        Blobs.Dispose();
         _nonFragmenting.Dispose();
         _resources.Dispose();
         var report = new LeakReport(Allocator.ChunksInUse, (long)Allocator.ChunksInUse * SlabAllocator.ChunkSize);

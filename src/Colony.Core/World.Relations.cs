@@ -8,6 +8,9 @@ public sealed partial class World
     private EntityId[] _cascade = new EntityId[64];
     private int _cascadeCount;
 
+    /// <summary>The rebuildable reverse index, exposed so tests can corrupt it and prove the hash ignores it.</summary>
+    internal RelationIndex RelationIndexForTests => _relations;
+
     /// <summary>
     /// The Entity <paramref name="source"/> relates to in <paramref name="relation"/>, or
     /// <see cref="EntityId.Null"/> when it is dead or has no link.
