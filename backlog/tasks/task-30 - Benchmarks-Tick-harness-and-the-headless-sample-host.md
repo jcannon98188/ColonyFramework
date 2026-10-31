@@ -1,9 +1,11 @@
 ---
 id: TASK-30
 title: 'Benchmarks, Tick harness and the headless sample host'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 13:49'
 labels:
   - ready-for-agent
   - implementation
