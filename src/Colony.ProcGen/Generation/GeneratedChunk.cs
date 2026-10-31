@@ -139,17 +139,6 @@ public sealed class GeneratedChunk
         _placements[PlacementCount++] = placement;
     }
 
-    internal int CountPlacements(int stage)
-    {
-        int count = 0;
-        for (int i = PlacementCount - 1; i >= 0 && _placements[i].Stage == stage; i--)
-        {
-            count++;
-        }
-
-        return count;
-    }
-
     private int CheckedSlot(int fieldId, int cellSize)
     {
         int slot = Pipeline.SlotOf(fieldId);
