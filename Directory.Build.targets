@@ -12,8 +12,10 @@
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <!-- CA1515 (make types internal) conflicts with xUnit's public test class convention;
-         CA1707 (no underscores) conflicts with Sentence_case_test_names. -->
-    <NoWarn>$(NoWarn);CA1515;CA1707</NoWarn>
+         CA1707 (no underscores) conflicts with Sentence_case_test_names;
+         CA1051/CA1815 (no public fields, struct equality) conflict with test Components, which are
+         plain unmanaged data structs by design (spec section 2, principle 4). -->
+    <NoWarn>$(NoWarn);CA1515;CA1707;CA1051;CA1815</NoWarn>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsTestProject)' == 'true'">
