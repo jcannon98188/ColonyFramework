@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Pathfinding: the pathfinding service of spec section 9.1. TASK-19 ships movement classes (Game-defined
+    passability rules), per-class region IDs maintained incrementally from the World change feed, and the O(1)
+    Reachable query; the chunk graph, HPA* and request queue are TASK-20, flow Fields and layered repair TASK-21.
+    Region data is derived state: never hashed, never saved, rebuilt lazily on first use.
+    Depends on Colony.Core and Colony.Fields (spec section 3 also allows Persistence); enforced by tools/Colony.DependencyCheck.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework pathfinding: movement classes, region IDs and reachability.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Pathfinding.Tests" />
+  </ItemGroup>
+
+</Project>
