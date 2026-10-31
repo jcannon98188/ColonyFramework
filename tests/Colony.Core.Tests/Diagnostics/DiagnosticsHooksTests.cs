@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Colony.Diagnostics;
 
 namespace Colony.Core.Tests.Diagnostics;
@@ -30,6 +31,15 @@ public sealed class DiagnosticsHooksTests
                 Reads = ComponentMask.Of(position),
                 ForEachChunk = (in SystemContext context, in ChunkView _) =>
                 {
+                    // Long enough that the other workers take jobs too on an idle machine; the
+                    // assertions below do not depend on it (a loaded machine may give worker 0 every job).
+                    var spin = new SpinWait();
+                    long until = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 2000;
+                    while (Stopwatch.GetTimestamp() < until)
+                    {
+                        spin.SpinOnce(-1);
+                    }
+
                     lock (sink)
                     {
                         sink.Add(new byte[64 + context.JobIndex]);
@@ -46,6 +56,8 @@ public sealed class DiagnosticsHooksTests
         for (int i = 0; i < 3; i++)
         {
             world.Tick();
+            listener.Allocations.Clear();
+            world.Tick();
         }
 
         var record = world.Diagnostics.Latest;
@@ -54,17 +66,29 @@ public sealed class DiagnosticsHooksTests
         Assert.True(record.Tick.AllocatingThreads > 0);
         Assert.True(record.Systems[leaky].AllocatedBytes >= 8 * 64);
         Assert.Equal(0, record.Systems[schema.System("Clean").Id].AllocatedBytes);
-        foreach (ref readonly var worker in record.Workers)
+
+        // Per thread: every worker that allocated names Leaky as the first allocating System, and the
+        // listener got exactly one report per allocating worker, whichever workers the pool used.
+        var allocatingWorkers = new List<int>();
+        for (int w = 0; w < record.Workers.Length; w++)
         {
+            ref readonly var worker = ref record.Workers[w];
             if (worker.AllocatedBytes > 0)
             {
                 Assert.Equal(leaky, worker.FirstAllocatingSystem);
+                allocatingWorkers.Add(w);
+            }
+            else
+            {
+                Assert.Equal(-1, worker.FirstAllocatingSystem);
             }
         }
 
-        Assert.NotEmpty(listener.Allocations);
+        Assert.Equal(record.Tick.AllocatingThreads, allocatingWorkers.Count);
+        Assert.Equal(allocatingWorkers, listener.Allocations.Select(a => a.Worker).Order());
         Assert.All(listener.Allocations, a => Assert.Equal("Leaky", a.SystemName));
-        Assert.Contains(listener.Allocations, a => a.Worker > 0);
+        long tick = record.Tick.Tick;
+        Assert.All(listener.Allocations, a => Assert.Equal(tick, a.Tick));
     }
 
     [Fact]

@@ -27,7 +27,13 @@ public readonly record struct LogEntry(long Tick, int SystemId, int JobIndex, Lo
         _ => throw new ArgumentOutOfRangeException(nameof(index), index, "A log entry carries four arguments."),
     };
 
-    /// <summary>Orders entries by Tick, then System id, then job index: a deterministic order that never depends on which thread logged.</summary>
+    /// <summary>
+    /// Position of this entry among those its logging thread wrote. Entries of one job all come from one
+    /// thread, so (Tick, System, job, Sequence) is a total order that still never depends on which thread it was.
+    /// </summary>
+    internal long Sequence { get; init; }
+
+    /// <summary>Orders entries by Tick, then System id, then job index, then write order within the job: a deterministic order that never depends on which thread logged.</summary>
     internal static int CompareOrder(in LogEntry a, in LogEntry b)
     {
         int c = a.Tick.CompareTo(b.Tick);
@@ -37,19 +43,34 @@ public readonly record struct LogEntry(long Tick, int SystemId, int JobIndex, Lo
         }
 
         c = a.SystemId.CompareTo(b.SystemId);
-        return c != 0 ? c : a.JobIndex.CompareTo(b.JobIndex);
+        if (c != 0)
+        {
+            return c;
+        }
+
+        c = a.JobIndex.CompareTo(b.JobIndex);
+        return c != 0 ? c : a.Sequence.CompareTo(b.Sequence);
+    }
+
+    /// <summary>Allocation-free comparer over <see cref="CompareOrder"/> for span sorts.</summary>
+    internal readonly struct OrderComparer : IComparer<LogEntry>
+    {
+        public int Compare(LogEntry x, LogEntry y) => CompareOrder(in x, in y);
     }
 }
 
 /// <summary>
 /// One Tick thread's log ring: a preallocated array written only by its owner thread during a Tick and
 /// drained by the host between Ticks. When full, the oldest entry is overwritten and counted as dropped.
+/// A worker runs its own stripe of jobs and then steals, so a ring is NOT in (Tick, System, job) order;
+/// <see cref="SortPending"/> puts it there before a merge.
 /// </summary>
 internal sealed class LogRing
 {
     private readonly LogEntry[] _entries;
     private int _head; // index of the oldest entry
     private int _count;
+    private long _written;
 
     public LogRing(int capacity)
     {
@@ -63,9 +84,10 @@ internal sealed class LogRing
     public void Write(in LogEntry entry)
     {
         var entries = _entries;
+        var stamped = entry with { Sequence = _written++ };
         if (_count == entries.Length)
         {
-            entries[_head] = entry;
+            entries[_head] = stamped;
             _head = _head + 1 == entries.Length ? 0 : _head + 1;
             Dropped++;
             return;
@@ -77,8 +99,30 @@ internal sealed class LogRing
             tail -= entries.Length;
         }
 
-        entries[tail] = entry;
+        entries[tail] = stamped;
         _count++;
+    }
+
+    /// <summary>Puts the pending entries into <see cref="LogEntry.CompareOrder"/> order, in place, without allocating.</summary>
+    public void SortPending()
+    {
+        if (_count == 0)
+        {
+            _head = 0;
+            return;
+        }
+
+        if (_head != 0)
+        {
+            // Rotate left by _head with three reversals so the oldest entry lands at index 0.
+            var all = _entries.AsSpan();
+            all[.._head].Reverse();
+            all[_head..].Reverse();
+            all.Reverse();
+            _head = 0;
+        }
+
+        _entries.AsSpan(0, _count).Sort(default(LogEntry.OrderComparer));
     }
 
     public ref readonly LogEntry Peek() => ref _entries[_head];

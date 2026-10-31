@@ -165,6 +165,12 @@ public sealed class WorldDiagnostics
     /// </summary>
     public int DrainLogs(Span<LogEntry> destination)
     {
+        // A worker's ring holds its own jobs then stolen ones, so it is unsorted; order each ring, then merge.
+        foreach (var slot in Slots)
+        {
+            slot.Log.SortPending();
+        }
+
         int written = 0;
         while (written < destination.Length)
         {

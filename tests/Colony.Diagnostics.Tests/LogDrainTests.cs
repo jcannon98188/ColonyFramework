@@ -25,6 +25,21 @@ public sealed class LogDrainTests
         Assert.Equal(11, lines.Length);
     }
 
+    /// <summary>
+    /// Workers run their own job stripe and then steal, so a worker's ring is not in job order; the drain
+    /// must sort and merge, not append. Repeated so a lucky schedule cannot hide a bad order.
+    /// </summary>
+    [Fact]
+    public void Drained_text_is_identical_for_1_and_8_workers_over_repeated_runs()
+    {
+        string expected = Run(workers: 1, chunks: 24);
+        for (int repeat = 0; repeat < 6; repeat++)
+        {
+            Assert.Equal(expected, Run(workers: 8, chunks: 24));
+            Assert.Equal(expected, Run(workers: 3, chunks: 24));
+        }
+    }
+
     [Fact]
     public void An_unregistered_message_id_is_still_printable()
     {
@@ -33,7 +48,7 @@ public sealed class LogDrainTests
         Assert.Contains("unregistered message 7", text, StringComparison.Ordinal);
     }
 
-    private static string Run(int workers)
+    private static string Run(int workers, int chunks = 3)
     {
         var builder = new WorldBuilder().AddComponent<Counter>("counter").AddComponent<Position>("position").AddComponent<Tag>("tag");
         var counter = builder.Component<Counter>();
@@ -62,11 +77,24 @@ public sealed class LogDrainTests
             .Build();
         using var world = schema.CreateWorld(new WorldOptions { WorkerThreads = workers });
 
-        // Three one-Entity archetypes make three chunk jobs that land on different workers.
+        // Three one-Entity archetypes make three chunk jobs that land on different workers; more chunks
+        // (Counter.Value is the archetype's per-chunk capacity) come from filling the first archetype.
         var buffer = world.CreateCommandBuffer();
         buffer.Create(ComponentMask.Of(counter));
         buffer.Create(ComponentMask.Of(counter, position));
         buffer.Create(ComponentMask.Of(counter, position, tag));
+        world.Playback(buffer);
+        int perChunk = 0;
+        foreach (var view in world.Query(ComponentMask.Of(counter), ComponentMask.Of(position)))
+        {
+            perChunk = view.Capacity;
+        }
+
+        for (int i = 0; i < (chunks - 3) * perChunk; i++)
+        {
+            buffer.Create(ComponentMask.Of(counter));
+        }
+
         world.Playback(buffer);
         world.ResetScratch();
 
@@ -76,7 +104,7 @@ public sealed class LogDrainTests
 
         var writer = new StringWriter();
         int drained = new LogDrain(world).Drain(writer);
-        Assert.Equal(11, drained);
+        Assert.Equal(2 * (chunks + 2) + 1, drained);
         return writer.ToString();
     }
 
