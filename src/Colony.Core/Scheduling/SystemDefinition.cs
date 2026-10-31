@@ -66,6 +66,13 @@ public sealed class SystemDefinition
     /// <summary>Skip chunks whose asleep bit is set (<see cref="ChunkView.SetAsleep"/>).</summary>
     public bool SkipAsleepChunks { get; init; }
 
+    /// <summary>
+    /// Visit chunks even when a queried Component is disabled on every row (spec section 4.1). By default
+    /// such chunks are skipped, like <see cref="World.Query(ComponentMask, ComponentMask, bool)"/> does; a
+    /// System that re-enables Components needs to see them.
+    /// </summary>
+    public bool IgnoreEnableBits { get; init; }
+
     /// <summary>Serial hook before the chunk jobs (job index -1). Use it to prepare per-job reduction slots.</summary>
     public SystemAction? Begin { get; init; }
 

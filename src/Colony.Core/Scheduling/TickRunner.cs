@@ -84,8 +84,11 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             state.Jobs = 0;
             if (!state.Ran)
             {
+                _world.SchedulerCounts.SystemsSkippedByRate++;
                 continue;
             }
+
+            _world.SchedulerCounts.SystemRuns++;
 
             state.Random = _world.Random.Derive((ulong)id).Derive((ulong)_tick);
             if (def.ForEachChunk is not null)
@@ -143,13 +146,23 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             {
                 if (def.SkipAsleepChunks && archetype.IsAsleep(c))
                 {
+                    _world.SchedulerCounts.ChunksSkippedAsleep++;
                     continue;
                 }
 
                 if (!def.ChangeFilter.IsEmpty && !archetype.HasChangedSince(c, def.ChangeFilter, state.LastRun))
                 {
+                    _world.SchedulerCounts.ChunksSkippedByChangeFilter++;
                     continue;
                 }
+
+                if (!def.IgnoreEnableBits && archetype.HasFullyDisabledColumn(c, all))
+                {
+                    _world.SchedulerCounts.ChunksSkippedDisabled++;
+                    continue;
+                }
+
+                _world.SchedulerCounts.ChunksVisited++;
 
                 if (_jobCount == _jobs.Length)
                 {

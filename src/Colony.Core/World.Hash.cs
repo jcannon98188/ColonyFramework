@@ -10,7 +10,7 @@ public sealed partial class World
     /// <summary>
     /// The World hash (spec section 6): <see cref="Hash64"/> over the schema hash, the Tick, every
     /// archetype's chunks in archetype id then chunk order (the Entity column and each Component column
-    /// over the live rows only), the non-fragmenting Components of every live Entity in slot order, the
+    /// over the live rows only, each with its enable bits), the non-fragmenting Components of every live Entity in slot order, the
     /// persistent Resources in id order and the RNG state. Padding rows, change versions, the asleep bit,
     /// transient Resources (including non-persistent event queues) and caches are excluded. Linear in the
     /// live data, so it is cheap enough to run every few Ticks in a test. Equal on 1 or N threads, JIT or
@@ -42,6 +42,7 @@ public sealed partial class World
                 for (int i = 0; i < archetype.ComponentIds.Length; i++)
                 {
                     state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                    state.Append(new ReadOnlySpan<byte>(chunk + archetype.EnabledOffsets[i], (rows + 7) / 8));
                 }
             }
         }
@@ -61,6 +62,7 @@ public sealed partial class World
                 {
                     state.Append(index);
                     state.Append(new ReadOnlySpan<byte>(_nonFragmenting.Pointer(slot, index), size));
+                    state.Append(_nonFragmenting.IsEnabled(slot, index) ? (byte)1 : (byte)0);
                 }
             }
         }

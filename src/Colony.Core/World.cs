@@ -123,6 +123,11 @@ public sealed partial class World : IDisposable
 
     public StructuralCounters Counters => new(_creates, _destroys, _adds, _removes, _staleSkipped);
 
+    /// <summary>Running totals of what the scheduler ran and skipped (spec section 4.3: rates, change versions, asleep and enable bits).</summary>
+    public SchedulerCounters SchedulerCounters => SchedulerCounts;
+
+    internal SchedulerCounters SchedulerCounts;
+
     /// <summary>Native memory reserved for this World's chunks, in bytes.</summary>
     public long ReservedBytes => Allocator.ReservedBytes;
 
@@ -283,9 +288,63 @@ public sealed partial class World : IDisposable
 
     internal unsafe void AppendEvent(int queue, byte* source) => _resources.Append(queue, source);
 
-    /// <summary>Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of <paramref name="none"/>.</summary>
-    public ChunkQuery Query(ComponentMask all, ComponentMask none = default)
-        => new(_archetypes, _archetypeCount, all, none, DebugValidation);
+    /// <summary>True when the Entity has the Component and its enable bit is set (spec section 4.1). Throws when the Entity is dead or lacks the Component.</summary>
+    public bool IsEnabled(EntityId id, ComponentType type)
+    {
+        Schema.ValidateType(type);
+        ThrowIfMissing(id, type);
+        int index = id.Index;
+        int slot = Schema.NonFragmentingSlots[type.Id];
+        if (slot >= 0)
+        {
+            return _nonFragmenting.IsEnabled(slot, index);
+        }
+
+        var archetype = _archetypes[_entities.ArchetypeOf(index)];
+        return archetype.IsEnabled(_entities.ChunkOf(index), archetype.ColumnOf(type.Id), _entities.RowOf(index));
+    }
+
+    /// <summary>
+    /// Flips a Component's enable bit (spec section 4.1): the standard way to turn frequent state on and
+    /// off. Not a structural change: no archetype move, views and refs stay valid. Call it outside a Tick
+    /// or from a serial hook; inside a chunk job use <see cref="ChunkView.SetEnabled"/> on your own chunk.
+    /// </summary>
+    public void SetEnabled(EntityId id, ComponentType type, bool enabled)
+    {
+        Schema.ValidateType(type);
+        ThrowIfMissing(id, type);
+        int index = id.Index;
+        int slot = Schema.NonFragmentingSlots[type.Id];
+        if (slot >= 0)
+        {
+            _nonFragmenting.SetEnabled(slot, index, enabled);
+            return;
+        }
+
+        var archetype = _archetypes[_entities.ArchetypeOf(index)];
+        archetype.SetEnabled(_entities.ChunkOf(index), archetype.ColumnOf(type.Id), _entities.RowOf(index), enabled);
+    }
+
+    private void ThrowIfMissing(EntityId id, ComponentType type)
+    {
+        if (!_entities.IsAlive(id))
+        {
+            throw new InvalidOperationException($"{id} is not alive.");
+        }
+
+        if (!Has(id, type))
+        {
+            throw new InvalidOperationException($"{id} has no Component '{Schema.Components[type.Id].Name}'.");
+        }
+    }
+
+    /// <summary>
+    /// Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of
+    /// <paramref name="none"/>. Iteration respects enable bits: a chunk in which some queried Component is
+    /// disabled on every row is skipped, unless <paramref name="ignoreEnableBits"/>.
+    /// </summary>
+    public ChunkQuery Query(ComponentMask all, ComponentMask none = default, bool ignoreEnableBits = false)
+        => new(_archetypes, _archetypeCount, all, none, DebugValidation, ignoreEnableBits);
 
     public ChunkQuery Query(params ReadOnlySpan<ComponentType> all) => Query(ComponentMask.Of(all));
 
@@ -428,6 +487,7 @@ public sealed partial class World : IDisposable
             if (sourceOffset >= 0)
             {
                 Buffer.MemoryCopy(from + sourceOffset + (long)sourceRow * size, target, size, size);
+                destination.SetEnabled(chunk, i, row, source.IsEnabled(sourceChunk, source.ColumnOf(destination.ComponentIds[i]), sourceRow));
             }
             else
             {
