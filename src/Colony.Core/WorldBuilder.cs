@@ -80,8 +80,67 @@ public sealed class WorldBuilder
     private readonly List<string> _logMessages = [];
     private readonly List<string> _counters = [];
     private readonly HashSet<string> _counterNames = new(StringComparer.Ordinal);
+    private readonly List<PluginDescriptor> _plugins = [];
+    private readonly List<SystemOverride> _systemOverrides = [];
+    private readonly List<int> _componentOwners = [];
+    private readonly List<int> _resourceOwners = [];
+    private int _currentPlugin = -1;
     private bool _debugValidation = WorldSchema.DefaultDebugValidation;
     private bool _built;
+
+    /// <summary>
+    /// Opens a Plugin scope (spec section 8): every Component and Resource registered until <see cref="EndPlugin"/>
+    /// is attributed to the Plugin <paramref name="id"/>, and <paramref name="deterministic"/> feeds
+    /// <see cref="WorldSchema.IsDeterministic"/>. Scopes do not nest; ids are unique. Colony.Plugins calls this
+    /// around each Plugin's <c>Register</c>; Core keeps only the provenance.
+    /// </summary>
+    public WorldBuilder BeginPlugin(string id, string version, bool deterministic)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(version);
+        ThrowIfBuilt();
+        if (_currentPlugin >= 0)
+        {
+            throw new InvalidOperationException($"Plugin '{_plugins[_currentPlugin].Id}' is still registering; Plugin scopes do not nest.");
+        }
+
+        if (_plugins.Exists(p => string.Equals(p.Id, id, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"A Plugin with id '{id}' is already registered.", nameof(id));
+        }
+
+        _currentPlugin = _plugins.Count;
+        _plugins.Add(new PluginDescriptor(_currentPlugin, id, version, deterministic));
+        return this;
+    }
+
+    /// <summary>Closes the scope opened by <see cref="BeginPlugin"/>.</summary>
+    public WorldBuilder EndPlugin()
+    {
+        ThrowIfBuilt();
+        if (_currentPlugin < 0)
+        {
+            throw new InvalidOperationException("No Plugin scope is open; call BeginPlugin first.");
+        }
+
+        _currentPlugin = -1;
+        return this;
+    }
+
+    /// <summary>
+    /// Records that <paramref name="replacingPlugin"/> replaced the Overridable System <paramref name="system"/>
+    /// of <paramref name="originalPlugin"/> (spec section 8). The replacement itself is registered through
+    /// <see cref="AddSystem"/> by the Plugin loader; Core records the fact for the save manifest.
+    /// </summary>
+    public WorldBuilder RecordSystemOverride(string system, string originalPlugin, string replacingPlugin)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(system);
+        ArgumentException.ThrowIfNullOrWhiteSpace(originalPlugin);
+        ArgumentException.ThrowIfNullOrWhiteSpace(replacingPlugin);
+        ThrowIfBuilt();
+        _systemOverrides.Add(new SystemOverride(system, originalPlugin, replacingPlugin));
+        return this;
+    }
 
     /// <summary>
     /// Registers a structured log message (spec section 10.1). The template uses <c>{0}</c> to <c>{3}</c> for
@@ -284,6 +343,7 @@ public sealed class WorldBuilder
             InlineOffset = inlineOffset,
         });
         _byName.Add(name, id);
+        _componentOwners.Add(_currentPlugin);
         return id;
     }
 
@@ -509,6 +569,7 @@ public sealed class WorldBuilder
         _resources.Add(new ResourceDescriptor(type, name, size, alignment, hash, kind, persistent));
         _resourceByName.Add(name, id);
         _resourceByClrType.Add(typeof(T), id);
+        _resourceOwners.Add(_currentPlugin);
         return type;
     }
 
@@ -528,6 +589,11 @@ public sealed class WorldBuilder
     public WorldSchema Build()
     {
         ThrowIfBuilt();
+        if (_currentPlugin >= 0)
+        {
+            throw new InvalidOperationException($"Plugin '{_plugins[_currentPlugin].Id}' is still registering; call EndPlugin before Build.");
+        }
+
         _built = true;
         var schedule = SystemSchedule.Build(_systems, _phases, _components.Count, _resources);
         foreach (var extension in _extensions)
@@ -535,7 +601,13 @@ public sealed class WorldBuilder
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections);
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections)
+        {
+            Plugins = [.. _plugins],
+            SystemOverrides = [.. _systemOverrides],
+            ComponentOwners = [.. _componentOwners],
+            ResourceOwners = [.. _resourceOwners],
+        };
     }
 
     private void ThrowIfBuilt()

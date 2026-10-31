@@ -43,4 +43,12 @@ public sealed class LoadOptions
 
     /// <summary>Host settings of the new World (threads, diagnostics, gate). The seed and the Entity capacity come from the save.</summary>
     public WorldOptions WorldOptions { get; init; } = WorldOptions.Default;
+
+    /// <summary>
+    /// Load a save made with Plugins the schema does not have (spec section 8): Components and persistent
+    /// Resources the save records and the schema lacks are dropped and the rest loads. Off by default, when such a
+    /// save fails with <see cref="MissingPluginException"/>. Dropping changes the schema, so the saved World hash is
+    /// not verified.
+    /// </summary>
+    public bool DropUnknownComponents { get; init; }
 }

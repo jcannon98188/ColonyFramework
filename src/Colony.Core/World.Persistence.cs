@@ -28,10 +28,14 @@ public sealed partial class World
         _relations.EnsureCapacity(_entities.Capacity);
     }
 
-    /// <summary>Creates the next archetype (ids are creation order, so the loader calls this in saved id order).</summary>
-    internal Archetype RestoreArchetype(ComponentMask signature)
+    /// <summary>
+    /// Creates the next archetype (ids are creation order, so the loader calls this in saved id order). With
+    /// <paramref name="mergeExisting"/> a signature seen before returns that archetype instead of throwing: the
+    /// loader dropping unknown Components can collapse two saved archetypes into one.
+    /// </summary>
+    internal Archetype RestoreArchetype(ComponentMask signature, bool mergeExisting = false)
     {
-        if (_bySignature.ContainsKey(signature))
+        if (!mergeExisting && _bySignature.ContainsKey(signature))
         {
             throw new InvalidOperationException("The save lists the same archetype signature twice.");
         }

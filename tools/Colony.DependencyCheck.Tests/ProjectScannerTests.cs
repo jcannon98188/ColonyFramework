@@ -67,6 +67,34 @@ public sealed class ProjectScannerTests : IDisposable
         Assert.Empty(violations);
     }
 
+    [Fact]
+    public void A_Game_can_reference_Core_and_Fields_without_the_Plugin_packages()
+    {
+        // TASK-16 AC #6, asserted against the real csproj files: neither Core nor Fields pulls in Colony.Plugins or Colony.Abstractions,
+        // directly or through anything they reference, so a Game that skips Plugins never compiles against them.
+        string repoRoot = ProjectScanner.FindRepoRoot(AppContext.BaseDirectory);
+        var projects = ProjectScanner.Scan(repoRoot).ToDictionary(p => p.RelativePath, StringComparer.Ordinal);
+
+        var reachable = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<string>(["src/Colony.Core/Colony.Core.csproj", "src/Colony.Fields/Colony.Fields.csproj"]);
+        while (pending.Count > 0)
+        {
+            string path = pending.Pop();
+            Assert.True(projects.ContainsKey(path), $"{path} is not in the repository.");
+            foreach (string reference in projects[path].ProjectReferences)
+            {
+                if (reachable.Add(reference))
+                {
+                    pending.Push(reference);
+                }
+            }
+        }
+
+        Assert.DoesNotContain("src/Colony.Plugins/Colony.Plugins.csproj", reachable);
+        Assert.DoesNotContain("src/Colony.Abstractions/Colony.Abstractions.csproj", reachable);
+        Assert.True(projects.ContainsKey("src/Colony.Plugins/Colony.Plugins.csproj"), "Colony.Plugins exists, so the assertion is not vacuous.");
+    }
+
     private void WriteProject(string relativePath, string content)
     {
         string path = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
