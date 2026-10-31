@@ -26,6 +26,16 @@ public sealed class ColonistScenarioTests
 
             Assert.Equal(ColonistScenario.DefaultColonists + ColonistScenario.DefaultFood, world.EntityCount);
             Assert.True(world.Counters.Destroys > Ticks * ColonistScenario.DefaultColonists / 100, "the churn and the eating must have happened");
+
+            // TASK-8: the Resource written by Stats, fed by the FoodEaten and StructuralFailure event queues, the
+            // enable bit Starvation clears on the target, and the every-4-Ticks Recover System were all exercised.
+            var stats = world.Resource<ColonyStats>(world.Schema.Resource<ColonyStats>());
+            Assert.Equal(ColonistScenario.DefaultColonists, stats.Colonists);
+            Assert.True(stats.TotalEaten > 0, "food must have been eaten (FoodEaten events)");
+            Assert.True(stats.Failures > 0, "two colonists reaching one food must have produced StructuralFailure events");
+            Assert.True(stats.ImmobileTicks > 0, "starved colonists must have had their target disabled");
+            Assert.True(stats.Recovered > 0, "the every-4-Ticks Recover System must have re-enabled some targets");
+            Assert.True(world.SchedulerCounters.SystemsSkippedByRate > 0);
             if (baseline is null)
             {
                 baseline = hashes;

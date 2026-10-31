@@ -6,8 +6,12 @@ namespace Colony.Core.Tests;
 public sealed class ChunkLayoutTests
 {
     // Colonist archetype from the ECS prototype: Entity 8 B + Position 8 + Hunger 4 + Health 4 = 24 B/row,
-    // 65536 / 24 = 2730 rounded down to a multiple of 16 = 2720. Independent of the CPU vector width.
-    private const int ColonistCapacity = 2720;
+    // 65536 / 24 = 2730 rounded down to a multiple of 16 = 2720, then stepped down until the columns plus one
+    // 64-byte-aligned enable bitset per Component (TASK-8) fit: 2672. Independent of the CPU vector width.
+    private const int ColonistCapacity = 2672;
+
+    // ceil(2672 / 8) = 334 bytes, aligned to 64 = 384 bytes per enable bitset; three Components.
+    private const int EnableBitsetBytes = 384 * 3;
 
     [Fact]
     public void Chunk_capacity_is_a_multiple_of_16_fixed_by_the_layout_alone()
@@ -57,8 +61,8 @@ public sealed class ChunkLayoutTests
             Assert.Equal(0, hungers % 64);
             Assert.Equal(0, healths % 64);
 
-            // Columns are laid out in Component id order, each padded to Capacity elements.
-            Assert.Equal(entities + ColonistCapacity * 8, positions);
+            // Entity column, then the enable bitsets, then the Component columns in id order, each padded to Capacity elements.
+            Assert.Equal(entities + ColonistCapacity * 8 + EnableBitsetBytes, positions);
             Assert.Equal(positions + ColonistCapacity * 8, hungers);
             Assert.Equal(hungers + ColonistCapacity * 4, healths);
             Assert.True(healths + ColonistCapacity * 4 - entities <= 64 * 1024);

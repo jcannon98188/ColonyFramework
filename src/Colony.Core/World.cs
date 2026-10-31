@@ -16,6 +16,7 @@ public sealed partial class World : IDisposable
     private readonly WorldOptions _options;
     private readonly EntityIndex _entities;
     private readonly NonFragmentingStore _nonFragmenting;
+    private readonly ResourceStore _resources;
     private readonly Dictionary<ComponentMask, Archetype> _bySignature = [];
     private readonly List<CommandBuffer> _buffers = [];
     private Archetype[] _archetypes = new Archetype[8];
@@ -25,6 +26,7 @@ public sealed partial class World : IDisposable
     private long _adds;
     private long _removes;
     private long _staleSkipped;
+    private int _playbackOwner = -1;
     private bool _disposed;
     private readonly IWorldExtension[] _extensions;
     private TickRunner? _runner;
@@ -39,6 +41,7 @@ public sealed partial class World : IDisposable
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
+        _resources = new ResourceStore(schema);
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
         _extensions = new IWorldExtension[schema.Extensions.Length];
@@ -168,6 +171,11 @@ public sealed partial class World : IDisposable
 
     public StructuralCounters Counters => new(_creates, _destroys, _adds, _removes, _staleSkipped);
 
+    /// <summary>Running totals of what the scheduler ran and skipped (spec section 4.3: rates, change versions, asleep and enable bits).</summary>
+    public SchedulerCounters SchedulerCounters => SchedulerCounts;
+
+    internal SchedulerCounters SchedulerCounts;
+
     /// <summary>Native memory reserved for this World's chunks, in bytes.</summary>
     public long ReservedBytes => Allocator.ReservedBytes;
 
@@ -208,7 +216,47 @@ public sealed partial class World : IDisposable
             ChangeCounter++;
         }
 
-        buffer.Playback();
+        if (!_inPhaseMerge)
+        {
+            StructuralEpoch++;
+        }
+
+        _playbackOwner = buffer.OwnerSystemId;
+        try
+        {
+            buffer.Playback();
+        }
+        finally
+        {
+            _playbackOwner = -1;
+        }
+    }
+
+    /// <summary>
+    /// Counts sync points: each Phase boundary (one merge of every System's buffers) and each host
+    /// <see cref="Playback"/> outside a Tick. An op whose Entity died in the current epoch lost a same-Phase
+    /// conflict (spec section 4.1); one whose Entity died earlier was stale.
+    /// </summary>
+    internal uint StructuralEpoch;
+
+    private bool _inPhaseMerge;
+
+    /// <summary>Brackets a Phase boundary so every buffer merged in it shares one epoch.</summary>
+    internal void BeginPhaseMerge()
+    {
+        StructuralEpoch++;
+        _inPhaseMerge = true;
+    }
+
+    internal void EndPhaseMerge() => _inPhaseMerge = false;
+
+    /// <summary>Records that an op was not applied: counted, and reported on the <see cref="WorldSchema.StructuralFailures"/> queue for the next Phase.</summary>
+    private unsafe void ReportFailure(EntityId id, StructuralOp op, int componentId)
+    {
+        _staleSkipped++;
+        var reason = _entities.DiedInEpoch(id, StructuralEpoch) ? StructuralFailureReason.Conflict : StructuralFailureReason.Stale;
+        var failure = new StructuralFailure(id, op, componentId < 0 ? default : new ComponentType(componentId), _playbackOwner, reason);
+        _resources.Append(0, (byte*)&failure);
     }
 
     /// <summary>
@@ -268,9 +316,90 @@ public sealed partial class World : IDisposable
         return ref GetUnchecked<T>(id.Index, type.Id);
     }
 
-    /// <summary>Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of <paramref name="none"/>.</summary>
-    public ChunkQuery Query(ComponentMask all, ComponentMask none = default)
-        => new(_archetypes, _archetypeCount, all, none, DebugValidation);
+    /// <summary>
+    /// The World's value of a Resource (spec section 4.1), by reference; stable for the World's lifetime.
+    /// Inside a System use <see cref="SystemContext.Resource{T}"/> / <see cref="SystemContext.ReadResource{T}"/>,
+    /// which check the declared access.
+    /// </summary>
+    public unsafe ref T Resource<T>(ResourceType type) where T : unmanaged
+    {
+        Schema.ValidateResource<T>(type, ResourceKind.Value);
+        return ref Unsafe.AsRef<T>(_resources.Pointer(type.Id));
+    }
+
+    /// <summary>
+    /// The pending events of a typed queue (spec section 4.3), in merge order: System order, then job
+    /// order, then record order. Inside a System use <see cref="SystemContext.Events{T}"/>, which checks the
+    /// declared access. The span is valid until the next playback or the End Phase boundary.
+    /// </summary>
+    public unsafe ReadOnlySpan<T> Events<T>(ResourceType queue) where T : unmanaged
+    {
+        Schema.ValidateResource<T>(queue, ResourceKind.EventQueue);
+        return new ReadOnlySpan<T>(_resources.QueuePointer(queue.Id), _resources.Count(queue.Id));
+    }
+
+    /// <summary>Clears every event queue: the End Phase boundary does this before the End Phase's buffers merge.</summary>
+    internal void ClearEvents() => _resources.ClearAllQueues();
+
+    internal unsafe void AppendEvent(int queue, byte* source) => _resources.Append(queue, source);
+
+    /// <summary>True when the Entity has the Component and its enable bit is set (spec section 4.1). Throws when the Entity is dead or lacks the Component.</summary>
+    public bool IsEnabled(EntityId id, ComponentType type)
+    {
+        Schema.ValidateType(type);
+        ThrowIfMissing(id, type);
+        int index = id.Index;
+        int slot = Schema.NonFragmentingSlots[type.Id];
+        if (slot >= 0)
+        {
+            return _nonFragmenting.IsEnabled(slot, index);
+        }
+
+        var archetype = _archetypes[_entities.ArchetypeOf(index)];
+        return archetype.IsEnabled(_entities.ChunkOf(index), archetype.ColumnOf(type.Id), _entities.RowOf(index));
+    }
+
+    /// <summary>
+    /// Flips a Component's enable bit (spec section 4.1): the standard way to turn frequent state on and
+    /// off. Not a structural change: no archetype move, views and refs stay valid. Call it outside a Tick
+    /// or from a serial hook; inside a chunk job use <see cref="ChunkView.SetEnabled"/> on your own chunk.
+    /// </summary>
+    public void SetEnabled(EntityId id, ComponentType type, bool enabled)
+    {
+        Schema.ValidateType(type);
+        ThrowIfMissing(id, type);
+        int index = id.Index;
+        int slot = Schema.NonFragmentingSlots[type.Id];
+        if (slot >= 0)
+        {
+            _nonFragmenting.SetEnabled(slot, index, enabled);
+            return;
+        }
+
+        var archetype = _archetypes[_entities.ArchetypeOf(index)];
+        archetype.SetEnabled(_entities.ChunkOf(index), archetype.ColumnOf(type.Id), _entities.RowOf(index), enabled);
+    }
+
+    private void ThrowIfMissing(EntityId id, ComponentType type)
+    {
+        if (!_entities.IsAlive(id))
+        {
+            throw new InvalidOperationException($"{id} is not alive.");
+        }
+
+        if (!Has(id, type))
+        {
+            throw new InvalidOperationException($"{id} has no Component '{Schema.Components[type.Id].Name}'.");
+        }
+    }
+
+    /// <summary>
+    /// Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of
+    /// <paramref name="none"/>. Iteration respects enable bits: a chunk in which some queried Component is
+    /// disabled on every row is skipped, unless <paramref name="ignoreEnableBits"/>.
+    /// </summary>
+    public ChunkQuery Query(ComponentMask all, ComponentMask none = default, bool ignoreEnableBits = false)
+        => new(_archetypes, _archetypeCount, all, none, DebugValidation, ignoreEnableBits);
 
     public ChunkQuery Query(params ReadOnlySpan<ComponentType> all) => Query(ComponentMask.Of(all));
 
@@ -317,14 +446,14 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Destroy, -1);
             return false;
         }
 
         int index = id.Index;
         RemoveFromArchetype(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), _entities.RowOf(index));
         _nonFragmenting.ClearEntity(index);
-        _entities.Free(index);
+        _entities.Free(index, StructuralEpoch);
         _destroys++;
         return true;
     }
@@ -334,7 +463,7 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Add, componentId);
             return false;
         }
 
@@ -373,7 +502,7 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Remove, componentId);
             return false;
         }
 
@@ -413,6 +542,7 @@ public sealed partial class World : IDisposable
             if (sourceOffset >= 0)
             {
                 Buffer.MemoryCopy(from + sourceOffset + (long)sourceRow * size, target, size, size);
+                destination.SetEnabled(chunk, i, row, source.IsEnabled(sourceChunk, source.ColumnOf(destination.ComponentIds[i]), sourceRow));
             }
             else
             {
@@ -491,6 +621,7 @@ public sealed partial class World : IDisposable
 
         Scratch.Dispose();
         _nonFragmenting.Dispose();
+        _resources.Dispose();
         var report = new LeakReport(Allocator.ChunksInUse, (long)Allocator.ChunksInUse * SlabAllocator.ChunkSize);
         Allocator.Dispose();
         if (DebugValidation && report.HasLeaks)
