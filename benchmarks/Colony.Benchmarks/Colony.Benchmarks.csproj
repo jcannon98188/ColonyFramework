@@ -3,7 +3,7 @@
   <!--
     BenchmarkDotNet micro-benchmarks of spec section 10.3: storage (churn, archetype moves, query iteration),
     scheduler (the colonist Tick on 1 and N workers), Fields (stencil Tick, accessor writes), hashing (Hash64,
-    Philox, World.Hash) and save/load (Colony.Persistence), plus the Off-vs-Standard diagnostics overhead
+    Philox, World.Hash), save/load (Colony.Persistence), pathfinding regions (Colony.Pathfinding), plus the Off-vs-Standard diagnostics overhead
     deferred here by TASK-17. One command runs them all (see benchmarks/README.md):
       dotnet run -c Release (project benchmarks/Colony.Benchmarks)        [all benchmarks; add BenchmarkDotNet options such as a filter after a double dash]
     Benchmarks run in-process (InProcessEmitToolchain): results land in BenchmarkDotNet.Artifacts/ (gitignored) as Markdown and full JSON.
@@ -25,10 +25,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Pathfinding\Colony.Pathfinding.csproj" />
     <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
     <Compile Include="..\..\tests\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
     <Compile Include="..\..\tests\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
+    <Compile Include="..\..\tests\Colony.Pathfinding.Tests\Scenarios\PrototypeTerrain.cs" Link="Scenarios\PrototypeTerrain.cs" />
   </ItemGroup>
 
 </Project>
