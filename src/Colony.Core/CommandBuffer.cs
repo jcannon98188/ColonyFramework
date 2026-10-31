@@ -1,0 +1,268 @@
+using System.Runtime.CompilerServices;
+
+namespace Colony;
+
+/// <summary>
+/// Deferred structural changes (spec section 4.1): create, destroy, add and remove Component. Commands
+/// are byte-encoded into pages taken from the World's per-Tick scratch arena and applied in record order
+/// by <see cref="World.Playback"/> at a sync point. <see cref="Create()"/> returns a deferred handle that
+/// later commands in the same buffer may target; after playback <see cref="Resolve"/> maps it to the real
+/// <see cref="EntityId"/> until the scratch arena is reset. Commands aimed at an Entity that is no longer
+/// alive are skipped and counted in <see cref="World.Counters"/>.
+/// </summary>
+public sealed class CommandBuffer
+{
+    private const int PageSize = 16 * 1024;
+    private const int HeaderSize = 16;
+    private const int PayloadCapacity = PageSize - HeaderSize;
+
+    private readonly WorldSchema _schema;
+    private nint _firstPage;
+    private nint _currentPage;
+    private uint _arenaGeneration;
+    private int _createCount;
+    private nint _resolved;
+    private int _resolvedCount;
+    private uint _resolvedGeneration;
+
+    internal CommandBuffer(World world)
+    {
+        World = world;
+        _schema = world.Schema;
+    }
+
+    private enum Kind : byte
+    {
+        Destroy = 1,
+        Create = 2,
+        Add = 3,
+        AddDefault = 4,
+        Remove = 5,
+    }
+
+    internal World World { get; }
+
+    /// <summary>Commands recorded since the last playback.</summary>
+    public int Count { get; private set; }
+
+    public bool IsEmpty => Count == 0;
+
+    /// <summary>Records the creation of an Entity with no fragmenting Components; add them with <see cref="Add{T}"/>.</summary>
+    public EntityId Create() => Create(ComponentMask.Empty);
+
+    /// <summary>
+    /// Records the creation of an Entity directly in the archetype for <paramref name="signature"/>,
+    /// with every Component zero-initialised. Cheaper than creating empty and adding one by one.
+    /// </summary>
+    public unsafe EntityId Create(ComponentMask signature)
+    {
+        byte* p = Reserve(1 + sizeof(ComponentMask));
+        *p = (byte)Kind.Create;
+        Unsafe.WriteUnaligned(p + 1, signature);
+        Count++;
+        return EntityId.Deferred(_createCount++);
+    }
+
+    public unsafe void Destroy(EntityId entity)
+    {
+        byte* p = Reserve(1 + sizeof(ulong));
+        *p = (byte)Kind.Destroy;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Count++;
+    }
+
+    /// <summary>Adds the Component with the given value, or overwrites it when the Entity already has it.</summary>
+    public unsafe void Add<T>(EntityId entity, ComponentType type, in T value) where T : unmanaged
+    {
+        _schema.ValidateType(type);
+        int size = _schema.Sizes[type.Id];
+        if (Unsafe.SizeOf<T>() != size)
+        {
+            throw new ArgumentException($"{typeof(T).Name} is {Unsafe.SizeOf<T>()} bytes but Component '{_schema.Describe(type).Name}' is {size} bytes.", nameof(T));
+        }
+
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
+        *p = (byte)Kind.Add;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        Unsafe.WriteUnaligned(p + 13, value);
+        Count++;
+    }
+
+    /// <summary>Adds the Component zero-initialised (a tag, or a value filled in later), or zeroes it when already present.</summary>
+    public unsafe void Add(EntityId entity, ComponentType type)
+    {
+        _schema.ValidateType(type);
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int));
+        *p = (byte)Kind.AddDefault;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        Count++;
+    }
+
+    public unsafe void Remove(EntityId entity, ComponentType type)
+    {
+        _schema.ValidateType(type);
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int));
+        *p = (byte)Kind.Remove;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        Count++;
+    }
+
+    /// <summary>
+    /// The real id of an Entity created by this buffer's last playback. Valid until the next playback or
+    /// until the World resets its scratch arena.
+    /// </summary>
+    public unsafe EntityId Resolve(EntityId deferred)
+    {
+        if (!deferred.IsDeferred)
+        {
+            throw new ArgumentException("Only deferred handles from Create can be resolved.", nameof(deferred));
+        }
+
+        if (_resolved == 0 || _resolvedGeneration != World.Scratch.Generation)
+        {
+            throw new InvalidOperationException("The deferred handle cannot be resolved: the buffer has not been played back since it was recorded, or the scratch arena was reset.");
+        }
+
+        int ordinal = deferred.DeferredOrdinal;
+        if ((uint)ordinal >= (uint)_resolvedCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(deferred), deferred, "The handle was not created by this buffer's last playback.");
+        }
+
+        return ((EntityId*)_resolved)[ordinal];
+    }
+
+    /// <summary>Drops every recorded command without applying it.</summary>
+    public void Clear()
+    {
+        _firstPage = 0;
+        _currentPage = 0;
+        Count = 0;
+        _createCount = 0;
+    }
+
+    internal unsafe void Playback()
+    {
+        if (Count == 0)
+        {
+            return;
+        }
+
+        var arena = World.Scratch;
+        if (_arenaGeneration != arena.Generation)
+        {
+            throw new InvalidOperationException("The command buffer outlived the scratch arena it was recorded into; play buffers back before ResetScratch.");
+        }
+
+        _resolved = (nint)arena.Alloc(Math.Max(1, _createCount) * sizeof(ulong), sizeof(ulong));
+        _resolvedCount = 0;
+        _resolvedGeneration = arena.Generation;
+        var resolved = (EntityId*)_resolved;
+
+        for (nint page = _firstPage; page != 0; page = ((PageHeader*)page)->Next)
+        {
+            byte* p = (byte*)page + HeaderSize;
+            byte* end = p + ((PageHeader*)page)->Used;
+            while (p < end)
+            {
+                var kind = (Kind)(*p++);
+                if (kind == Kind.Create)
+                {
+                    var signature = Unsafe.ReadUnaligned<ComponentMask>(p);
+                    p += sizeof(ComponentMask);
+                    resolved[_resolvedCount++] = World.CreateEntity(signature);
+                    continue;
+                }
+
+                var target = Target(Unsafe.ReadUnaligned<ulong>(p), resolved);
+                p += sizeof(ulong);
+                if (kind == Kind.Destroy)
+                {
+                    World.DestroyEntity(target);
+                    continue;
+                }
+
+                int componentId = Unsafe.ReadUnaligned<int>(p);
+                p += sizeof(int);
+                switch (kind)
+                {
+                    case Kind.Add:
+                        World.AddComponent(target, componentId, p);
+                        p += _schema.Sizes[componentId];
+                        break;
+                    case Kind.AddDefault:
+                        World.AddComponent(target, componentId, null);
+                        break;
+                    case Kind.Remove:
+                        World.RemoveComponent(target, componentId);
+                        break;
+                    default:
+                        throw new InvalidOperationException("Corrupt command buffer.");
+                }
+            }
+        }
+
+        Clear();
+    }
+
+    private unsafe EntityId Target(ulong raw, EntityId* resolved)
+    {
+        var id = new EntityId(raw);
+        if (!id.IsDeferred)
+        {
+            return id;
+        }
+
+        int ordinal = id.DeferredOrdinal;
+        if ((uint)ordinal >= (uint)_resolvedCount)
+        {
+            throw new InvalidOperationException($"{id} targets an Entity this buffer has not created.");
+        }
+
+        return resolved[ordinal];
+    }
+
+    private unsafe byte* Reserve(int bytes)
+    {
+        var arena = World.Scratch;
+        if (_firstPage == 0)
+        {
+            _arenaGeneration = arena.Generation;
+            _firstPage = _currentPage = NewPage(arena);
+        }
+        else if (_arenaGeneration != arena.Generation)
+        {
+            throw new InvalidOperationException("The command buffer outlived the scratch arena it was recorded into; play buffers back before ResetScratch.");
+        }
+
+        var header = (PageHeader*)_currentPage;
+        if (header->Used + bytes > PayloadCapacity)
+        {
+            nint next = NewPage(arena);
+            header->Next = next;
+            _currentPage = next;
+            header = (PageHeader*)next;
+        }
+
+        byte* p = (byte*)_currentPage + HeaderSize + header->Used;
+        header->Used += bytes;
+        return p;
+    }
+
+    private static unsafe nint NewPage(ScratchArena arena)
+    {
+        var page = (PageHeader*)arena.Alloc(PageSize, 16);
+        page->Next = 0;
+        page->Used = 0;
+        return (nint)page;
+    }
+
+    private struct PageHeader
+    {
+        public nint Next;
+        public int Used;
+    }
+}
