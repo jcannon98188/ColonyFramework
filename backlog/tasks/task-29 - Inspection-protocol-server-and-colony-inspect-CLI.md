@@ -1,9 +1,11 @@
 ---
 id: TASK-29
 title: 'Inspection protocol, server and colony-inspect CLI'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 20:44'
 labels:
   - ready-for-agent
   - implementation
