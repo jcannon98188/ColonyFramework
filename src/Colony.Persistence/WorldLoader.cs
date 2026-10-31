@@ -57,8 +57,10 @@ internal static unsafe class WorldLoader
             LoadNonFragmenting(reader, world, plans);
             LoadResources(reader, world, manifest);
             LoadTables(reader, world);
-            LoadWorldSection(reader, world, manifest);
+            // Change versions are rebuildable (spec section 7.1): every chunk counts as changed once, before the
+            // saved change counter is restored so the counter itself continues from the save.
             world.MarkAllChunksChanged();
+            LoadWorldSection(reader, world, manifest);
             world.RebuildRelationIndex();
             world.LoadExtensions(name => new SectionReader(reader, name, SaveContainer.ExtensionPrefix + name + "/"));
 

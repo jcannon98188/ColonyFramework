@@ -25,7 +25,7 @@ public struct WorkSite
 /// hash at checkpoints is the determinism evidence, <see cref="Denied"/> (the denied counter summed over the
 /// run) is the thrash measure. No test-framework dependency.
 /// </summary>
-public sealed class ClaimScenario : Scenario
+public sealed class ClaimScenario : Testing.Scenario
 {
     public const ulong DefaultSeed = 4242;
     public const string DecideSystemName = "claims.decide";
@@ -84,10 +84,12 @@ public sealed class ClaimScenario : Scenario
             BudgetPerTick = Budget,
             Decide = state.Decide,
         });
+        // Begin, not Late: the site list is then a function of the World at the Tick boundary, so a World loaded
+        // from a save (TASK-14) continues exactly like the unsaved run.
         builder.AddSystem(new SystemDefinition
         {
             Name = "claims.sites",
-            Phase = Phase.Late,
+            Phase = Phase.Begin,
             Reads = ComponentMask.Of(site),
             Begin = state.RebuildSites,
         });
@@ -96,7 +98,6 @@ public sealed class ClaimScenario : Scenario
             Name = "claims.churn",
             Phase = Phase.Late,
             Reads = ComponentMask.Of(site, worker),
-            After = ["claims.sites"],
             Begin = state.Churn,
         });
     }
@@ -212,7 +213,7 @@ public sealed class ClaimScenario : Scenario
             }
         }
 
-        /// <summary>Late (serial): the live sites in chunk order, the list the next Tick's decisions pick from.</summary>
+        /// <summary>Begin (serial): the live sites in chunk order, the list this Tick's decisions pick from.</summary>
         public void RebuildSites(in SystemContext context)
         {
             int count = 0;

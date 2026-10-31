@@ -32,6 +32,16 @@ public abstract class Scenario
         world.Tick();
     }
 
+    /// <summary>
+    /// Called instead of <see cref="Populate"/> when the harness loaded <paramref name="world"/> from a save
+    /// (spec section 7.1): rebuild any per-schema scratch caches the Systems derive from World state between
+    /// Ticks (a site list, a grid), so the loaded World continues exactly as the unsaved one would. Nothing by default.
+    /// </summary>
+    public virtual void OnLoaded(World world)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+    }
+
     /// <summary>Wraps plain delegates as a scenario for one-off tests.</summary>
     public static Scenario Create(string name, ulong seed, Action<WorldBuilder> compose, Action<World> populate, Action<World>? step = null)
     {

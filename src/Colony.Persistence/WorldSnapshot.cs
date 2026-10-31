@@ -27,6 +27,12 @@ public sealed class WorldSnapshot
 
     public int SectionCount => _sections.Count;
 
+    /// <summary>Section names in container order.</summary>
+    public string SectionName(int index) => _sections[index].Name;
+
+    /// <summary>The raw payload of a section, for tooling and tests.</summary>
+    public ReadOnlySpan<byte> SectionPayload(int index) => _sections[index].Payload;
+
     /// <summary>Total raw bytes of every section (before compression).</summary>
     public long RawBytes
     {

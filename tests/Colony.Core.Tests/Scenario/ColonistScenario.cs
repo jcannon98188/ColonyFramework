@@ -200,7 +200,8 @@ public static class ColonistScenario
                 After = ["Starvation"],
                 Begin = (in SystemContext context) => state.PrepareRecover(context.JobCount),
                 ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Recover(in context, in chunk, health, hunger, target),
-                End = (in SystemContext context) => state.FinishRecover(context.JobCount),
+                WritesResources = ResourceMask.Of(stats),
+                End = (in SystemContext context) => state.FinishRecover(in context, stats),
             })
             .AddSystem(new SystemDefinition
             {
@@ -346,7 +347,6 @@ public static class ColonistScenario
         private int[] _count = new int[64];
         private int[] _immobile = new int[64];
         private int[] _recovered = new int[64];
-        private long _recoveredTotal;
 
         public ScenarioState(int foodTarget, bool sabotage)
         {
@@ -557,12 +557,16 @@ public static class ColonistScenario
             _recovered[context.JobIndex] = recovered;
         }
 
-        public void FinishRecover(int jobCount)
+        /// <summary>The running total lives in the ColonyStats Resource (World state), not in scenario scratch, so a loaded World continues it.</summary>
+        public void FinishRecover(in SystemContext context, ResourceType statsType)
         {
-            for (int j = 0; j < jobCount; j++)
+            long recovered = 0;
+            for (int j = 0; j < context.JobCount; j++)
             {
-                _recoveredTotal += _recovered[j];
+                recovered += _recovered[j];
             }
+
+            context.Resource<ColonyStats>(statsType).Recovered += recovered;
         }
 
         // ---- Stats (Late): per-chunk reduction combined in job order into the ColonyStats Resource. ----
@@ -620,7 +624,6 @@ public static class ColonistScenario
             stats.TotalEaten += context.Events<FoodEaten>(foodEaten).Length;
             stats.Failures += context.Events<StructuralFailure>(failures).Length;
             stats.ImmobileTicks += immobile;
-            stats.Recovered = _recoveredTotal;
         }
 
         // ---- FoodSpawner (Late, serial): top food back up, regrowing near where the FoodEaten events say it was eaten. ----
