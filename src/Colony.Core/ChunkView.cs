@@ -68,6 +68,14 @@ public readonly ref struct ChunkView
         return Span<T>(Offset<T>(type), PaddedCount);
     }
 
+    /// <summary>
+    /// The chunk's asleep bit: Systems with <see cref="SystemDefinition.SkipAsleepChunks"/> skip asleep chunks.
+    /// A structural change in the chunk wakes it. Set it only from a job that owns this chunk, or outside a Tick.
+    /// </summary>
+    public bool IsAsleep => _archetype.IsAsleep(ChunkIndex);
+
+    public void SetAsleep(bool asleep) => _archetype.SetAsleep(ChunkIndex, asleep);
+
     /// <summary>True while the chunk has had no structural change since the view was taken.</summary>
     public bool IsCurrent => ChunkIndex < _archetype.ChunkCount && _archetype.Version(ChunkIndex) == _version;
 

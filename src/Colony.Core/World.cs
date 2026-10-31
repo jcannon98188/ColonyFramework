@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Colony.Numerics;
 
 namespace Colony;
 
@@ -25,6 +26,8 @@ public sealed class World : IDisposable
     private long _removes;
     private long _staleSkipped;
     private bool _disposed;
+    private TickRunner? _runner;
+    private RandomSequence _sharedRandom;
 
     internal World(WorldSchema schema, WorldOptions options)
     {
@@ -35,9 +38,80 @@ public sealed class World : IDisposable
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
+        Random = new RandomSource(options.Seed, RootRandomKey);
+        _sharedRandom = new RandomSequence(Random.Derive("world"));
     }
 
+    /// <summary>Stream key of the World's root <see cref="RandomSource"/> ("WRLD").</summary>
+    private const ulong RootRandomKey = 0x5752_4C44UL;
+
     public WorldSchema Schema { get; }
+
+    /// <summary>The seed every random stream in this World derives from.</summary>
+    public ulong Seed => _options.Seed;
+
+    /// <summary>Root random stream (stateless). Systems get a per-System, per-Tick derivation in <see cref="SystemContext.Random"/>.</summary>
+    public RandomSource Random { get; }
+
+    /// <summary>
+    /// A World-owned random cursor for serial use (host code, <see cref="SystemDefinition.Begin"/>/<see cref="SystemDefinition.End"/>
+    /// hooks). Its counter is World state: saved and part of the World hash. Never draw from it inside a chunk job.
+    /// </summary>
+    public ref RandomSequence SharedRandom => ref _sharedRandom;
+
+    /// <summary>Ticks completed so far; the Tick about to run has this number.</summary>
+    public long CurrentTick { get; private set; }
+
+    /// <summary>Set when a System threw: the World no longer Ticks (spec section 4.3).</summary>
+    public WorldFault? Fault { get; private set; }
+
+    public bool IsFaulted => Fault.HasValue;
+
+    /// <summary>Threads a Tick runs on, including the caller; fixed when the first Tick starts.</summary>
+    public int WorkerCount => _runner?.WorkerCount ?? ResolveWorkerCount();
+
+    /// <summary>Monotonic counter of waves run, stamped on columns as they change (chunk skipping, spec section 4.3).</summary>
+    internal uint ChangeCounter;
+
+    /// <summary>
+    /// Runs one Tick: every Phase in order, Systems in waves on the worker pool, command buffers merged at
+    /// each Phase boundary, scratch reset at the end. Returns false, running nothing, when the
+    /// <see cref="WorldOptions.TickGate"/> holds the Tick. A System exception aborts the Tick, faults the
+    /// World and surfaces as <see cref="SystemFaultException"/>.
+    /// </summary>
+    public bool Tick()
+    {
+        ThrowIfDisposed();
+        if (Fault is { } fault)
+        {
+            throw new InvalidOperationException($"The World is faulted: System '{fault.SystemName}' threw during Tick {fault.Tick}.");
+        }
+
+        if (_options.TickGate is { } gate && !gate.TryPass())
+        {
+            return false;
+        }
+
+        _runner ??= new TickRunner(this, Schema.Schedule, ResolveWorkerCount());
+        try
+        {
+            _runner.RunTick(CurrentTick);
+        }
+        catch (SystemFaultException e)
+        {
+            Fault = e.Fault;
+            throw;
+        }
+
+        CurrentTick++;
+        return true;
+    }
+
+    /// <summary>Managed bytes the dedicated worker threads have allocated so far (0 after warm-up in a steady state).</summary>
+    public long WorkerAllocatedBytes => _runner?.WorkerAllocatedBytes ?? 0;
+
+    private int ResolveWorkerCount()
+        => _options.WorkerThreads > 0 ? _options.WorkerThreads : PhysicalCores.Count();
 
     /// <summary>True when this World validates refs and views, poisons freed memory and reports leaks.</summary>
     public bool DebugValidation { get; }
@@ -176,6 +250,7 @@ public sealed class World : IDisposable
         var archetype = GetOrCreateArchetype(signature);
         var (chunk, row) = archetype.AddRow(Allocator);
         archetype.ClearRow(chunk, row);
+        archetype.MarkChanged(chunk, ChangeCounter);
         var id = _entities.Allocate(archetype.Id, chunk, row);
         _nonFragmenting.EnsureCapacity(_entities.Capacity);
         ((ulong*)archetype.ChunkPointer(chunk))[row] = id.Value;
@@ -224,6 +299,7 @@ public sealed class World : IDisposable
         }
 
         int size = Schema.Sizes[componentId];
+        archetype.MarkChanged(_entities.ChunkOf(index), ChangeCounter);
         byte* destination = archetype.ChunkPointer(_entities.ChunkOf(index)) + archetype.OffsetOf(componentId) + (long)_entities.RowOf(index) * size;
         if (source is null)
         {
@@ -270,6 +346,7 @@ public sealed class World : IDisposable
         int sourceChunk = _entities.ChunkOf(index);
         int sourceRow = _entities.RowOf(index);
         var (chunk, row) = destination.AddRow(Allocator);
+        destination.MarkChanged(chunk, ChangeCounter);
         byte* to = destination.ChunkPointer(chunk);
         byte* from = source.ChunkPointer(sourceChunk);
         ((ulong*)to)[row] = ((ulong*)from)[sourceRow];
@@ -295,10 +372,21 @@ public sealed class World : IDisposable
 
     private void RemoveFromArchetype(Archetype archetype, int chunk, int row)
     {
+        int lastChunk = archetype.ChunkCount - 1;
         var moved = archetype.RemoveRow(chunk, row, Allocator);
         if (!moved.IsNull)
         {
             _entities.Relocate(moved.Index, chunk, row);
+        }
+
+        if (chunk < archetype.ChunkCount)
+        {
+            archetype.MarkChanged(chunk, ChangeCounter);
+        }
+
+        if (lastChunk != chunk && lastChunk < archetype.ChunkCount)
+        {
+            archetype.MarkChanged(lastChunk, ChangeCounter);
         }
     }
 
@@ -335,6 +423,7 @@ public sealed class World : IDisposable
         }
 
         _disposed = true;
+        _runner?.Dispose();
         for (int i = 0; i < _archetypeCount; i++)
         {
             _archetypes[i].ReturnAllChunks(Allocator);

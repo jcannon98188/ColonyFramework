@@ -6,6 +6,9 @@ namespace Colony;
 /// </summary>
 public sealed class WorldSchema
 {
+    /// <summary>Seed for the schema hash ("SCHM").</summary>
+    private const ulong SchemaHashSeed = 0x5343_484DUL;
+
     private readonly ComponentDescriptor[] _components;
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
@@ -16,23 +19,25 @@ public sealed class WorldSchema
         Dictionary<Type, int> byClrType,
         Dictionary<string, int> byName,
         List<Phase> phases,
+        SystemSchedule schedule,
         bool debugValidation)
     {
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
         _phases = [.. phases];
+        Schedule = schedule;
         DebugValidation = debugValidation;
 
         var sizes = new int[_components.Length];
         var slots = new int[_components.Length];
         int nonFragmenting = 0;
-        ulong hash = Fnv1a.Offset;
+        ulong hash = Hashing.Hash64.Compute(ReadOnlySpan<byte>.Empty, SchemaHashSeed);
         for (int i = 0; i < _components.Length; i++)
         {
             sizes[i] = _components[i].Size;
             slots[i] = _components[i].IsNonFragmenting ? nonFragmenting++ : -1;
-            hash = Fnv1a.Hash(_components[i].LayoutHash, hash);
+            hash = Hashing.Hash64.Combine(hash, _components[i].LayoutHash);
         }
 
         Sizes = sizes;
@@ -63,6 +68,25 @@ public sealed class WorldSchema
     internal int[] NonFragmentingSlots { get; }
 
     internal int NonFragmentingCount { get; }
+
+    internal SystemSchedule Schedule { get; }
+
+    /// <summary>Every registered System by id with the Phase, order and wave the scheduler gave it.</summary>
+    public ReadOnlySpan<SystemDescriptor> Systems => Schedule.Descriptors;
+
+    public SystemDescriptor System(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (ref readonly var descriptor in Systems)
+        {
+            if (string.Equals(descriptor.Name, name, StringComparison.Ordinal))
+            {
+                return descriptor;
+            }
+        }
+
+        throw new ArgumentException($"No System named '{name}' is registered in this schema.", nameof(name));
+    }
 
     /// <summary>The handle for the Component registered with CLR type <typeparamref name="T"/>.</summary>
     public ComponentType Component<T>() where T : unmanaged

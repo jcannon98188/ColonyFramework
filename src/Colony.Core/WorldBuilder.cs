@@ -9,10 +9,38 @@ namespace Colony;
 /// </summary>
 public sealed class WorldBuilder
 {
+    /// <summary>Seed for Component layout hashes ("LAYT"), so they never collide with a World hash by construction.</summary>
+    private const ulong LayoutHashSeed = 0x4C41_5954UL;
+
     private readonly List<ComponentDescriptor> _components = [];
     private readonly Dictionary<Type, int> _byClrType = [];
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
     private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
+    private readonly List<SystemDefinition> _systems = [];
+    private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Registers a System (spec section 4.3). Its id is the registration order, which breaks ordering ties.
+    /// Access conflicts, ordering cycles and unknown names are reported by <see cref="Build"/>.
+    /// </summary>
+    public WorldBuilder AddSystem(SystemDefinition system)
+    {
+        ArgumentNullException.ThrowIfNull(system);
+        ThrowIfBuilt();
+        ArgumentException.ThrowIfNullOrWhiteSpace(system.Name, nameof(system));
+        if (!_systemNames.Add(system.Name))
+        {
+            throw new ArgumentException($"A System named '{system.Name}' is already registered.", nameof(system));
+        }
+
+        if (system.Begin is null && system.ForEachChunk is null && system.End is null)
+        {
+            throw new ArgumentException($"System '{system.Name}' has no body: set Begin, ForEachChunk or End.", nameof(system));
+        }
+
+        _systems.Add(system);
+        return this;
+    }
     private bool _debugValidation = WorldSchema.DefaultDebugValidation;
     private bool _built;
 
@@ -84,9 +112,10 @@ public sealed class WorldBuilder
             throw new InvalidOperationException($"A schema may register at most {ComponentMask.Capacity} Components.");
         }
 
-        ulong hash = Fnv1a.Hash(name);
-        hash = Fnv1a.Hash((ulong)size, hash);
-        hash = Fnv1a.Hash((ulong)alignment, hash);
+        // Layout identity (spec section 4.1): the registered name, size and alignment, never the CLR type.
+        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), LayoutHashSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)size);
+        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
         _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags));
         _byName.Add(name, id);
         _byClrType.Add(typeof(T), id);
@@ -110,7 +139,8 @@ public sealed class WorldBuilder
     {
         ThrowIfBuilt();
         _built = true;
-        return new WorldSchema(_components, _byClrType, _byName, _phases, _debugValidation);
+        var schedule = SystemSchedule.Build(_systems, _phases, _components.Count);
+        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _debugValidation);
     }
 
     private void ThrowIfBuilt()

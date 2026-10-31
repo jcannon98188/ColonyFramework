@@ -25,6 +25,8 @@ internal sealed unsafe class Archetype
     private nint[] _chunks = new nint[4];
     private int[] _counts = new int[4];
     private uint[] _versions = new uint[4];
+    private uint[] _columnVersions;
+    private bool[] _asleep = new bool[4];
 
     public Archetype(int id, ComponentMask signature, WorldSchema schema)
     {
@@ -70,6 +72,7 @@ internal sealed unsafe class Archetype
         }
 
         UsedBytesPerChunk = offset;
+        _columnVersions = new uint[4 * Math.Max(1, ids.Length)];
     }
 
     public int Id { get; }
@@ -103,6 +106,48 @@ internal sealed unsafe class Archetype
 
     public uint Version(int chunk) => _versions[chunk];
 
+    // ---- Change versions and the asleep bit (spec section 4.3: chunk-level skipping). Not part of the World hash. ----
+
+    /// <summary>Records that every column of the chunk changed (a structural change) and wakes it.</summary>
+    public void MarkChanged(int chunk, uint changeCounter)
+    {
+        int columns = Math.Max(1, ComponentIds.Length);
+        Array.Fill(_columnVersions, changeCounter, chunk * columns, columns);
+        _asleep[chunk] = false;
+    }
+
+    /// <summary>Records that a System wrote the columns in <paramref name="writes"/> of one chunk.</summary>
+    public void MarkWritten(int chunk, ComponentMask writes, uint changeCounter)
+    {
+        int columns = Math.Max(1, ComponentIds.Length);
+        for (int i = 0; i < ComponentIds.Length; i++)
+        {
+            if (writes.Contains(new ComponentType(ComponentIds[i])))
+            {
+                _columnVersions[(chunk * columns) + i] = changeCounter;
+            }
+        }
+    }
+
+    /// <summary>True when any column in <paramref name="filter"/> changed after <paramref name="since"/>.</summary>
+    public bool HasChangedSince(int chunk, ComponentMask filter, uint since)
+    {
+        int columns = Math.Max(1, ComponentIds.Length);
+        for (int i = 0; i < ComponentIds.Length; i++)
+        {
+            if (filter.Contains(new ComponentType(ComponentIds[i])) && _columnVersions[(chunk * columns) + i] > since)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public bool IsAsleep(int chunk) => _asleep[chunk];
+
+    public void SetAsleep(int chunk, bool asleep) => _asleep[chunk] = asleep;
+
     /// <summary>Appends a row at the end of the last chunk, renting a new chunk when it is full. The row's bytes are unspecified.</summary>
     public (int Chunk, int Row) AddRow(SlabAllocator allocator)
     {
@@ -113,10 +158,13 @@ internal sealed unsafe class Archetype
                 Array.Resize(ref _chunks, _chunks.Length * 2);
                 Array.Resize(ref _counts, _counts.Length * 2);
                 Array.Resize(ref _versions, _versions.Length * 2);
+                Array.Resize(ref _asleep, _asleep.Length * 2);
+                Array.Resize(ref _columnVersions, _columnVersions.Length * 2);
             }
 
             _chunks[ChunkCount] = (nint)allocator.Rent();
             _counts[ChunkCount] = 0;
+            _asleep[ChunkCount] = false;
             ChunkCount++;
         }
 
