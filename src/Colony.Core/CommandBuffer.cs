@@ -45,6 +45,9 @@ public sealed class CommandBuffer
 
     internal World World { get; }
 
+    /// <summary>The System whose jobs record into this buffer, or -1 for a host buffer; named in failure events.</summary>
+    internal int OwnerSystemId { get; set; } = -1;
+
     /// <summary>Commands recorded since the last playback.</summary>
     public int Count { get; private set; }
 

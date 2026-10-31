@@ -28,7 +28,8 @@ public sealed class ResourceTests
         var clock = schema.Resource<ColonyClock>();
 
         Assert.Equal(clock, schema.Resource("clock"));
-        Assert.Equal(2, schema.Resources.Length);
+        Assert.Equal(3, schema.Resources.Length); // the built-in StructuralFailures queue is id 0
+        Assert.Equal(schema.StructuralFailures, schema.Resources[0].Type);
         Assert.Equal("weather", schema.DescribeResource(schema.Resource<Weather>()).Name);
         Assert.Equal(0, world.Resource<ColonyClock>(clock).Day);
 

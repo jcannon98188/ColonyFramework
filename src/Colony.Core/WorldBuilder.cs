@@ -25,6 +25,19 @@ public sealed class WorldBuilder
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
 
+    public WorldBuilder()
+    {
+        // Resource 0 in every schema: the queue that structural ops losing a conflict are reported on
+        // (spec section 4.1). Persistent, so load-then-continue delivers the same events.
+        StructuralFailures = AddResourceCore<StructuralFailure>(StructuralFailureQueueName, ResourceKind.EventQueue, persistent: true);
+    }
+
+    /// <summary>Registered name of the built-in <see cref="StructuralFailure"/> queue.</summary>
+    public const string StructuralFailureQueueName = "colony.structural-failure";
+
+    /// <summary>The built-in <see cref="StructuralFailure"/> event queue; declare it in <see cref="SystemDefinition.ReadsResources"/> to read it.</summary>
+    public ResourceType StructuralFailures { get; }
+
     /// <summary>
     /// Registers a System (spec section 4.3). Its id is the registration order, which breaks ordering ties.
     /// Access conflicts, ordering cycles and unknown names are reported by <see cref="Build"/>.

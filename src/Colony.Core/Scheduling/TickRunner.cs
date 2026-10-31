@@ -28,7 +28,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         _states = new SystemState[schedule.SystemCount];
         for (int i = 0; i < _states.Length; i++)
         {
-            _states[i] = new SystemState();
+            _states[i] = new SystemState { Id = i };
         }
 
         _pool = new WorkerPool(workerCount, this);
@@ -173,6 +173,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         for (int i = old; i < state.Buffers.Length; i++)
         {
             state.Buffers[i] = _world.CreateCommandBuffer();
+            state.Buffers[i].OwnerSystemId = state.Id;
         }
     }
 
@@ -238,19 +239,29 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
 
     private void Playback(SystemSchedule.PhasePlan plan)
     {
-        for (int k = 0; k < plan.Systems.Length; k++)
+        // Every Phase boundary is one structural epoch: an op whose Entity died in this epoch lost a
+        // same-Phase conflict; one whose Entity died earlier was stale when recorded.
+        _world.BeginPhaseMerge();
+        try
         {
-            var state = _states[plan.Systems[k]];
-            if (!state.Ran)
+            for (int k = 0; k < plan.Systems.Length; k++)
             {
-                continue;
-            }
+                var state = _states[plan.Systems[k]];
+                if (!state.Ran)
+                {
+                    continue;
+                }
 
-            int buffers = Math.Max(1, state.Jobs);
-            for (int j = 0; j < buffers; j++)
-            {
-                _world.Playback(state.Buffers[j]);
+                int buffers = Math.Max(1, state.Jobs);
+                for (int j = 0; j < buffers; j++)
+                {
+                    _world.Playback(state.Buffers[j]);
+                }
             }
+        }
+        finally
+        {
+            _world.EndPhaseMerge();
         }
     }
 
@@ -278,6 +289,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     private sealed class SystemState
     {
         public CommandBuffer[] Buffers = [];
+        public int Id;
         public int Jobs;
         public bool Ran;
         public uint LastRun;

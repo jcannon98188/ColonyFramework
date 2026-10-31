@@ -150,8 +150,11 @@ public sealed class WorldSchema
 
     public ReadOnlySpan<ComponentDescriptor> Components => _components;
 
-    /// <summary>Every registered Resource (values and event queues) in id order.</summary>
+    /// <summary>Every registered Resource (values and event queues) in id order; id 0 is always <see cref="StructuralFailures"/>.</summary>
     public ReadOnlySpan<ResourceDescriptor> Resources => _resources;
+
+    /// <summary>The built-in queue of <see cref="StructuralFailure"/> events (spec section 4.1).</summary>
+    public ResourceType StructuralFailures => _resources[0].Type;
 
     /// <summary>The handle for the Resource registered with CLR type <typeparamref name="T"/>.</summary>
     public ResourceType Resource<T>() where T : unmanaged

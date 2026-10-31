@@ -168,8 +168,8 @@ public sealed class EventTests
 
         Assert.Equal(HashAfterOneTick(EventOptions.None, emit: true), HashAfterOneTick(EventOptions.None, emit: false));
         Assert.NotEqual(HashAfterOneTick(EventOptions.Persistent, emit: true), HashAfterOneTick(EventOptions.Persistent, emit: false));
-        Assert.True(new WorldBuilder().AddEvent<Bell>("bell", EventOptions.Persistent).Build().Resources[0].IsPersistent);
-        Assert.False(new WorldBuilder().AddEvent<Bell>("bell").Build().Resources[0].IsPersistent);
+        Assert.True(new WorldBuilder().AddEvent<Bell>("bell", EventOptions.Persistent).Build().Resources[1].IsPersistent);
+        Assert.False(new WorldBuilder().AddEvent<Bell>("bell").Build().Resources[1].IsPersistent);
     }
 
     [Fact]

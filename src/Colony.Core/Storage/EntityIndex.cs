@@ -12,6 +12,7 @@ internal sealed class EntityIndex
     private int[] _chunk;
     private int[] _row;
     private uint[] _generation;
+    private uint[] _freedEpoch;
     private int[] _free;
     private int _freeCount;
 
@@ -22,6 +23,7 @@ internal sealed class EntityIndex
         _chunk = new int[capacity];
         _row = new int[capacity];
         _generation = new uint[capacity];
+        _freedEpoch = new uint[capacity];
         _free = new int[Math.Max(16, capacity / 4)];
         Array.Fill(_archetype, -1);
     }
@@ -67,9 +69,21 @@ internal sealed class EntityIndex
         return new EntityId(index, _generation[index]);
     }
 
-    public void Free(int index)
+    /// <summary>
+    /// True when <paramref name="id"/> named the Entity that was destroyed in the slot during structural
+    /// epoch <paramref name="epoch"/> (the current Phase's merge): the op lost a same-Phase conflict rather
+    /// than being stale from an earlier Phase.
+    /// </summary>
+    public bool DiedInEpoch(EntityId id, uint epoch)
+    {
+        int index = id.Index;
+        return (uint)index < (uint)HighWater && _freedEpoch[index] == epoch && _generation[index] == id.Generation + 1;
+    }
+
+    public void Free(int index, uint epoch)
     {
         _archetype[index] = -1;
+        _freedEpoch[index] = epoch;
         AliveCount--;
         if (_generation[index] < EntityId.MaxGeneration)
         {
@@ -109,6 +123,7 @@ internal sealed class EntityIndex
         Array.Resize(ref _chunk, capacity);
         Array.Resize(ref _row, capacity);
         Array.Resize(ref _generation, capacity);
+        Array.Resize(ref _freedEpoch, capacity);
         Array.Fill(_archetype, -1, HighWater, capacity - HighWater);
     }
 }

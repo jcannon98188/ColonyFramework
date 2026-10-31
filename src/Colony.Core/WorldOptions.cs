@@ -39,7 +39,11 @@ public readonly record struct LeakReport(int LeakedChunks, long LeakedBytes)
     public bool HasLeaks => LeakedChunks > 0;
 }
 
-/// <summary>Running totals of structural changes applied by command-buffer playback.</summary>
+/// <summary>
+/// Running totals of structural changes applied by command-buffer playback. <see cref="StaleSkipped"/>
+/// counts ops not applied because their Entity was dead (a lost same-Phase conflict or a stale id); each
+/// one also produced a <see cref="StructuralFailure"/> event.
+/// </summary>
 public readonly record struct StructuralCounters(long Creates, long Destroys, long Adds, long Removes, long StaleSkipped)
 {
     public long Total => Creates + Destroys + Adds + Removes;

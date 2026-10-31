@@ -26,6 +26,7 @@ public sealed partial class World : IDisposable
     private long _adds;
     private long _removes;
     private long _staleSkipped;
+    private int _playbackOwner = -1;
     private bool _disposed;
     private TickRunner? _runner;
     private RandomSequence _sharedRandom;
@@ -155,7 +156,47 @@ public sealed partial class World : IDisposable
             throw new ArgumentException("The command buffer belongs to another World.", nameof(buffer));
         }
 
-        buffer.Playback();
+        if (!_inPhaseMerge)
+        {
+            StructuralEpoch++;
+        }
+
+        _playbackOwner = buffer.OwnerSystemId;
+        try
+        {
+            buffer.Playback();
+        }
+        finally
+        {
+            _playbackOwner = -1;
+        }
+    }
+
+    /// <summary>
+    /// Counts sync points: each Phase boundary (one merge of every System's buffers) and each host
+    /// <see cref="Playback"/> outside a Tick. An op whose Entity died in the current epoch lost a same-Phase
+    /// conflict (spec section 4.1); one whose Entity died earlier was stale.
+    /// </summary>
+    internal uint StructuralEpoch;
+
+    private bool _inPhaseMerge;
+
+    /// <summary>Brackets a Phase boundary so every buffer merged in it shares one epoch.</summary>
+    internal void BeginPhaseMerge()
+    {
+        StructuralEpoch++;
+        _inPhaseMerge = true;
+    }
+
+    internal void EndPhaseMerge() => _inPhaseMerge = false;
+
+    /// <summary>Records that an op was not applied: counted, and reported on the <see cref="WorldSchema.StructuralFailures"/> queue for the next Phase.</summary>
+    private unsafe void ReportFailure(EntityId id, StructuralOp op, int componentId)
+    {
+        _staleSkipped++;
+        var reason = _entities.DiedInEpoch(id, StructuralEpoch) ? StructuralFailureReason.Conflict : StructuralFailureReason.Stale;
+        var failure = new StructuralFailure(id, op, componentId < 0 ? default : new ComponentType(componentId), _playbackOwner, reason);
+        _resources.Append(0, (byte*)&failure);
     }
 
     /// <summary>
@@ -291,14 +332,14 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Destroy, -1);
             return false;
         }
 
         int index = id.Index;
         RemoveFromArchetype(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), _entities.RowOf(index));
         _nonFragmenting.ClearEntity(index);
-        _entities.Free(index);
+        _entities.Free(index, StructuralEpoch);
         _destroys++;
         return true;
     }
@@ -308,7 +349,7 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Add, componentId);
             return false;
         }
 
@@ -347,7 +388,7 @@ public sealed partial class World : IDisposable
     {
         if (!_entities.IsAlive(id))
         {
-            _staleSkipped++;
+            ReportFailure(id, StructuralOp.Remove, componentId);
             return false;
         }
 
