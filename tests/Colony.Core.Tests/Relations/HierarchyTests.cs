@@ -3,7 +3,7 @@ namespace Colony.Core.Tests.Relations;
 /// <summary>AC #2: the built-in parent/child hierarchy with cascade delete removes descendants deterministically without managed allocation.</summary>
 public sealed class HierarchyTests
 {
-    private static WorldSchema Schema(bool cascade = true, int initialCapacity = 0)
+    private static WorldSchema Schema(bool cascade = true)
     {
         var builder = new WorldBuilder().AddComponent<Position>("position").DebugValidation(false);
         builder.AddHierarchy(cascade);

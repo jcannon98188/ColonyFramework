@@ -42,7 +42,19 @@ public sealed partial class World
                 state.Append(new ReadOnlySpan<byte>(chunk, rows * Archetype.EntityColumnElementSize));
                 for (int i = 0; i < archetype.ComponentIds.Length; i++)
                 {
-                    state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                    ref readonly var descriptor = ref Schema.Components[archetype.ComponentIds[i]];
+                    if (descriptor.IsBuffer)
+                    {
+                        for (int row = 0; row < rows; row++)
+                        {
+                            HashBuffer(ref state, chunk + archetype.Offsets[i] + (long)row * descriptor.Size, in descriptor);
+                        }
+                    }
+                    else
+                    {
+                        state.Append(new ReadOnlySpan<byte>(chunk + archetype.Offsets[i], rows * archetype.Sizes[i]));
+                    }
+
                     state.Append(new ReadOnlySpan<byte>(chunk + archetype.EnabledOffsets[i], (rows + 7) / 8));
                 }
             }
@@ -57,12 +69,21 @@ public sealed partial class World
             }
 
             int size = Schema.Sizes[id];
+            ref readonly var descriptor = ref Schema.Components[id];
             for (int index = 0; index < _entities.HighWater; index++)
             {
                 if (_entities.IsAliveSlot(index) && _nonFragmenting.Has(slot, index))
                 {
                     state.Append(index);
-                    state.Append(new ReadOnlySpan<byte>(_nonFragmenting.Pointer(slot, index), size));
+                    if (descriptor.IsBuffer)
+                    {
+                        HashBuffer(ref state, _nonFragmenting.Pointer(slot, index), in descriptor);
+                    }
+                    else
+                    {
+                        state.Append(new ReadOnlySpan<byte>(_nonFragmenting.Pointer(slot, index), size));
+                    }
+
                     state.Append(_nonFragmenting.IsEnabled(slot, index) ? (byte)1 : (byte)0);
                 }
             }

@@ -39,6 +39,7 @@ public sealed partial class World : IDisposable
         DebugValidation = schema.DebugValidation;
         Allocator = new SlabAllocator(poison: DebugValidation);
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
+        _bufferHeap = new BufferHeap(Allocator);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
         _relations = new RelationIndex(schema.RelationCount, _entities.Capacity);
@@ -476,6 +477,11 @@ public sealed partial class World : IDisposable
             DetachRelations(index);
         }
 
+        if (Schema.HasBufferComponents)
+        {
+            FreeBuffers(index);
+        }
+
         RemoveFromArchetype(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), _entities.RowOf(index));
         _nonFragmenting.ClearEntity(index);
         _entities.Free(index, StructuralEpoch);
@@ -498,8 +504,14 @@ public sealed partial class World : IDisposable
 
         int index = id.Index;
         int slot = Schema.NonFragmentingSlots[componentId];
+        bool isBuffer = Schema.Components[componentId].IsBuffer;
         if (slot >= 0)
         {
+            if (isBuffer && _nonFragmenting.Has(slot, index))
+            {
+                FreeBuffer(_nonFragmenting.Pointer(slot, index));
+            }
+
             _nonFragmenting.Set(slot, index, source);
             _adds++;
             return true;
@@ -509,6 +521,10 @@ public sealed partial class World : IDisposable
         if (!archetype.Has(componentId))
         {
             archetype = MoveTo(index, archetype, GetOrCreateArchetype(archetype.Signature.With(new ComponentType(componentId))));
+        }
+        else if (isBuffer)
+        {
+            FreeBuffer(archetype.ChunkPointer(_entities.ChunkOf(index)) + archetype.OffsetOf(componentId) + (long)_entities.RowOf(index) * Schema.Sizes[componentId]);
         }
 
         int size = Schema.Sizes[componentId];
@@ -527,7 +543,7 @@ public sealed partial class World : IDisposable
         return true;
     }
 
-    internal bool RemoveComponent(EntityId id, int componentId)
+    internal unsafe bool RemoveComponent(EntityId id, int componentId)
     {
         if (!_entities.IsAlive(id))
         {
@@ -545,6 +561,11 @@ public sealed partial class World : IDisposable
                 UnlinkOutgoing(relation, slot, index);
             }
 
+            if (Schema.Components[componentId].IsBuffer && _nonFragmenting.Has(slot, index))
+            {
+                FreeBuffer(_nonFragmenting.Pointer(slot, index));
+            }
+
             _nonFragmenting.Remove(slot, index);
         }
         else
@@ -552,6 +573,11 @@ public sealed partial class World : IDisposable
             var archetype = _archetypes[_entities.ArchetypeOf(index)];
             if (archetype.Has(componentId))
             {
+                if (Schema.Components[componentId].IsBuffer)
+                {
+                    FreeBuffer(archetype.ChunkPointer(_entities.ChunkOf(index)) + archetype.OffsetOf(componentId) + (long)_entities.RowOf(index) * Schema.Sizes[componentId]);
+                }
+
                 MoveTo(index, archetype, GetOrCreateArchetype(archetype.Signature.Without(new ComponentType(componentId))));
             }
         }
@@ -617,7 +643,7 @@ public sealed partial class World : IDisposable
             return archetype;
         }
 
-        archetype = new Archetype(_archetypeCount, signature, Schema);
+        archetype = new Archetype(_archetypeCount, signature, Schema, _bufferHeap);
         if (_archetypeCount == _archetypes.Length)
         {
             Array.Resize(ref _archetypes, _archetypes.Length * 2);
@@ -655,6 +681,7 @@ public sealed partial class World : IDisposable
         }
 
         Scratch.Dispose();
+        _bufferHeap.Dispose();
         _nonFragmenting.Dispose();
         _resources.Dispose();
         var report = new LeakReport(Allocator.ChunksInUse, (long)Allocator.ChunksInUse * SlabAllocator.ChunkSize);

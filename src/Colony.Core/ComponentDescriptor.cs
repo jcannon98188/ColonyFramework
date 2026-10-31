@@ -27,6 +27,9 @@ public readonly record struct ComponentDescriptor(
     /// <summary>Elements a buffer Component stores inline before overflowing; 0 otherwise.</summary>
     public int InlineCapacity { get; init; }
 
+    /// <summary>Byte offset of a buffer Component's inline storage; 0 otherwise.</summary>
+    internal int InlineOffset { get; init; }
+
     /// <summary>The fields of the layout (spec section 4.1); empty when the Component was registered by name only.</summary>
     public System.Collections.Immutable.ImmutableArray<ComponentField> Fields { get; init; } = System.Collections.Immutable.ImmutableArray<ComponentField>.Empty;
 }

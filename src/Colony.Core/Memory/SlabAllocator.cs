@@ -18,6 +18,7 @@ internal sealed unsafe class SlabAllocator : IDisposable
     public const byte PoisonByte = 0xDD;
 
     private readonly bool _poison;
+    private readonly Lock _lock = new();
     private nint[] _slabs = new nint[4];
     private int _slabCount;
     private nint[] _free = new nint[ChunksPerSlab];
@@ -37,39 +38,48 @@ internal sealed unsafe class SlabAllocator : IDisposable
 
     public long ReservedBytes => (long)_slabCount * SlabSize;
 
-    /// <summary>Rents a 64 KiB chunk. Contents are unspecified (poisoned in debug, zero when fresh).</summary>
+    /// <summary>
+    /// Rents a 64 KiB chunk. Contents are unspecified (poisoned in debug, zero when fresh). Serialised by a
+    /// lock: the scratch arena and the buffer heap rent from worker threads during a wave.
+    /// </summary>
     public byte* Rent()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_freeCount == 0)
+        lock (_lock)
         {
-            AddSlab();
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_freeCount == 0)
+            {
+                AddSlab();
+            }
 
-        ChunksInUse++;
-        if (ChunksInUse > PeakChunksInUse)
-        {
-            PeakChunksInUse = ChunksInUse;
-        }
+            ChunksInUse++;
+            if (ChunksInUse > PeakChunksInUse)
+            {
+                PeakChunksInUse = ChunksInUse;
+            }
 
-        return (byte*)_free[--_freeCount];
+            return (byte*)_free[--_freeCount];
+        }
     }
 
     public void Return(byte* chunk)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (chunk is null || !Owns(chunk))
+        lock (_lock)
         {
-            throw new InvalidOperationException("The chunk being returned does not belong to this allocator.");
-        }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (chunk is null || !Owns(chunk))
+            {
+                throw new InvalidOperationException("The chunk being returned does not belong to this allocator.");
+            }
 
-        if (_poison)
-        {
-            NativeMemory.Fill(chunk, ChunkSize, PoisonByte);
-        }
+            if (_poison)
+            {
+                NativeMemory.Fill(chunk, ChunkSize, PoisonByte);
+            }
 
-        ChunksInUse--;
-        _free[_freeCount++] = (nint)chunk;
+            ChunksInUse--;
+            _free[_freeCount++] = (nint)chunk;
+        }
     }
 
     /// <summary>True when <paramref name="pointer"/> is a chunk boundary inside one of the slabs.</summary>

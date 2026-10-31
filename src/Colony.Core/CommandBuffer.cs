@@ -88,6 +88,11 @@ public sealed class CommandBuffer
             throw new ArgumentException($"{typeof(T).Name} is {Unsafe.SizeOf<T>()} bytes but Component '{_schema.Describe(type).Name}' is {size} bytes.", nameof(T));
         }
 
+        if (_schema.Components[type.Id].IsBuffer && Unsafe.As<T, BufferHeader>(ref Unsafe.AsRef(in value)).Handle != 0)
+        {
+            throw new ArgumentException($"The buffer Component value owns overflow storage and cannot be copied; add elements through World.GetBuffer or ChunkView.Buffer instead.", nameof(value));
+        }
+
         byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
         *p = (byte)Kind.Add;
         Unsafe.WriteUnaligned(p + 1, entity.Value);

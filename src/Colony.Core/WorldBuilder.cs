@@ -173,8 +173,54 @@ public sealed class WorldBuilder
         return this;
     }
 
+    /// <summary>Seed mixed into a buffer Component's layout hash ("BUFR").</summary>
+    private const ulong BufferLayoutSeed = 0x4255_4652UL;
+
+    /// <summary>
+    /// Registers a buffer Component (spec section 4.1): a <see cref="BufferComponent{TElement, TInline}"/>
+    /// holding <typeparamref name="TElement"/>s inline in <typeparamref name="TInline"/> (its size must be a
+    /// positive multiple of the element size; <see cref="Inline4{T}"/> .. <see cref="Inline32{T}"/> are
+    /// provided) and overflowing to the World's size-class allocator. Access it with
+    /// <see cref="World.GetBuffer{TElement}"/> or <see cref="ChunkView.Buffer{TElement}"/>; overflow counts
+    /// are in <see cref="World.BufferCounters"/>.
+    /// </summary>
+    public WorldBuilder AddBufferComponent<TElement, TInline>(string name, ComponentOptions flags = ComponentOptions.None)
+        where TElement : unmanaged
+        where TInline : unmanaged
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if ((flags & (ComponentOptions.Relation | ComponentOptions.Buffer)) != 0)
+        {
+            throw new ArgumentException($"Component '{name}': the Relation and Buffer flags are set by AddRelation and AddBufferComponent, not passed in.", nameof(flags));
+        }
+
+        ThrowIfBuilt();
+        int elementSize = Unsafe.SizeOf<TElement>();
+        int inlineBytes = Unsafe.SizeOf<TInline>();
+        if (inlineBytes % elementSize != 0)
+        {
+            throw new ArgumentException($"Buffer Component '{name}': {typeof(TInline).Name} is {inlineBytes} bytes, not a multiple of the {elementSize} byte element.", nameof(TInline));
+        }
+
+        if (_byClrType.ContainsKey(typeof(BufferComponent<TElement, TInline>)))
+        {
+            throw new ArgumentException($"The type BufferComponent<{typeof(TElement).Name}, {typeof(TInline).Name}> is already registered as a Component.", nameof(TInline));
+        }
+
+        int size = Unsafe.SizeOf<BufferComponent<TElement, TInline>>();
+        int alignment = Unsafe.SizeOf<AlignmentProbe<BufferComponent<TElement, TInline>>>() - size;
+        int inlineCapacity = inlineBytes / elementSize;
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
+        hash = Hashing.Hash64.Combine(hash, BufferLayoutSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)elementSize);
+        hash = Hashing.Hash64.Combine(hash, (ulong)inlineCapacity);
+        int id = AddComponentCore(name, size, alignment, hash, flags | ComponentOptions.Buffer, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty, elementSize, inlineCapacity, BufferComponent<TElement, TInline>.InlineOffset);
+        _byClrType.Add(typeof(BufferComponent<TElement, TInline>), id);
+        return this;
+    }
+
     /// <summary>Registers a Component by layout alone (no CLR type binding); returns its id.</summary>
-    private int AddComponentCore(string name, int size, int alignment, ulong layoutHash, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields, int elementSize, int inlineCapacity)
+    private int AddComponentCore(string name, int size, int alignment, ulong layoutHash, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields, int elementSize, int inlineCapacity, int inlineOffset = 0)
     {
         ThrowIfBuilt();
         if (_byName.ContainsKey(name))
@@ -201,6 +247,7 @@ public sealed class WorldBuilder
             Fields = fields,
             ElementSize = elementSize,
             InlineCapacity = inlineCapacity,
+            InlineOffset = inlineOffset,
         });
         _byName.Add(name, id);
         return id;
