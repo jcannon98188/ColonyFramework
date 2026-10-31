@@ -36,6 +36,9 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
 
     public override ulong LayoutHash => _layoutHash;
 
+    /// <summary>The chunk grid shared by every World of this schema; available after <see cref="Freeze"/>.</summary>
+    internal ChunkLayout Layout => _layout ?? throw new InvalidOperationException("The Fields builder has not been frozen yet.");
+
     /// <summary>
     /// Registers a Field of cells <typeparamref name="T"/> under a stable <paramref name="name"/>; every
     /// chunk starts uniform with <paramref name="initialValue"/>. The layout hash covers name, size and

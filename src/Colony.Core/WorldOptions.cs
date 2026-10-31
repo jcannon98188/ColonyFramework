@@ -25,6 +25,9 @@ public sealed class WorldOptions
     /// use. When null, a leak throws <see cref="InvalidOperationException"/> from <see cref="World.Dispose"/>.
     /// </summary>
     public IDebugListener? DebugListener { get; init; }
+
+    /// <summary>Profiling level, record ring, allocation check, Tick budget, logging and hash trail (spec section 10.1).</summary>
+    public Colony.Diagnostics.DiagnosticsOptions Diagnostics { get; init; } = Colony.Diagnostics.DiagnosticsOptions.Default;
 }
 
 /// <summary>Sink for debug-validation findings (spec section 4.2). Release builds never call it.</summary>
@@ -39,7 +42,24 @@ public readonly record struct LeakReport(int LeakedChunks, long LeakedBytes)
     public bool HasLeaks => LeakedChunks > 0;
 }
 
-/// <summary>Running totals of structural changes applied by command-buffer playback.</summary>
+/// <summary>
+/// Running totals kept by the scheduler (spec section 4.3): System runs and rate skips (every-N-Ticks),
+/// chunk jobs run, and chunks skipped because they were asleep, because no filtered column changed, or
+/// because a queried Component was disabled on every row. A skipped chunk is never visited.
+/// </summary>
+public record struct SchedulerCounters(
+    long SystemRuns,
+    long SystemsSkippedByRate,
+    long ChunksVisited,
+    long ChunksSkippedAsleep,
+    long ChunksSkippedByChangeFilter,
+    long ChunksSkippedDisabled);
+
+/// <summary>
+/// Running totals of structural changes applied by command-buffer playback. <see cref="StaleSkipped"/>
+/// counts ops not applied because their Entity was dead (a lost same-Phase conflict or a stale id); each
+/// one also produced a <see cref="StructuralFailure"/> event.
+/// </summary>
 public readonly record struct StructuralCounters(long Creates, long Destroys, long Adds, long Removes, long StaleSkipped)
 {
     public long Total => Creates + Destroys + Adds + Removes;

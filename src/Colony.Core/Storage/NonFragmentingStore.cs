@@ -12,6 +12,7 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
     private readonly int[] _sizes;
     private readonly byte*[] _columns;
     private readonly ulong*[] _presence;
+    private readonly ulong*[] _enabled;
     private int _capacity;
     private bool _disposed;
 
@@ -29,6 +30,7 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
 
         _columns = new byte*[_sizes.Length];
         _presence = new ulong*[_sizes.Length];
+        _enabled = new ulong*[_sizes.Length];
         EnsureCapacity(initialCapacity);
     }
 
@@ -58,6 +60,8 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
             nuint newWords = (nuint)((capacity + 63) / 64) * sizeof(ulong);
             _presence[slot] = (ulong*)NativeMemory.Realloc(_presence[slot], newWords);
             NativeMemory.Clear((byte*)_presence[slot] + oldWords, newWords - oldWords);
+            _enabled[slot] = (ulong*)NativeMemory.Realloc(_enabled[slot], newWords);
+            NativeMemory.Clear((byte*)_enabled[slot] + oldWords, newWords - oldWords);
         }
 
         _capacity = capacity;
@@ -67,10 +71,26 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
 
     public byte* Pointer(int slot, int index) => _columns[slot] + (long)index * _sizes[slot];
 
-    /// <summary>Marks the Component present and copies <paramref name="source"/> (or zeroes the value when null).</summary>
+    public bool IsEnabled(int slot, int index) => (_enabled[slot][index >> 6] & (1UL << (index & 63))) != 0;
+
+    public void SetEnabled(int slot, int index, bool enabled)
+    {
+        ulong bit = 1UL << (index & 63);
+        if (enabled)
+        {
+            _enabled[slot][index >> 6] |= bit;
+        }
+        else
+        {
+            _enabled[slot][index >> 6] &= ~bit;
+        }
+    }
+
+    /// <summary>Marks the Component present and enabled and copies <paramref name="source"/> (or zeroes the value when null).</summary>
     public void Set(int slot, int index, byte* source)
     {
         _presence[slot][index >> 6] |= 1UL << (index & 63);
+        _enabled[slot][index >> 6] |= 1UL << (index & 63);
         byte* destination = Pointer(slot, index);
         if (source is null)
         {
@@ -82,7 +102,11 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
         }
     }
 
-    public void Remove(int slot, int index) => _presence[slot][index >> 6] &= ~(1UL << (index & 63));
+    public void Remove(int slot, int index)
+    {
+        _presence[slot][index >> 6] &= ~(1UL << (index & 63));
+        _enabled[slot][index >> 6] &= ~(1UL << (index & 63));
+    }
 
     /// <summary>Drops every non-fragmenting Component of a destroyed Entity.</summary>
     public void ClearEntity(int index)
@@ -105,8 +129,10 @@ internal sealed unsafe class NonFragmentingStore : IDisposable
         {
             NativeMemory.Free(_columns[slot]);
             NativeMemory.Free(_presence[slot]);
+            NativeMemory.Free(_enabled[slot]);
             _columns[slot] = null;
             _presence[slot] = null;
+            _enabled[slot] = null;
         }
     }
 }

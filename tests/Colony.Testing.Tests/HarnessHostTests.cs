@@ -66,7 +66,7 @@ public sealed class HarnessHostTests
             Assert.Skip("Publish the AOT host first: dotnet publish tests/Colony.Testing.AotHost -c Release -r <rid> (see CONVENTIONS, TASK-10).");
         }
 
-        long? colonist = PublishedHost.CompareWithJit(exe, new ColonistScenario(), Options, out var jit, out var aot);
+        long? colonist = PublishedHost.CompareWithJit(exe, new ColonistHarnessScenario(), Options, out var jit, out var aot);
         Assert.True(colonist is null, $"colonist: AOT diverged from JIT at Tick {colonist}\nJIT:\n{jit.Describe()}\nAOT:\n{aot.Describe()}");
         Assert.Equal(2, aot.Runs.Count);
 

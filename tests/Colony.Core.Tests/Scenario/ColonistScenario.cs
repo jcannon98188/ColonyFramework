@@ -1,12 +1,15 @@
-using Colony.Testing;
+using Colony;
 
-namespace Colony.Testing.Tests.Scenarios;
+namespace Colony.Scenario;
 
-// The acceptance oracle for TASK-7 (spec "Core slice" acceptance): the ECS prototype's colonist scenario
-// rebuilt on the real World.Tick with hand-written Systems. 100k colonists wander, get hungry, walk to the
-// nearest food and eat it (destroying it through command buffers); food regrows; 1% of the colony churns
-// every Tick. Run through Colony.Testing's harnesses (TASK-10). This file has no test-framework dependency:
-// the Native AOT host (tests/Colony.Testing.AotHost) compiles it as well.
+// The acceptance oracle for TASK-7 (spec "Core slice" acceptance), extended by TASK-8: the ECS prototype's
+// colonist scenario rebuilt on the real World.Tick with hand-written Systems. 100k colonists wander, get
+// hungry, walk to the nearest food and eat it (destroying it through command buffers; a second colonist
+// reaching the same food loses the conflict and produces a StructuralFailure event); food regrows where
+// FoodEaten events say it was eaten; starved colonists have their target disabled (an enable bit, not a
+// structural change) and an every-4-Ticks Recover System puts them back on their feet; Stats writes a
+// ColonyStats Resource that the World hash covers; 1% of the colony churns every Tick.
+// This file has no test-framework dependency: the Native AOT host compiles it as well.
 // Component names are prefixed so they never collide with the test project's own Components.
 
 public struct ColonistPosition
@@ -36,7 +39,26 @@ public struct FoodItem
     public int Nutrition;
 }
 
-public sealed class ColonistScenario : Scenario
+/// <summary>Event emitted from the Eat chunk jobs: where food was eaten this Tick.</summary>
+public struct FoodEaten
+{
+    public int X;
+    public int Y;
+}
+
+/// <summary>Resource written by Stats at the end of every Tick; part of the World hash.</summary>
+public struct ColonyStats
+{
+    public long HungerTenths;
+    public int Starving;
+    public int Colonists;
+    public long TotalEaten;
+    public long Failures;
+    public long ImmobileTicks;
+    public long Recovered;
+}
+
+public static class ColonistScenario
 {
     public const int DefaultColonists = 100_000;
     public const int DefaultFood = 5_000;
@@ -48,23 +70,18 @@ public sealed class ColonistScenario : Scenario
     public const float HungryThreshold = 50f;
     public const float StarvingThreshold = 100f;
     public const int ChurnPercent = 1;
+    public const int RecoverEvery = 4;
+    public const int RecoverHealth = 10;
 
-    /// <summary>The negative control is a separate scenario name so it never shares a golden file with the real one.</summary>
-    public override string Name => Sabotage ? "colonist-negative-control" : "colonist";
+    /// <summary>Builds the schema and Systems. The scenario's scratch state is per schema, so create one World per schema.</summary>
+    public static WorldSchema BuildSchema(bool sabotage = false, int foodTarget = DefaultFood)
+        => Compose(new WorldBuilder(), sabotage, foodTarget).Build();
 
-    public override ulong Seed { get; init; } = DefaultSeed;
-
-    public int Colonists { get; init; } = DefaultColonists;
-
-    public int Food { get; init; } = DefaultFood;
-
-    /// <summary>Negative control: key the Wander RNG by worker thread, which must break the cross-thread hash comparison.</summary>
-    public bool Sabotage { get; init; }
-
-    public override int InitialEntityCapacity => (Colonists + Food) * 2;
-
-    /// <summary>Registers the Components and Systems. The scenario's scratch state is per schema, so the harness composes once per World.</summary>
-    public override void Compose(WorldBuilder builder)
+    /// <summary>
+    /// Adds the scenario's Components, Resources and Systems to <paramref name="builder"/> without building it:
+    /// the Colony.Testing harness composes its own builder (see Colony.Testing.Tests' ColonistHarnessScenario).
+    /// </summary>
+    public static WorldBuilder Compose(WorldBuilder builder, bool sabotage = false, int foodTarget = DefaultFood)
     {
         ArgumentNullException.ThrowIfNull(builder);
         builder
@@ -73,17 +90,22 @@ public sealed class ColonistScenario : Scenario
             .AddComponent<ColonistHunger>("colonist.hunger")
             .AddComponent<ColonistHealth>("colonist.health")
             .AddComponent<FoodItem>("food")
+            .AddEvent<FoodEaten>("food.eaten")
+            .AddResource<ColonyStats>("colony.stats")
             .DebugValidation(false);
         var position = builder.Component<ColonistPosition>();
         var target = builder.Component<ColonistTarget>();
         var hunger = builder.Component<ColonistHunger>();
         var health = builder.Component<ColonistHealth>();
         var food = builder.Component<FoodItem>();
+        var foodEaten = builder.Resource<FoodEaten>();
+        var stats = builder.Resource<ColonyStats>();
+        var failures = builder.StructuralFailures;
         var colonist = ComponentMask.Of(position, target, hunger, health);
         var foodSignature = ComponentMask.Of(position, food);
-        var state = new ScenarioState(Food, Sabotage);
+        var state = new ScenarioState(foodTarget, sabotage);
 
-        builder
+        return builder
             .AddSystem(new SystemDefinition
             {
                 Name = "FoodIndex",
@@ -113,9 +135,10 @@ public sealed class ColonistScenario : Scenario
                 Writes = ComponentMask.Of(position),
                 ForEachChunk = (in SystemContext _, in ChunkView chunk) =>
                 {
+                    // Only colonists whose target is enabled move: Starvation disables it, Recover enables it again.
                     var positions = chunk.Column<ColonistPosition>(position);
                     var targets = chunk.Column<ColonistTarget>(target);
-                    for (int i = 0; i < positions.Length; i++)
+                    foreach (int i in chunk.EnabledRows(target))
                     {
                         positions[i].X += Math.Clamp(targets[i].X - positions[i].X, -Speed, Speed);
                         positions[i].Y += Math.Clamp(targets[i].Y - positions[i].Y, -Speed, Speed);
@@ -129,10 +152,9 @@ public sealed class ColonistScenario : Scenario
                 All = colonist,
                 Reads = ComponentMask.Of(position),
                 Writes = ComponentMask.Of(hunger, target),
+                WritesResources = ResourceMask.Of(foodEaten),
                 After = ["Hunger", "Move"],
-                Begin = (in SystemContext context) => state.PrepareEat(context.JobCount),
-                ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Eat(in context, in chunk, position, target, hunger),
-                End = (in SystemContext context) => state.FinishEat(context.JobCount),
+                ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Eat(in context, in chunk, position, target, hunger, foodEaten),
             })
             .AddSystem(new SystemDefinition
             {
@@ -149,8 +171,8 @@ public sealed class ColonistScenario : Scenario
                 Name = "Starvation",
                 Phase = Phase.Simulate,
                 Reads = ComponentMask.Of(hunger),
-                Writes = ComponentMask.Of(health),
-                After = ["Eat"],
+                Writes = ComponentMask.Of(health, target),
+                After = ["Eat", "Wander"],
                 ForEachChunk = (in SystemContext _, in ChunkView chunk) =>
                 {
                     var hungers = chunk.Column<ColonistHunger>(hunger);
@@ -160,25 +182,44 @@ public sealed class ColonistScenario : Scenario
                         if (hungers[i].Value > StarvingThreshold)
                         {
                             healths[i].Value = Math.Max(0, healths[i].Value - 1);
+                            if (healths[i].Value == 0)
+                            {
+                                chunk.SetEnabled(target, i, false);
+                            }
                         }
                     }
                 },
             })
             .AddSystem(new SystemDefinition
             {
+                Name = "Recover",
+                Phase = Phase.Simulate,
+                Every = RecoverEvery,
+                Writes = ComponentMask.Of(health, hunger, target),
+                IgnoreEnableBits = true,
+                After = ["Starvation"],
+                Begin = (in SystemContext context) => state.PrepareRecover(context.JobCount),
+                ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Recover(in context, in chunk, health, hunger, target),
+                End = (in SystemContext context) => state.FinishRecover(context.JobCount),
+            })
+            .AddSystem(new SystemDefinition
+            {
                 Name = "Stats",
                 Phase = Phase.Late,
-                Reads = ComponentMask.Of(hunger, health),
+                Reads = ComponentMask.Of(hunger, health, target),
+                ReadsResources = ResourceMask.Of(foodEaten, failures),
+                WritesResources = ResourceMask.Of(stats),
                 Begin = (in SystemContext context) => state.PrepareStats(context.JobCount),
-                ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Stats(in context, in chunk, hunger, health),
-                End = (in SystemContext context) => state.FinishStats(context.JobCount),
+                ForEachChunk = (in SystemContext context, in ChunkView chunk) => state.Stats(in context, in chunk, hunger, health, target),
+                End = (in SystemContext context) => state.FinishStats(in context, stats, foodEaten, failures),
             })
             .AddSystem(new SystemDefinition
             {
                 Name = "FoodSpawner",
                 Phase = Phase.Late,
                 Reads = ComponentMask.Of(food),
-                Begin = (in SystemContext context) => state.SpawnFood(in context, position, food, foodSignature),
+                ReadsResources = ResourceMask.Of(foodEaten),
+                Begin = (in SystemContext context) => state.SpawnFood(in context, position, food, foodSignature, foodEaten),
             })
             .AddSystem(new SystemDefinition
             {
@@ -190,8 +231,23 @@ public sealed class ColonistScenario : Scenario
             });
     }
 
-    /// <summary>Populates the World with colonists and food, drawing from <see cref="World.Random"/>, ready to Tick.</summary>
-    public override void Populate(World world)
+    /// <summary>Creates a World on <paramref name="workers"/> threads populated with colonists and food, ready to Tick.</summary>
+    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood, Colony.Diagnostics.DiagnosticsOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(schema);
+        var world = schema.CreateWorld(new WorldOptions
+        {
+            Seed = seed,
+            WorkerThreads = workers,
+            InitialEntityCapacity = (colonists + food) * 2,
+            Diagnostics = options ?? Colony.Diagnostics.DiagnosticsOptions.Default,
+        });
+        Populate(world, colonists, food);
+        return world;
+    }
+
+    /// <summary>Fills a freshly created World with <paramref name="colonists"/> colonists and <paramref name="food"/> food items and resets its scratch arena.</summary>
+    public static void Populate(World world, int colonists = DefaultColonists, int food = DefaultFood)
     {
         ArgumentNullException.ThrowIfNull(world);
         var schema = world.Schema;
@@ -202,20 +258,21 @@ public sealed class ColonistScenario : Scenario
         var foodType = schema.Component<FoodItem>();
         var init = world.Random.Derive("init");
         var buffer = world.CreateCommandBuffer();
-        for (int i = 0; i < Colonists; i++)
+        for (int i = 0; i < colonists; i++)
         {
             var block = init.BlockAt((ulong)i);
             var e = buffer.Create(ComponentMask.Of(position, target, hunger, health));
             var at = RandomTile(block[0], block[1]);
             buffer.Add(e, position, at);
             buffer.Add(e, target, new ColonistTarget { X = at.X, Y = at.Y });
-            buffer.Add(e, hunger, new ColonistHunger { Value = (block[2] % 500) * 0.1f });
-            buffer.Add(e, health, new ColonistHealth { Value = 100 });
+            // Some start already starving and frail, so starvation and recovery happen within a short run.
+            buffer.Add(e, hunger, new ColonistHunger { Value = (block[2] % 1200) * 0.1f });
+            buffer.Add(e, health, new ColonistHealth { Value = 1 + (int)(block[3] % 20) });
         }
 
-        for (int i = 0; i < Food; i++)
+        for (int i = 0; i < food; i++)
         {
-            var block = init.BlockAt((ulong)(Colonists + i));
+            var block = init.BlockAt((ulong)(colonists + i));
             var e = buffer.Create(ComponentMask.Of(position, foodType));
             buffer.Add(e, position, RandomTile(block[0], block[1]));
             buffer.Add(e, foodType, new FoodItem { Nutrition = 50 });
@@ -223,6 +280,25 @@ public sealed class ColonistScenario : Scenario
 
         world.Playback(buffer);
         world.ResetScratch();
+    }
+
+    /// <summary>Runs <paramref name="ticks"/> Ticks and returns the World hash after each Tick listed in <paramref name="checkpoints"/>, plus the final hash last.</summary>
+    public static ulong[] Run(World world, int ticks, ReadOnlySpan<int> checkpoints)
+    {
+        ArgumentNullException.ThrowIfNull(world);
+        var hashes = new ulong[checkpoints.Length + 1];
+        int next = 0;
+        for (int t = 1; t <= ticks; t++)
+        {
+            world.Tick();
+            if (next < checkpoints.Length && checkpoints[next] == t)
+            {
+                hashes[next++] = world.Hash();
+            }
+        }
+
+        hashes[^1] = world.Hash();
+        return hashes;
     }
 
     public static ColonistPosition RandomTile(uint a, uint b)
@@ -251,7 +327,7 @@ public sealed class ColonistScenario : Scenario
         }
     }
 
-    /// <summary>Mutable scenario scratch: the food grid, per-job reduction slots and the stats. Grows only during warm-up.</summary>
+    /// <summary>Mutable scenario scratch: the food grid and per-job reduction slots. Grows only during warm-up.</summary>
     private sealed class ScenarioState
     {
         private const int CellShift = 11; // 8 tiles of 256 units
@@ -265,14 +341,12 @@ public sealed class ColonistScenario : Scenario
         private ColonistPosition[] _itemPositions;
         private int _foodCount;
 
-        private int[] _eatenCount = new int[64];
-        private ColonistPosition[][] _eatenPositions = CreateSlots(64);
-        private ColonistPosition[] _eatenLog;
-        private int _eatenLogCount;
-
         private long[] _hungerSum = new long[64];
         private int[] _starving = new int[64];
         private int[] _count = new int[64];
+        private int[] _immobile = new int[64];
+        private int[] _recovered = new int[64];
+        private long _recoveredTotal;
 
         public ScenarioState(int foodTarget, bool sabotage)
         {
@@ -280,26 +354,6 @@ public sealed class ColonistScenario : Scenario
             _sabotage = sabotage;
             _items = new EntityId[foodTarget * 2];
             _itemPositions = new ColonistPosition[foodTarget * 2];
-            _eatenLog = new ColonistPosition[foodTarget];
-        }
-
-        public long TotalEaten { get; private set; }
-
-        public int Starving { get; private set; }
-
-        public int Colonists { get; private set; }
-
-        public long HungerTenths { get; private set; }
-
-        private static ColonistPosition[][] CreateSlots(int n)
-        {
-            var slots = new ColonistPosition[n][];
-            for (int i = 0; i < n; i++)
-            {
-                slots[i] = new ColonistPosition[64];
-            }
-
-            return slots;
         }
 
         // ---- FoodIndex (Begin Phase, serial): counting sort of food into a CSR grid, in chunk order. ----
@@ -420,28 +474,13 @@ public sealed class ColonistScenario : Scenario
             return true;
         }
 
-        // ---- Eat (Simulate): per-job eaten lists combined in job order at End. ----
+        // ---- Eat (Simulate): eaten food is reported through FoodEaten events, merged in job then record order. ----
 
-        public void PrepareEat(int jobCount)
-        {
-            if (_eatenCount.Length < jobCount)
-            {
-                _eatenCount = new int[jobCount * 2];
-                var old = _eatenPositions;
-                _eatenPositions = CreateSlots(jobCount * 2);
-                Array.Copy(old, _eatenPositions, old.Length);
-            }
-
-            Array.Clear(_eatenCount, 0, jobCount);
-        }
-
-        public void Eat(in SystemContext context, in ChunkView chunk, ComponentType position, ComponentType target, ComponentType hunger)
+        public void Eat(in SystemContext context, in ChunkView chunk, ComponentType position, ComponentType target, ComponentType hunger, ResourceType foodEaten)
         {
             var positions = chunk.Column<ColonistPosition>(position);
             var targets = chunk.Column<ColonistTarget>(target);
             var hungers = chunk.Column<ColonistHunger>(hunger);
-            ref var slot = ref _eatenPositions[context.JobIndex];
-            int eaten = 0;
             for (int i = 0; i < hungers.Length; i++)
             {
                 if (hungers[i].Value < HungryThreshold || !FindNearest(positions[i].X, positions[i].Y, out var food, out var at))
@@ -451,15 +490,11 @@ public sealed class ColonistScenario : Scenario
 
                 if (Math.Abs(at.X - positions[i].X) <= TileUnits && Math.Abs(at.Y - positions[i].Y) <= TileUnits)
                 {
-                    // Two colonists may reach one food in the same Tick; the second Destroy is skipped as stale (deterministically).
+                    // Two colonists may reach one food in the same Tick: the second Destroy loses the conflict
+                    // (deterministically, by System/job/record order) and becomes a StructuralFailure event.
                     context.Commands.Destroy(food);
                     hungers[i].Value = 0;
-                    if (eaten == slot.Length)
-                    {
-                        Array.Resize(ref slot, slot.Length * 2); // warm-up only
-                    }
-
-                    slot[eaten++] = at;
+                    context.Emit(foodEaten, new FoodEaten { X = at.X, Y = at.Y });
                 }
                 else
                 {
@@ -467,31 +502,6 @@ public sealed class ColonistScenario : Scenario
                     targets[i].Y = at.Y;
                 }
             }
-
-            _eatenCount[context.JobIndex] = eaten;
-        }
-
-        public void FinishEat(int jobCount)
-        {
-            int sum = 0;
-            for (int j = 0; j < jobCount; j++)
-            {
-                sum += _eatenCount[j];
-            }
-
-            if (_eatenLog.Length < sum)
-            {
-                _eatenLog = new ColonistPosition[sum * 2];
-            }
-
-            _eatenLogCount = 0;
-            for (int j = 0; j < jobCount; j++)
-            {
-                Array.Copy(_eatenPositions[j], 0, _eatenLog, _eatenLogCount, _eatenCount[j]);
-                _eatenLogCount += _eatenCount[j];
-            }
-
-            TotalEaten += sum;
         }
 
         // ---- Wander (Simulate): fed colonists at their target pick a random tile; RNG keyed by Entity, never by thread. ----
@@ -502,7 +512,7 @@ public sealed class ColonistScenario : Scenario
             var targets = chunk.Column<ColonistTarget>(target);
             var hungers = chunk.Column<ColonistHunger>(hunger);
             var entities = chunk.Entities;
-            // Negative control (TASK-7 AC #7, TASK-10 AC #2): keying the stream by the worker thread must break the cross-thread hash comparison.
+            // Negative control (AC #7): keying the stream by the worker thread must break the cross-thread hash comparison.
             var random = _sabotage ? context.Random.Derive((ulong)Environment.CurrentManagedThreadId) : context.Random;
             for (int i = 0; i < positions.Length; i++)
             {
@@ -518,7 +528,44 @@ public sealed class ColonistScenario : Scenario
             }
         }
 
-        // ---- Stats (Late): per-chunk reduction combined in job order. ----
+        // ---- Recover (Simulate, every 4 Ticks, sees fully disabled chunks): starved colonists get back up. ----
+
+        public void PrepareRecover(int jobCount)
+        {
+            if (_recovered.Length < jobCount)
+            {
+                _recovered = new int[jobCount * 2];
+            }
+        }
+
+        public void Recover(in SystemContext context, in ChunkView chunk, ComponentType health, ComponentType hunger, ComponentType target)
+        {
+            var healths = chunk.Column<ColonistHealth>(health);
+            var hungers = chunk.Column<ColonistHunger>(hunger);
+            int recovered = 0;
+            for (int i = 0; i < healths.Length; i++)
+            {
+                if (healths[i].Value == 0)
+                {
+                    healths[i].Value = RecoverHealth;
+                    hungers[i].Value = 0;
+                    chunk.SetEnabled(target, i, true);
+                    recovered++;
+                }
+            }
+
+            _recovered[context.JobIndex] = recovered;
+        }
+
+        public void FinishRecover(int jobCount)
+        {
+            for (int j = 0; j < jobCount; j++)
+            {
+                _recoveredTotal += _recovered[j];
+            }
+        }
+
+        // ---- Stats (Late): per-chunk reduction combined in job order into the ColonyStats Resource. ----
 
         public void PrepareStats(int jobCount)
         {
@@ -527,10 +574,11 @@ public sealed class ColonistScenario : Scenario
                 _hungerSum = new long[jobCount * 2];
                 _starving = new int[jobCount * 2];
                 _count = new int[jobCount * 2];
+                _immobile = new int[jobCount * 2];
             }
         }
 
-        public void Stats(in SystemContext context, in ChunkView chunk, ComponentType hunger, ComponentType health)
+        public void Stats(in SystemContext context, in ChunkView chunk, ComponentType hunger, ComponentType health, ComponentType target)
         {
             var hungers = chunk.Column<ColonistHunger>(hunger);
             var healths = chunk.Column<ColonistHealth>(health);
@@ -548,38 +596,47 @@ public sealed class ColonistScenario : Scenario
             _hungerSum[context.JobIndex] = sum;
             _starving[context.JobIndex] = starving;
             _count[context.JobIndex] = hungers.Length;
+            _immobile[context.JobIndex] = chunk.Count - chunk.EnabledCount(target);
         }
 
-        public void FinishStats(int jobCount)
+        public void FinishStats(in SystemContext context, ResourceType statsType, ResourceType foodEaten, ResourceType failures)
         {
             long sum = 0;
             int starving = 0;
             int n = 0;
-            for (int j = 0; j < jobCount; j++)
+            int immobile = 0;
+            for (int j = 0; j < context.JobCount; j++)
             {
                 sum += _hungerSum[j];
                 starving += _starving[j];
                 n += _count[j];
+                immobile += _immobile[j];
             }
 
-            HungerTenths = sum;
-            Starving = starving;
-            Colonists = n;
+            ref var stats = ref context.Resource<ColonyStats>(statsType);
+            stats.HungerTenths = sum;
+            stats.Starving = starving;
+            stats.Colonists = n;
+            stats.TotalEaten += context.Events<FoodEaten>(foodEaten).Length;
+            stats.Failures += context.Events<StructuralFailure>(failures).Length;
+            stats.ImmobileTicks += immobile;
+            stats.Recovered = _recoveredTotal;
         }
 
-        // ---- FoodSpawner (Late, serial): top food back up, regrowing near where it was eaten. ----
+        // ---- FoodSpawner (Late, serial): top food back up, regrowing near where the FoodEaten events say it was eaten. ----
 
-        public void SpawnFood(in SystemContext context, ComponentType position, ComponentType food, ComponentMask signature)
+        public void SpawnFood(in SystemContext context, ComponentType position, ComponentType food, ComponentMask signature, ResourceType foodEaten)
         {
             int have = context.World.Query(signature).EntityCount();
+            var eaten = context.Events<FoodEaten>(foodEaten);
             const int max = (WorldTiles * TileUnits) - (TileUnits / 2);
             for (int i = have, k = 0; i < _foodTarget; i++, k++)
             {
                 var block = context.Random.BlockAt((ulong)i);
                 ColonistPosition at;
-                if (k < _eatenLogCount)
+                if (k < eaten.Length)
                 {
-                    at = _eatenLog[k];
+                    at = new ColonistPosition { X = eaten[k].X, Y = eaten[k].Y };
                     at.X = Math.Clamp(at.X + (((int)(block[2] % 17) - 8) * TileUnits), TileUnits / 2, max);
                     at.Y = Math.Clamp(at.Y + (((int)(block[3] % 17) - 8) * TileUnits), TileUnits / 2, max);
                 }

@@ -24,7 +24,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
-    <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistHarnessScenario.cs" Link="Scenarios\ColonistHarnessScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
   </ItemGroup>
 

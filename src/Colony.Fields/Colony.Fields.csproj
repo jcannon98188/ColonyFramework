@@ -1,8 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Colony.Fields: Field chunks, stencils, the World change feed (spec section 5.1 and 5.2); later tickets add the
-    spatial index (TASK-13), ChunkProvider and the streaming residency manager (TASK-25/26).
+    Colony.Fields: Field chunks, stencils, the World change feed and the spatial index over grid Entities (spec
+    section 5.1 and 5.2); later tickets add ChunkProvider and the streaming residency manager (TASK-25/26).
     Depends on Colony.Core only; enforced by tools/Colony.DependencyCheck.
   -->
 

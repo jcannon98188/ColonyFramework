@@ -12,23 +12,38 @@ public sealed class WorldSchema
     private readonly ComponentDescriptor[] _components;
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
+    private readonly ResourceDescriptor[] _resources;
+    private readonly Dictionary<Type, int> _resourceByClrType;
+    private readonly Dictionary<string, int> _resourceByName;
     private readonly Phase[] _phases;
     private readonly WorldExtensionDefinition[] _extensions;
+    private readonly string[] _logMessages;
+    private readonly string[] _counters;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
         Dictionary<Type, int> byClrType,
         Dictionary<string, int> byName,
+        List<ResourceDescriptor> resources,
+        Dictionary<Type, int> resourceByClrType,
+        Dictionary<string, int> resourceByName,
         List<Phase> phases,
         SystemSchedule schedule,
         List<WorldExtensionDefinition> extensions,
-        bool debugValidation)
+        bool debugValidation,
+        List<string> logMessages,
+        List<string> counters)
     {
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
+        _resources = [.. resources];
+        _resourceByClrType = resourceByClrType;
+        _resourceByName = resourceByName;
         _phases = [.. phases];
         _extensions = [.. extensions];
+        _logMessages = [.. logMessages];
+        _counters = [.. counters];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
@@ -43,12 +58,21 @@ public sealed class WorldSchema
             hash = Hashing.Hash64.Combine(hash, _components[i].LayoutHash);
         }
 
+        var resourceSizes = new int[_resources.Length];
+        for (int i = 0; i < _resources.Length; i++)
+        {
+            resourceSizes[i] = _resources[i].Size;
+            hash = Hashing.Hash64.Combine(hash, _resources[i].LayoutHash);
+            hash = Hashing.Hash64.Combine(hash, _resources[i].IsPersistent ? 1UL : 0UL);
+        }
+
         foreach (var extension in _extensions)
         {
             hash = Hashing.Hash64.Combine(hash, extension.LayoutHash);
         }
 
         Sizes = sizes;
+        ResourceSizes = resourceSizes;
         NonFragmentingSlots = slots;
         NonFragmentingCount = nonFragmenting;
         SchemaHash = hash;
@@ -64,13 +88,18 @@ public sealed class WorldSchema
 
     public int ComponentCount => _components.Length;
 
-    /// <summary>Hash over every Component's layout hash in id order; two schemas with equal hashes store Components identically.</summary>
+    public int ResourceCount => _resources.Length;
+
+    /// <summary>Hash over every Component's and Resource's layout hash in id order; two schemas with equal hashes store state identically.</summary>
     public ulong SchemaHash { get; }
 
     public bool DebugValidation { get; }
 
     /// <summary>Component sizes by id.</summary>
     internal int[] Sizes { get; }
+
+    /// <summary>Resource value (or event element) sizes by id.</summary>
+    internal int[] ResourceSizes { get; }
 
     /// <summary>Per id: slot in the non-fragmenting store, or -1 for archetype-stored Components.</summary>
     internal int[] NonFragmentingSlots { get; }
@@ -135,11 +164,60 @@ public sealed class WorldSchema
 
     public ReadOnlySpan<ComponentDescriptor> Components => _components;
 
+    /// <summary>Every registered Resource (values and event queues) in id order; id 0 is always <see cref="StructuralFailures"/>.</summary>
+    public ReadOnlySpan<ResourceDescriptor> Resources => _resources;
+
+    /// <summary>The built-in queue of <see cref="StructuralFailure"/> events (spec section 4.1).</summary>
+    public ResourceType StructuralFailures => _resources[0].Type;
+
+    /// <summary>The handle for the Resource registered with CLR type <typeparamref name="T"/>.</summary>
+    public ResourceType Resource<T>() where T : unmanaged
+    {
+        if (!_resourceByClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as a Resource in this schema.", nameof(T));
+        }
+
+        return new ResourceType(id);
+    }
+
+    /// <summary>The handle for the Resource registered under <paramref name="name"/>.</summary>
+    public ResourceType Resource(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_resourceByName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Resource named '{name}' is registered in this schema.", nameof(name));
+        }
+
+        return new ResourceType(id);
+    }
+
+    public bool TryGetResource(string name, out ResourceType type)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        bool found = _resourceByName.TryGetValue(name, out int id);
+        type = new ResourceType(id);
+        return found;
+    }
+
+    public ResourceDescriptor DescribeResource(ResourceType type)
+    {
+        ValidateResource(type);
+        return _resources[type.Id];
+    }
+
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
     public ReadOnlySpan<Phase> Phases => _phases;
 
     /// <summary>Registered World extensions in registration order (their layout hashes are part of <see cref="SchemaHash"/>).</summary>
     public ReadOnlySpan<WorldExtensionDefinition> Extensions => _extensions;
+
+    /// <summary>Log message templates by <see cref="Colony.Diagnostics.LogMessageId"/> (spec section 10.1).</summary>
+    public ReadOnlySpan<string> LogMessages => _logMessages;
+
+    /// <summary>Registered counter names by <see cref="Colony.Diagnostics.CounterId"/>.</summary>
+    public ReadOnlySpan<string> Counters => _counters;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);
@@ -155,6 +233,31 @@ public sealed class WorldSchema
         if ((uint)type.Id >= (uint)_components.Length)
         {
             throw new ArgumentException($"{type} does not belong to this schema.", nameof(type));
+        }
+    }
+
+    internal void ValidateResource(ResourceType type)
+    {
+        if ((uint)type.Id >= (uint)_resources.Length)
+        {
+            throw new ArgumentException($"{type} does not belong to this schema.", nameof(type));
+        }
+    }
+
+    /// <summary>Throws unless <typeparamref name="T"/> has the registered size of the Resource.</summary>
+    internal void ValidateResource<T>(ResourceType type, ResourceKind kind) where T : unmanaged
+    {
+        ValidateResource(type);
+        var descriptor = _resources[type.Id];
+        if (descriptor.Kind != kind)
+        {
+            throw new ArgumentException($"Resource '{descriptor.Name}' is {(descriptor.IsEventQueue ? "an event queue" : "a value")}, not {(kind == ResourceKind.EventQueue ? "an event queue" : "a value")}.", nameof(type));
+        }
+
+        int size = global::System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+        if (size != descriptor.Size)
+        {
+            throw new ArgumentException($"{typeof(T).Name} is {size} bytes but Resource '{descriptor.Name}' is {descriptor.Size} bytes.", nameof(T));
         }
     }
 
