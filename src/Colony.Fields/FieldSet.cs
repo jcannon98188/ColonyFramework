@@ -124,6 +124,18 @@ public sealed class FieldSet : IWorldExtension
 
     internal FieldStorage StorageAt(int fieldId) => _storage[fieldId];
 
+    private readonly List<FieldStorage> _scratch = [];
+
+    /// <summary>A second storage shaped like <paramref name="field"/>'s (a stencil back buffer); owned and disposed by this set, never hashed.</summary>
+    internal FieldStorage CreateScratchStorage<T>(Field<T> field)
+        where T : unmanaged
+    {
+        int id = Validate(field);
+        var storage = new CpuFieldStorage(_fields[id].CellSize, _layout.ChunkCount, _storage[id].UniformValue(0));
+        _scratch.Add(storage);
+        return storage;
+    }
+
     /// <summary>The version a write made now gets: the Tick in progress plus one, so 0 means "never written".</summary>
     public uint CurrentVersion => (uint)(World.CurrentTick + 1);
 
@@ -220,6 +232,11 @@ public sealed class FieldSet : IWorldExtension
 
         _disposed = true;
         foreach (var storage in _storage)
+        {
+            storage.Dispose();
+        }
+
+        foreach (var storage in _scratch)
         {
             storage.Dispose();
         }

@@ -81,6 +81,30 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
         _isUniform[ordinal] = true;
     }
 
+    public override bool CellsEqual(int ordinal, ReadOnlySpan<byte> cells)
+    {
+        if (cells.Length != (int)_chunkBytes)
+        {
+            throw new ArgumentException($"Expected {_chunkBytes} bytes, got {cells.Length}.", nameof(cells));
+        }
+
+        if (!_isUniform[ordinal])
+        {
+            return cells.SequenceEqual(new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes));
+        }
+
+        var value = UniformValue(ordinal);
+        for (int offset = 0; offset < cells.Length; offset += CellSize)
+        {
+            if (!cells.Slice(offset, CellSize).SequenceEqual(value))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public override void HashChunk(int ordinal, ref Hash64State state)
     {
         if (_isUniform[ordinal])

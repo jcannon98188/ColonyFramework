@@ -9,6 +9,8 @@ namespace Colony.Fields;
 /// Systems. The CPU implementation is the oracle: any other must hash identically for the same cells.
 /// Chunks are addressed by ordinal (Morton rank) and cells by storage index (<see cref="FieldChunk.CellIndex"/>).
 /// A chunk is either uniform (one value, no cell storage) or dense (<see cref="FieldChunk.CellCount"/> cells).
+/// Contract: the memory behind <see cref="ReadCells"/>/<see cref="WriteCells"/> is stable (native or pinned)
+/// for as long as the chunk is dense; stencils cache references to it for the duration of a job.
 /// </summary>
 public abstract class FieldStorage : IDisposable
 {
@@ -40,6 +42,9 @@ public abstract class FieldStorage : IDisposable
 
     /// <summary>Makes the chunk uniform with <paramref name="value"/>. Dense storage already allocated is kept for reuse.</summary>
     public abstract void Fill(int ordinal, ReadOnlySpan<byte> value);
+
+    /// <summary>True when the chunk's cells (uniform or dense) equal <paramref name="cells"/>, a full chunk in storage order.</summary>
+    public abstract bool CellsEqual(int ordinal, ReadOnlySpan<byte> cells);
 
     /// <summary>Appends the chunk's cells in storage order, exactly as a dense chunk with the same values would hash.</summary>
     public abstract void HashChunk(int ordinal, ref Hash64State state);
