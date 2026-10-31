@@ -40,9 +40,9 @@
     <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
     <!-- CS1591: missing XML doc comment. Public API is documented when it exists; stubs are not. -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <!-- COL1001-COL1007: Colony determinism analyzers (spec section 6) are errors even if an .editorconfig lowers
+    <!-- COL1001-COL1007 (determinism, spec section 6) and COL2001-COL2007 (generator shapes and access sets, spec section 11) are errors even if an .editorconfig lowers
          them to warnings. Opt out per site with [Colony.AllowNonDeterministic("why")] or #pragma warning disable. -->
-    <WarningsAsErrors>$(WarningsAsErrors);COL1001;COL1002;COL1003;COL1004;COL1005;COL1006;COL1007</WarningsAsErrors>
+    <WarningsAsErrors>$(WarningsAsErrors);COL1001;COL1002;COL1003;COL1004;COL1005;COL1006;COL1007;COL2001;COL2002;COL2003;COL2004;COL2005;COL2006;COL2007</WarningsAsErrors>
   </PropertyGroup>
 
   <PropertyGroup Label="Repo layout">
