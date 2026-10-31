@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/HelloColony/HelloColony.csproj" />
+    <Project Path="samples/HelloColony.Tests/HelloColony.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Colony.Colony/Colony.Colony.csproj" />
     <Project Path="src/Colony.Core/Colony.Core.csproj" />

@@ -1,4 +1,4 @@
-﻿namespace Colony.Benchmarks.TickHarness.Tests;
+namespace Colony.Benchmarks.TickHarness.Tests;
 
 /// <summary>
 /// Ticket AC #2 and #4: the Tick harness runs the colonist scenario (churn, Fields, save/load) and writes a
