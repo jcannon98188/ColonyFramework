@@ -15,18 +15,18 @@ internal sealed class WorkerPool : IDisposable
     private const int DefaultSpinMicroseconds = 200;
 
     private readonly Worker[] _workers;
-    private readonly IJobSource _source;
     private readonly int[] _cursors;
     private readonly long _spinTicks;
+    private IJobSource? _source;
     private int _jobCount;
     private int _active;
     private int _generation;
+    private int _running;
     private volatile bool _stop;
 
-    public WorkerPool(int workerCount, IJobSource source)
+    public WorkerPool(int workerCount)
     {
         WorkerCount = Math.Max(1, workerCount);
-        _source = source;
         _cursors = new int[WorkerCount * Pad];
         _spinTicks = Stopwatch.Frequency * DefaultSpinMicroseconds / 1_000_000;
         _workers = new Worker[WorkerCount - 1];
@@ -65,19 +65,39 @@ internal sealed class WorkerPool : IDisposable
         return total;
     }
 
-    /// <summary>Runs jobs 0 to <paramref name="jobCount"/> - 1 and returns when all have finished.</summary>
-    public void Run(int jobCount)
+    /// <summary>
+    /// Runs jobs 0 to <paramref name="jobCount"/> - 1 of <paramref name="source"/> and returns when all have
+    /// finished. One run at a time: a nested call (from a job, on any thread) throws instead of deadlocking.
+    /// </summary>
+    public void Run(int jobCount, IJobSource source)
     {
         if (jobCount <= 0)
         {
             return;
         }
 
+        if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("The worker pool is already running a wave; parallel jobs cannot be started from inside a job.");
+        }
+
+        try
+        {
+            RunCore(jobCount, source);
+        }
+        finally
+        {
+            Volatile.Write(ref _running, 0);
+        }
+    }
+
+    private void RunCore(int jobCount, IJobSource source)
+    {
         if (_workers.Length == 0 || jobCount == 1)
         {
             for (int i = 0; i < jobCount; i++)
             {
-                _source.Run(i, 0);
+                source.Run(i, 0);
             }
 
             return;
@@ -89,6 +109,7 @@ internal sealed class WorkerPool : IDisposable
             _cursors[w * Pad] = 0;
         }
 
+        _source = source;
         Volatile.Write(ref _active, _workers.Length);
         Interlocked.Increment(ref _generation);
         foreach (var worker in _workers)
@@ -109,6 +130,7 @@ internal sealed class WorkerPool : IDisposable
 
     private void Drain(int worker)
     {
+        var source = _source!;
         int count = _jobCount;
         int n = WorkerCount;
         for (int step = 0; step < n; step++)
@@ -123,7 +145,7 @@ internal sealed class WorkerPool : IDisposable
                     break;
                 }
 
-                _source.Run(job, worker);
+                source.Run(job, worker);
             }
         }
     }
