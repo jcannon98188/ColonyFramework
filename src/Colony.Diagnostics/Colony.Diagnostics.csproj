@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Diagnostics: the host-side consumers of Core's diagnostics API (spec section 10.1): the logging
+    drain that resolves structured entries to text, the hash-trail recorder and comparison, and (TASK-18) the
+    EventSource/Meter bridge and Perfetto trace export. Core never references this package; it plugs into
+    Core through IDiagnosticsListener and world.Diagnostics (enforced by tools/Colony.DependencyCheck).
+    Depends on Colony.Core (and Colony.Fields / Colony.Persistence once they exist).
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework diagnostics: logging drain, hash trail comparison and profiling sinks.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Diagnostics.Tests" />
+  </ItemGroup>
+
+</Project>
