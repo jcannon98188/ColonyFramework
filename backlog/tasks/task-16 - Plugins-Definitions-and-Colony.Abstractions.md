@@ -1,9 +1,11 @@
 ---
 id: TASK-16
 title: 'Plugins, Definitions and Colony.Abstractions'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 13:49'
 labels:
   - ready-for-agent
   - implementation
