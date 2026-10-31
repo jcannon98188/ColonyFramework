@@ -1,9 +1,11 @@
 ---
 id: TASK-25
 title: 'Generation pipeline, ChunkProvider and validation tooling'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 20:49'
 labels:
   - ready-for-agent
   - implementation
