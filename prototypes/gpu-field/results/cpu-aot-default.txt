@@ -1,0 +1,27 @@
+﻿# mode=cpu backend=vulkan runtime=11.0.0 aot=True V256=False V512=False cpus=16
+## CPU diffusion step (Vector256 accelerated=False, Vector128=True, threads=16)
+full 512x512x256 dense | Exact i32 | V256 1T               mean   78.805 | p50   74.761 | p99   86.918 | min   74.245 | max   86.918 ms (n=6)
+full 512x512x256 dense | Exact i32 | V256 MT               mean   32.967 | p50   32.988 | p99   34.644 | min   31.126 | max   34.644 ms (n=30)
+full 512x512x256 dense | Exact i32 | V128 MT               mean   33.637 | p50   34.010 | p99   34.906 | min   32.021 | max   34.906 ms (n=30)
+full 512x512x256 dense | Approx f32 | V256 1T              mean   76.978 | p50   77.010 | p99   77.558 | min   76.116 | max   77.558 ms (n=6)
+full 512x512x256 dense | Approx f32 | V256 MT              mean   32.164 | p50   31.792 | p99   37.776 | min   30.868 | max   37.776 ms (n=30)
+full 512x512x256 dense | Approx f32 | V128 MT              mean   33.274 | p50   33.320 | p99   34.829 | min   31.485 | max   34.829 ms (n=30)
+small 256x256x64 dense | Exact i32 | V256 1T               mean    4.746 | p50    4.705 | p99    5.213 | min    4.388 | max    5.213 ms (n=30)
+small 256x256x64 dense | Exact i32 | V256 MT               mean    1.922 | p50    1.887 | p99    2.378 | min    1.657 | max    2.419 ms (n=200)
+small 256x256x64 dense | Exact i32 | V128 MT               mean    2.039 | p50    2.002 | p99    2.420 | min    1.834 | max    2.629 ms (n=200)
+small 256x256x64 dense | Exact i32 | scalar MT             mean    2.316 | p50    2.270 | p99    2.853 | min    2.081 | max    2.928 ms (n=200)
+small 256x256x64 dense | Approx f32 | V256 1T              mean    4.517 | p50    4.487 | p99    4.907 | min    4.356 | max    4.907 ms (n=30)
+small 256x256x64 dense | Approx f32 | V256 MT              mean    1.849 | p50    1.811 | p99    2.151 | min    1.685 | max    2.195 ms (n=200)
+small 256x256x64 dense | Approx f32 | V128 MT              mean    1.895 | p50    1.870 | p99    2.261 | min    1.706 | max    2.302 ms (n=200)
+small 256x256x64 dense | Approx f32 | scalar MT            mean    2.410 | p50    2.279 | p99    3.071 | min    1.865 | max    3.263 ms (n=200)
+full 512x512x256 sparse 5% chunks | Exact i32 | V256 1T    mean    3.072 | p50    2.992 | p99    3.446 | min    2.870 | max    3.446 ms (n=30)
+full 512x512x256 sparse 5% chunks | Exact i32 | V256 MT    mean    1.370 | p50    1.342 | p99    1.749 | min    1.049 | max    1.911 ms (n=200)
+full 512x512x256 sparse 5% chunks | Exact i32 | V128 MT    mean    1.464 | p50    1.451 | p99    1.929 | min    1.157 | max    2.108 ms (n=200)
+full 512x512x256 sparse 5% chunks | Exact i32 | scalar MT  mean    1.616 | p50    1.537 | p99    1.978 | min    1.334 | max    2.270 ms (n=200)
+full 512x512x256 sparse 5% chunks | Approx f32 | V256 1T   mean    2.924 | p50    2.889 | p99    3.181 | min    2.779 | max    3.181 ms (n=30)
+full 512x512x256 sparse 5% chunks | Approx f32 | V256 MT   mean    1.568 | p50    1.579 | p99    2.185 | min    1.134 | max    2.484 ms (n=200)
+full 512x512x256 sparse 5% chunks | Approx f32 | V128 MT   mean    1.482 | p50    1.507 | p99    1.901 | min    0.998 | max    2.330 ms (n=200)
+full 512x512x256 sparse 5% chunks | Approx f32 | scalar MT mean    1.596 | p50    1.568 | p99    2.092 | min    1.263 | max    2.126 ms (n=200)
+  full world host memory: pool 256 MiB x2 (double buffer) + tables, total 513.2 MiB; slots=16384
+  sparse world host memory: 26.8 MiB; slots=822 of 16384 chunks
+# uncaptured wgpu errors: 0

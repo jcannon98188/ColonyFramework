@@ -1,0 +1,28 @@
+# .NET build output
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+BenchmarkDotNet.Artifacts/
+*.binlog
+
+# Native AOT / publish output
+publish/
+
+# Downloaded third-party native binaries (prototypes fetch wgpu-native on demand;
+# the version pins in native/**/commit-sha and wgpu-native-git-tag stay tracked)
+prototypes/**/native/**/lib/
+prototypes/**/native/**/*.zip
+
+# IDE
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local tooling state
+.claude/settings.local.json

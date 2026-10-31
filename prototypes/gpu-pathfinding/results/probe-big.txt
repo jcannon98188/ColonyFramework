@@ -1,0 +1,41 @@
+# gpu-pathfinding prototype  mode=probe world=big  2026-10-30 19:55  cores=16  .NET 11.0.0
+# World 512x512x64 = 16,777,216 tiles, gen 161 ms; blocked 30.0 %; stairs 8,895; doors 170,823; dynamic tiles 335,935 (2.00 %)
+# Regions: 217,400 chunk components, 208,483 abstract edges, 47,510 regions; main region 10,349,867 tiles (88.1 % of passable); pocket tiles 1,370,257; full build 61.4 ms (label 45.7 / edges 5.2 / graph 10.3); 80 MB
+# Moves: 4-neighbour in-plane + vertical between vertically adjacent stair tiles; uniform cost 1; tie-break order -x,+x,-y,+y,-z,+z
+## Regions: full rebuild vs incremental update (16 threads)
+  toggles     168 (0.001 %): incremental   10.15 ms (chunk relabel+faces 2.91, graph rebuild 7.22); dirty chunks 162/4096
+  toggles    1678 (0.010 %): incremental   26.83 ms (chunk relabel+faces 20.04, graph rebuild 6.34); dirty chunks 1381/4096
+  toggles   16777 (0.100 %): incremental   55.57 ms (chunk relabel+faces 48.34, graph rebuild 7.08); dirty chunks 4027/4096
+  toggles  167772 (1.000 %): incremental   53.42 ms (chunk relabel+faces 46.65, graph rebuild 6.38); dirty chunks 4096/4096
+  full rebuild: mean   52.946 | p50   51.939 | p99   58.331 | min   49.268 | max   58.331 ms (n=5)
+  full rebuild 1 thread: mean  430.410 | p50  409.504 | p99  451.316 | min  409.504 | max  451.316 ms (n=2)
+  region early-out: 110.5 ns per request (1 thread) [38]
+## CPU flow fields: full build vs incremental repair (64 Fields)
+  build 64 Fields, 16 threads: mean 3653.748 | p50 3669.618 | p99 3853.290 | min 3438.337 | max 3853.290 ms (n=3)  (2147 MB)
+  build 1 Field, 1 thread: mean  183.702 | p50  183.702 | p99  183.702 | min  183.702 | max  183.702 ms (n=1)
+  max finite distance over main-region Fields (~world diameter from a goal): 3031
+  toggles     168: repair 64 Fields   156.20   132.75   408.06 (mean p50 p99 ms); tiles touched/Field/Tick 282,725; fell back to full rebuild 0.6 of 64 Fields/Tick
+  toggles    1678: repair 64 Fields  2117.82  1857.00  3058.92 (mean p50 p99 ms); tiles touched/Field/Tick 1,507,705; fell back to full rebuild 31.4 of 64 Fields/Tick
+  toggles   16777: repair 64 Fields  3875.80  3891.29  3958.15 (mean p50 p99 ms); tiles touched/Field/Tick 1,326,190; fell back to full rebuild 58.0 of 64 Fields/Tick
+  toggles  167772: repair 64 Fields  3247.79  3991.61  4167.59 (mean p50 p99 ms); tiles touched/Field/Tick 1,316,199; fell back to full rebuild 58.0 of 64 Fields/Tick
+## A*: unreachable target without region IDs (search exhausts the start's region)
+  mean  436.951 | p50  386.805 | p99  578.713 | min  378.226 | max  578.713 ms (n=4); expanded 10,349,867 tiles per search
+  reachable random pairs: mean  115.529 | p50   67.525 | p99  333.585 | min    1.417 | max  333.585 ms (n=50); mean length 1108, expanded 3,112,975 per search
+## GPU flow fields (Vulkan)
+# GPU: NVIDIA GeForce RTX 2060 SUPER (610.88) via Vulkan; maxBuffer 1048576 MiB, maxStorageBinding 2147483644 B, timestamps True
+  [Jacobi in-block variant] build 64 Fields: wall 1186.0 ms, GPU 1180.4 ms, 257 iterations, 20,444,634 block visits
+  build  1 Fields: wall     17.5 ms, GPU Kernel time     15.3 ms, 166 block iterations, 7 submits, 387 dispatches, 299,567 block visits (4.6 per block), device memory 70 MB
+  build 32 Fields: wall    541.5 ms, GPU Kernel time    537.8 ms, 257 block iterations, 10 submits, 579 dispatches, 11,593,333 block visits (5.5 per block), device memory 1134 MB
+  build 64 Fields: wall    957.5 ms, GPU Kernel time    952.3 ms, 257 block iterations, 10 submits, 1158 dispatches, 20,444,634 block visits (4.9 per block), device memory 2250 MB
+    IterPerSubmit   8: wall 962.4 ms, GPU 951.8 ms, submits 34, dispatches 1062
+    IterPerSubmit  32: wall 956.5 ms, GPU 951.4 ms, submits 10, dispatches 1158
+    IterPerSubmit 128: wall 956.0 ms, GPU 952.4 ms, submits 4, dispatches 1542
+  repair 64 Fields, toggles     168: wall    38.63    27.52    68.58 ms (mean p50 p99), GPU Kernel   32.91 ms, iterations inval 145.2 + relax 164.6, submits 12.4
+  repair 64 Fields, toggles    1678: wall   229.66   236.22   363.45 ms (mean p50 p99), GPU Kernel  222.58 ms, iterations inval 171.8 + relax 203.6, submits 14.4
+  repair 64 Fields, toggles   16777: wall   947.21   957.79   958.83 ms (mean p50 p99), GPU Kernel  941.48 ms, iterations inval 0.0 + relax 259.8, submits 10.0 [above RebuildAbove=8388: full rebuild]
+  repair 64 Fields, toggles  167772: wall   669.20   960.65   964.72 ms (mean p50 p99), GPU Kernel  659.26 ms, iterations inval 0.0 + relax 357.6, submits 13.0 [above RebuildAbove=8388: full rebuild]
+  upload 100k unit fields (400 KB) + empty submit/wait: mean    0.142 | p50    0.142 | p99    0.147 | min    0.139 | max    0.147 ms (n=20)
+  empty submit + fence wait: mean    0.058 | p50    0.057 | p99    0.063 | min    0.054 | max    0.063 ms (n=20)
+  move Kernel 100k units + 400 KB readback + map, sync: mean    0.288 | p50    0.285 | p99    0.321 | min    0.278 | max    0.321 ms (n=20); GPU Kernel 0.117 ms
+  plain one-hop relaxation (no block-local iteration) needs exactly maxDistance sweeps over all tiles of every Field: 3031 sweeps x 2.15 GB read+write -> at 448 GB/s peak >= 29058 ms per full build; block-local worklist needed 257 iterations
+## (6) per-unit GPU queries = one Field per unique goal (batched 32): see 'build 32 Fields' above; extrapolate to requests/Tick

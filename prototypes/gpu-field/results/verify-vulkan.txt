@@ -1,0 +1,12 @@
+﻿# mode=verify backend=vulkan runtime=11.0.0 aot=False V256=True V512=False cpus=16
+## Verify: CPU widths vs reference (Exact, small world)
+  active=100 %: reference=F6BF6A88E192301F, scalar=F6BF6A88E192301F, V128=F6BF6A88E192301F, V256=F6BF6A88E192301F, V256-MT=F6BF6A88E192301F -> IDENTICAL
+  active=5 %: reference=7B1492AA2DBC7521, scalar=7B1492AA2DBC7521, V128=7B1492AA2DBC7521, V256=7B1492AA2DBC7521, V256-MT=7B1492AA2DBC7521 -> IDENTICAL
+  Approx reference vs V256-MT after 3 steps: IDENTICAL (CPU float order is fixed, no FMA)
+## Verify: GPU (Vulkan) vs CPU V256-MT, Exact kernel, hash compare
+  256x256x64 active=100 % slots=1024: step 1: == FCD598CCAC592E1C; step 10: == 90360C1227B44993; step 50: == 2A29360A049BDE6F; step 100: == 6F7B51BCBCFDEA39; step 200: == 9C4C225231CD01D9; step 500: == EF0CF9BFD09C6DA1 -> BIT-IDENTICAL
+  512x512x256 active=100 % slots=16384: step 1: == 7A60365CC3B96B5A; step 5: == 8F92E07CAA4D11B7; step 20: == 5593CC27C70EF5B3 -> BIT-IDENTICAL
+  512x512x256 active=5 % slots=822: step 1: == 578C0414E39612D0; step 10: == C4C4E818B4FDCC03; step 100: == DF96F15E56C4333F; step 200: == 6811C142CA18C104 -> BIT-IDENTICAL
+## Verify: GPU vs CPU, Approx (float) kernel, 256x256x64 dense, 100 steps
+  100 steps: 1269873 of 4194304 cells differ (30.276%), max |diff| 1.788E-007, max ULP 5
+# uncaptured wgpu errors: 0

@@ -1,0 +1,5 @@
+# gpu-pathfinding prototype  mode=hybrid world=big  2026-10-30 21:27  cores=16  .NET 11.0.0
+# World 512x512x64 = 16,777,216 tiles, gen 169 ms; blocked 30.0 %; stairs 8,895; doors 170,823; dynamic tiles 335,935 (2.00 %)
+# Regions: 217,400 chunk components, 208,483 abstract edges, 47,510 regions; main region 10,349,867 tiles (88.1 % of passable); pocket tiles 1,370,257; full build 64.7 ms (label 49.0 / edges 4.6 / graph 10.9); 80 MB
+# Moves: 4-neighbour in-plane + vertical between vertically adjacent stair tiles; uniform cost 1; tie-break order -x,+x,-y,+y,-z,+z
+# hybrid: workload M = first half shared goals (64 Fields), second half unique goals; 3% churn; 10% unreachable; toggles 168

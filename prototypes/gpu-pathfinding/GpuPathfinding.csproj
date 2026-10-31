@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- THROWAWAY prototype for TASK-1.14-style spike: GPU vs CPU pathfinding service. Not Framework code. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <TieredPGO>true</TieredPGO>
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>GpuPath</RootNamespace>
+    <!-- Pinned native Backend binary: wgpu-native v29.0.1.1 (gfx-rs/wgpu-native, commit 6aed5095). -->
+    <WgpuNativeDir>native\wgpu-v29.0.1.1\lib</WgpuNativeDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(WgpuNativeDir)\wgpu_native.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Link="wgpu_native.dll" />
+  </ItemGroup>
+
+</Project>

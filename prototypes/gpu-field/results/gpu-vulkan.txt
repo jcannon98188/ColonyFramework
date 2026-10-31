@@ -1,0 +1,41 @@
+﻿# mode=gpu backend=vulkan runtime=11.0.0 aot=False V256=True V512=False cpus=16
+## GPU Backend Vulkan: NVIDIA GeForce RTX 2060 SUPER (610.88), timestamps=True
+  GPU memory used before device: 2891 MiB
+  GPU memory used with full-world mirror allocated: 3730 MiB (mirror buffers: 896 MiB incl. 2x pool + staging ring)
+full 512x512x256 dense | Exact i32 | GPU kernel (timestamps) mean    2.064 | p50    2.058 | p99    2.327 | min    2.045 | max    2.329 ms (n=128)
+full 512x512x256 dense | Exact i32 | 1 step submit+fence wait (CPU clock) mean    2.229 | p50    2.179 | p99    2.580 | min    2.164 | max    2.580 ms (n=50)
+full 512x512x256 dense | Exact i32 | per step, 20 steps/submit (CPU clock) mean    2.107 | p50    2.102 | p99    2.115 | min    2.101 | max    2.115 ms (n=5)
+full 512x512x256 dense | Approx f32 | GPU kernel (timestamps) mean    2.125 | p50    2.090 | p99    2.367 | min    2.075 | max    2.415 ms (n=128)
+full 512x512x256 dense | Approx f32 | 1 step submit+fence wait (CPU clock) mean    2.259 | p50    2.217 | p99    2.514 | min    2.195 | max    2.514 ms (n=50)
+full 512x512x256 dense | Approx f32 | per step, 20 steps/submit (CPU clock) mean    2.163 | p50    2.145 | p99    2.229 | min    2.143 | max    2.229 ms (n=5)
+small 256x256x64 dense | Exact i32 | GPU kernel (timestamps) mean    0.138 | p50    0.135 | p99    0.139 | min    0.134 | max    0.392 ms (n=128)
+small 256x256x64 dense | Exact i32 | 1 step submit+fence wait (CPU clock) mean    0.220 | p50    0.213 | p99    0.422 | min    0.207 | max    0.422 ms (n=50)
+small 256x256x64 dense | Exact i32 | per step, 20 steps/submit (CPU clock) mean    0.152 | p50    0.150 | p99    0.161 | min    0.148 | max    0.161 ms (n=5)
+small 256x256x64 dense | Approx f32 | GPU kernel (timestamps) mean    0.136 | p50    0.136 | p99    0.138 | min    0.134 | max    0.139 ms (n=128)
+small 256x256x64 dense | Approx f32 | 1 step submit+fence wait (CPU clock) mean    0.243 | p50    0.237 | p99    0.389 | min    0.232 | max    0.389 ms (n=50)
+small 256x256x64 dense | Approx f32 | per step, 20 steps/submit (CPU clock) mean    0.157 | p50    0.154 | p99    0.171 | min    0.153 | max    0.171 ms (n=5)
+full 512x512x256 sparse 5% chunks | Exact i32 | GPU kernel (timestamps) mean    0.104 | p50    0.102 | p99    0.105 | min    0.099 | max    0.385 ms (n=128)
+full 512x512x256 sparse 5% chunks | Exact i32 | 1 step submit+fence wait (CPU clock) mean    0.214 | p50    0.211 | p99    0.381 | min    0.194 | max    0.381 ms (n=50)
+full 512x512x256 sparse 5% chunks | Exact i32 | per step, 20 steps/submit (CPU clock) mean    0.120 | p50    0.118 | p99    0.128 | min    0.115 | max    0.128 ms (n=5)
+full 512x512x256 sparse 5% chunks | Approx f32 | GPU kernel (timestamps) mean    0.104 | p50    0.102 | p99    0.105 | min    0.100 | max    0.361 ms (n=128)
+full 512x512x256 sparse 5% chunks | Approx f32 | 1 step submit+fence wait (CPU clock) mean    0.186 | p50    0.183 | p99    0.222 | min    0.176 | max    0.222 ms (n=50)
+full 512x512x256 sparse 5% chunks | Approx f32 | per step, 20 steps/submit (CPU clock) mean    0.115 | p50    0.115 | p99    0.116 | min    0.114 | max    0.116 ms (n=5)
+## Transfers (full 512x512x256 dense world, i32, 16 KiB chunks)
+full upload 256 MiB, queue.writeBuffer + wait              mean   91.734 | p50   91.578 | p99   95.655 | min   88.283 | max   95.655 ms (n=10)
+    -> 2.73 GiB/s
+full readback 256 MiB, copy+map+memcpy (4 x 64 MiB)        mean   73.235 | p50   72.826 | p99   76.415 | min   71.892 | max   76.415 ms (n=10)
+    -> 3.41 GiB/s
+dirty upload 1 % (163 chunks, 2.5 MiB) staging ring + copies mean    0.994 | p50    0.991 | p99    1.208 | min    0.878 | max    1.208 ms (n=30)
+dirty upload 1 % (163 chunks) writeBuffer per chunk        mean    1.025 | p50    1.003 | p99    1.181 | min    0.972 | max    1.181 ms (n=30)
+dirty readback 1 % (163 chunks) copy+map+scatter           mean    0.962 | p50    0.952 | p99    1.117 | min    0.894 | max    1.117 ms (n=30)
+    -> upload 2.50 GiB/s, readback 2.58 GiB/s
+dirty upload 5 % (819 chunks, 12.8 MiB) staging ring + copies mean    4.977 | p50    4.868 | p99    6.431 | min    4.502 | max    6.431 ms (n=30)
+dirty upload 5 % (819 chunks) writeBuffer per chunk        mean    5.103 | p50    5.036 | p99    5.772 | min    4.805 | max    5.772 ms (n=30)
+dirty readback 5 % (819 chunks) copy+map+scatter           mean    4.795 | p50    4.773 | p99    5.633 | min    4.513 | max    5.633 ms (n=30)
+    -> upload 2.51 GiB/s, readback 2.61 GiB/s
+dirty upload 25 % (4096 chunks, 64.0 MiB) staging ring + copies mean   22.171 | p50   22.285 | p99   23.677 | min   20.904 | max   23.677 ms (n=30)
+dirty upload 25 % (4096 chunks) writeBuffer per chunk      mean   30.230 | p50   29.780 | p99   33.303 | min   29.117 | max   33.303 ms (n=30)
+dirty readback 25 % (4096 chunks) copy+map+scatter         mean   22.024 | p50   21.694 | p99   25.341 | min   20.862 | max   25.341 ms (n=30)
+    -> upload 2.82 GiB/s, readback 2.84 GiB/s
+  process private bytes now: 831 MiB
+# uncaptured wgpu errors: 0

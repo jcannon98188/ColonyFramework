@@ -1,0 +1,11 @@
+﻿# mode=pinvoke backend=vulkan runtime=11.0.0 aot=False V256=True V512=False cpus=16
+## P/Invoke layer cost
+  wgpuGetVersion (trivial native call): 17.95 ns/call (acc 845032704)
+  same with [SuppressGCTransition]: 17.55 ns/call (acc 1690065408)
+  record one dispatch (6 native calls incl. wgpu validation): 0.53 us; finish+submit of 1000 dispatches: 8.57 ms
+  record one dispatch (6 native calls incl. wgpu validation): 0.51 us; finish+submit of 1000 dispatches: 8.62 ms
+  record one copyBufferToBuffer: 0.41 us
+  record one copyBufferToBuffer: 1.36 us
+  queue.writeBuffer 32 B: 2.14 us/call
+  empty submit + fence wait round trip                     mean    0.251 | p50    0.105 | p99    1.822 | min    0.078 | max   21.701 ms (n=2000)
+# uncaptured wgpu errors: 0

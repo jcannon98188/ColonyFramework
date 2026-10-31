@@ -1,0 +1,11 @@
+﻿# mode=pinvoke backend=dx12 runtime=11.0.0 aot=False V256=True V512=False cpus=16
+## P/Invoke layer cost
+  wgpuGetVersion (trivial native call): 18.18 ns/call (acc 845032704)
+  same with [SuppressGCTransition]: 17.55 ns/call (acc 1690065408)
+  record one dispatch (6 native calls incl. wgpu validation): 0.51 us; finish+submit of 1000 dispatches: 15.90 ms
+  record one dispatch (6 native calls incl. wgpu validation): 0.38 us; finish+submit of 1000 dispatches: 15.22 ms
+  record one copyBufferToBuffer: 0.15 us
+  record one copyBufferToBuffer: 0.41 us
+  queue.writeBuffer 32 B: 15.31 us/call
+  empty submit + fence wait round trip                     mean    0.011 | p50    0.010 | p99    0.017 | min    0.009 | max    0.090 ms (n=2000)
+# uncaptured wgpu errors: 0

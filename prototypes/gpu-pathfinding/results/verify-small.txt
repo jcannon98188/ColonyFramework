@@ -1,0 +1,30 @@
+# gpu-pathfinding prototype  mode=verify world=small  2026-10-30 19:51  cores=16  .NET 11.0.0
+# World 256x256x32 = 2,097,152 tiles, gen 27 ms; blocked 30.0 %; stairs 1,120; doors 21,992; dynamic tiles 42,618 (2.03 %)
+# Regions: 26,419 chunk components, 25,130 abstract edges, 5,831 regions; main region 1,279,200 tiles (87.2 % of passable); pocket tiles 185,247; full build 15.7 ms (label 8.0 / edges 2.1 / graph 5.3); 10 MB
+# Moves: 4-neighbour in-plane + vertical between vertically adjacent stair tiles; uniform cost 1; tie-break order -x,+x,-y,+y,-z,+z
+## Regions vs global BFS components
+  [PASS] region IDs == global BFS connected components (after full build)
+## CPU flow repair vs fresh BFS; GPU vs CPU bit-exactness
+# GPU: NVIDIA GeForce RTX 2060 SUPER (610.88) via Vulkan; maxBuffer 1048576 MiB, maxStorageBinding 2147483644 B, timestamps True
+  [PASS] GPU build == CPU BFS for 10 Fields (123 iterations)
+## A* lengths == BFS distances; HPA* validity and path-length ratio; GPU move == CPU move
+  [PASS] A* length == BFS distance for 400 reachable pairs (0 unreachable agreed)
+  [PASS] GPU move Kernel positions/status == CPU flow move for 3000 units over 1483 Ticks
+  [PASS] A* and flow units all arrive (3000, 3000 of 3000 reachable)
+  [PASS] HPA* units arrive: 3000 of 3000; Ticks-to-arrive / BFS distance mean 1.062, worst 1.67
+  [PASS] A* walk length == flow-field walk length (+-1 Tick of arrival detection) for 3000/3000 units
+## Under dynamic toggles: CPU repair vs fresh BFS, GPU repair vs CPU, regions vs BFS, GPU vs CPU units
+  [PASS] CPU incremental repair == fresh BFS after 5 Ticks at 21 toggles/Tick
+  [PASS] GPU repair == CPU after 5 Ticks at 21 toggles/Tick (last: inval 8 + relax 24 iterations)
+  [PASS] region IDs == global BFS components after incremental updates at 21 toggles/Tick
+  [PASS] CPU incremental repair == fresh BFS after 5 Ticks at 210 toggles/Tick
+  [PASS] GPU repair == CPU after 5 Ticks at 210 toggles/Tick (last: inval 41 + relax 31 iterations)
+  [PASS] region IDs == global BFS components after incremental updates at 210 toggles/Tick
+  [PASS] CPU incremental repair == fresh BFS after 5 Ticks at 2097 toggles/Tick
+  [PASS] GPU repair == CPU after 5 Ticks at 2097 toggles/Tick (last: inval 0 + relax 132 iterations)
+  [PASS] region IDs == global BFS components after incremental updates at 2097 toggles/Tick
+  [PASS] CPU incremental repair == fresh BFS after 5 Ticks at 20972 toggles/Tick
+  [PASS] GPU repair == CPU after 5 Ticks at 20972 toggles/Tick (last: inval 0 + relax 78 iterations)
+  [PASS] region IDs == global BFS components after incremental updates at 20972 toggles/Tick
+  [PASS] 20000 units, 60 Ticks, 210 toggles/Tick, 3% churn: GPU-repaired Fields + GPU move == CPU (positions and status)
+# VERIFY: all checks passed

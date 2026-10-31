@@ -1,0 +1,31 @@
+﻿# mode=probe backend=vulkan runtime=11.0.0 aot=False V256=True V512=False cpus=16
+wgpu-native version 0x1D000101
+Vulkan: NVIDIA GeForce RTX 2060 SUPER (610.88)
+  adapter maxBufferSize=1099511627776 maxStorageBufferBindingSize=2147483644 maxStorageBuffersPerStage=524288 maxWorkgroupsPerDim=65535 maxInvocations=1024 minStorageOffsetAlign=32
+  timestamps=True period=1ns
+  default-limits device: maxBufferSize=268435456 maxStorageBufferBindingSize=134217728 maxStorageBuffersPerStage=8
+dotnet : [wgpu uncaptured error type=2] Validation Error
+At line:16 char:130
++ ... " | % Line; dotnet bin/Release/net11.0/GpuField.dll probe 2>&1 | Tee- ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([wgpu uncapture...alidation Error:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Caused by:
+  In wgpuDeviceCreateBindGroup
+    Buffer binding 0 range 268435456 exceeds `max_*_buffer_binding_size` limit 134217728
+
+  full-world mirror with default limits: FAILED as expected: BindGroup for 'diffuse-i32' failed
+D3D12: NVIDIA GeForce RTX 2060 SUPER ()
+  adapter maxBufferSize=2147483647 maxStorageBufferBindingSize=2147483644 maxStorageBuffersPerStage=262144 maxWorkgroupsPerDim=65535 maxInvocations=1024 minStorageOffsetAlign=32
+  timestamps=True period=1ns
+  default-limits device: maxBufferSize=268435456 maxStorageBufferBindingSize=134217728 maxStorageBuffersPerStage=8
+[wgpu uncaptured error type=2] Validation Error
+
+Caused by:
+  In wgpuDeviceCreateBindGroup
+    Buffer binding 0 range 268435456 exceeds `max_*_buffer_binding_size` limit 134217728
+
+  full-world mirror with default limits: FAILED as expected: BindGroup for 'diffuse-i32' failed
+# uncaptured wgpu errors: 2

@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Colony.Bench/Colony.Bench.csproj" />
+    <Project Path="src/Colony.Ecs/Colony.Ecs.csproj" />
+  </Folder>
+</Solution>
