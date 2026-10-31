@@ -4,6 +4,7 @@ title: 'Scheduler, Phases and the Tick; reproduce the ECS prototype hash'
 status: To Do
 assignee: []
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 03:00'
 labels:
   - ready-for-agent
   - implementation
@@ -37,3 +38,13 @@ Spec section 4.3 and the spec acceptance for the Core slice: the host calls Worl
 - [ ] #6 A System exception aborts the Tick and marks the World faulted naming the System; TickClock handles accumulator, pause, speed and catch-up cap; a Tick gate lets the host hold a Tick
 - [ ] #7 A negative-control test that introduces a thread-order dependency fails the hash comparison
 <!-- AC:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @jason
+created: 2026-10-31 03:00
+---
+Hand-forward from TASK-6: World.Playback is the sync point to call at each Phase boundary in System order; World.ResetScratch is the end-of-Tick sync point. Bulk playback paths (reserve N rows + memcpy) are not implemented; add them if the colonist scenario's playback shows up in profiles.
+---
+<!-- COMMENTS:END -->
