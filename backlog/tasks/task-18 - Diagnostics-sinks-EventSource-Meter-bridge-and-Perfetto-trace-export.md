@@ -1,9 +1,11 @@
 ---
 id: TASK-18
 title: 'Diagnostics sinks: EventSource/Meter bridge and Perfetto trace export'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 08:15'
 labels:
   - ready-for-agent
   - implementation
