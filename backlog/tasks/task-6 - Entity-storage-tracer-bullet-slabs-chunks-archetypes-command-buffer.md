@@ -1,9 +1,11 @@
 ---
 id: TASK-6
 title: 'Entity storage tracer bullet: slabs, chunks, archetypes, command buffer'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 02:34'
 labels:
   - ready-for-agent
   - implementation
