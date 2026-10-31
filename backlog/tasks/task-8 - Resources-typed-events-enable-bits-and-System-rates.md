@@ -4,6 +4,7 @@ title: 'Resources, typed events, enable bits and System rates'
 status: To Do
 assignee: []
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 03:00'
 labels:
   - ready-for-agent
   - implementation
@@ -34,3 +35,13 @@ Spec sections 4.1 and 4.3: Resources are World-owned singleton unmanaged structs
 - [ ] #4 Every-N-Ticks with offset runs Systems on the expected Ticks; chunks skipped by change version or asleep bit are counted and never visited
 - [ ] #5 All of the above pass the determinism harness scenario across thread counts with zero steady-state allocation
 <!-- AC:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @jason
+created: 2026-10-31 03:00
+---
+Hand-forward from TASK-6: spec 4.1 conflicting-ops rule (first-in-stable-order wins, loser gets a deterministic failure event next Phase) is not implemented because events did not exist; implement it here once typed events land. Stale ops are currently skipped and counted in StructuralCounters.
+---
+<!-- COMMENTS:END -->
