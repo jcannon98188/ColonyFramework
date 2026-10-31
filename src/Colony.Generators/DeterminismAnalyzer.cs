@@ -27,13 +27,36 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
         "Non-deterministic math API in System code",
         "'{0}' is not bit-identical across CPUs; use the Colony math layer instead (spec section 6)");
 
-    private static ImmutableArray<DiagnosticDescriptor>? _all;
+    /// <summary>COL1002: System.Numerics.Vector&lt;T&gt; and the Vector helper class (width varies per CPU).</summary>
+    public static readonly DiagnosticDescriptor VariableWidthVector = Rule(
+        "COL1002",
+        "Variable-width Vector<T> in System code",
+        "'{0}' has a CPU-dependent width; use the Colony math layer's fixed-width SIMD instead (spec section 6)");
+
+    /// <summary>COL1003: DateTime, DateTimeOffset, Stopwatch and Environment.TickCount.</summary>
+    public static readonly DiagnosticDescriptor WallClockTime = Rule(
+        "COL1003",
+        "Wall-clock time in System code",
+        "'{0}' reads wall-clock time, which never enters the simulation; use the Tick counter instead (spec sections 4.3 and 6)");
+
+    /// <summary>COL1004: Guid.NewGuid.</summary>
+    public static readonly DiagnosticDescriptor NewGuid = Rule(
+        "COL1004",
+        "Guid.NewGuid in System code",
+        "'{0}' is random per call; derive ids from Entity IDs or the counter-based RNG instead (spec section 6)");
+
+    /// <summary>COL1007: System.Random.</summary>
+    public static readonly DiagnosticDescriptor SystemRandom = Rule(
+        "COL1007",
+        "System.Random in System code",
+        "'{0}' is not replayable; use the counter-based RNG keyed by (World seed, stream key, counter) instead (spec section 6)");
+
+    // Declared after the descriptors: static field initializers run in textual order.
+    private static readonly ImmutableArray<DiagnosticDescriptor> All =
+        ImmutableArray.Create(NonDeterministicMath, VariableWidthVector, WallClockTime, NewGuid, SystemRandom);
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => All;
-
-    private static ImmutableArray<DiagnosticDescriptor> All =>
-        _all ??= ImmutableArray.Create(NonDeterministicMath);
 
     /// <summary>True when <paramref name="id"/> is one of this analyzer's diagnostic ids.</summary>
     public static bool IsKnownId(string id) => All.Any(d => d.Id == id);
@@ -74,7 +97,51 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
         if (symbol is IMethodSymbol method && BannedMath.IsBanned(method))
         {
             Report(context, NonDeterministicMath, method);
+            return;
         }
+
+        if (symbol is ITypeSymbol type)
+        {
+            if (BannedApis.ForType(type) is { } typeRule)
+            {
+                Report(context, typeRule, type);
+            }
+
+            return;
+        }
+
+        if (BannedApis.ForMember(symbol) is { } memberRule)
+        {
+            Report(context, memberRule, symbol);
+            return;
+        }
+
+        // A member of a banned type reached through something declared outside System code
+        // ("GetRng().Next()", "_hostClock.Elapsed"). When the receiver is a type name, a local or parameter
+        // declared here, or another banned-type member, the chain was already reported upstream.
+        if (symbol.ContainingType is { } owner
+            && BannedApis.ForType(owner) is { } ownerRule
+            && ReceiverIsUnreported(context, scope))
+        {
+            Report(context, ownerRule, symbol);
+        }
+    }
+
+    private static bool ReceiverIsUnreported(SyntaxNodeAnalysisContext context, SystemScope scope)
+    {
+        if (context.Node.Parent is not MemberAccessExpressionSyntax { Expression: var receiver })
+        {
+            return false;
+        }
+
+        var receiverSymbol = context.SemanticModel.GetSymbolInfo(receiver, context.CancellationToken).Symbol;
+        return receiverSymbol switch
+        {
+            null or ITypeSymbol or ILocalSymbol or IParameterSymbol => false,
+            IMethodSymbol method => !(method.ContainingType is { } t && BannedApis.ForType(t) is not null),
+            _ => !(receiverSymbol.ContainingType is { } t && BannedApis.ForType(t) is not null)
+                 && !scope.IsSystemCode(receiverSymbol),
+        };
     }
 
     private static void Report(SyntaxNodeAnalysisContext context, DiagnosticDescriptor descriptor, ISymbol symbol)
@@ -128,6 +195,45 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
 
             return inSystem;
         }
+    }
+
+    /// <summary>Spec section 6: types and members banned outright, keyed by fully qualified metadata name.</summary>
+    private static class BannedApis
+    {
+        private static readonly ImmutableDictionary<string, DiagnosticDescriptor> Types =
+            ImmutableDictionary.CreateRange(StringComparer.Ordinal, new[]
+            {
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Numerics.Vector`1", VariableWidthVector),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Numerics.Vector", VariableWidthVector),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.DateTime", WallClockTime),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.DateTimeOffset", WallClockTime),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Diagnostics.Stopwatch", WallClockTime),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Random", SystemRandom),
+            });
+
+        private static readonly ImmutableDictionary<string, DiagnosticDescriptor> Members =
+            ImmutableDictionary.CreateRange(StringComparer.Ordinal, new[]
+            {
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Guid.NewGuid", NewGuid),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Environment.TickCount", WallClockTime),
+                new KeyValuePair<string, DiagnosticDescriptor>("System.Environment.TickCount64", WallClockTime),
+            });
+
+        public static DiagnosticDescriptor? ForType(ITypeSymbol type) =>
+            type.OriginalDefinition is INamedTypeSymbol named
+            && named.ContainingNamespace is { } ns
+            && Types.TryGetValue(QualifiedMetadataName(ns, named.MetadataName), out var rule)
+                ? rule
+                : null;
+
+        public static DiagnosticDescriptor? ForMember(ISymbol member) =>
+            member.ContainingType is { ContainingNamespace: { } ns } owner
+            && Members.TryGetValue(QualifiedMetadataName(ns, owner.MetadataName) + "." + member.Name, out var rule)
+                ? rule
+                : null;
+
+        private static string QualifiedMetadataName(INamespaceSymbol ns, string metadataName) =>
+            ns.IsGlobalNamespace ? metadataName : ns.ToDisplayString() + "." + metadataName;
     }
 
     /// <summary>Spec section 6: transcendentals on Math, MathF and the generic-math statics of double/float/Half.</summary>
