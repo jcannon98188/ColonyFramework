@@ -295,6 +295,84 @@ public sealed class WorldSchema
     /// <summary>Registered counter names by <see cref="Colony.Diagnostics.CounterId"/>.</summary>
     public ReadOnlySpan<string> Counters => _counters;
 
+    private readonly PluginDescriptor[] _plugins = [];
+    private readonly SystemOverride[] _systemOverrides = [];
+    private readonly int[] _componentOwners = [];
+    private readonly int[] _resourceOwners = [];
+
+    /// <summary>The Plugins that registered into this schema, in load order (spec section 8); empty for a World built without Plugins.</summary>
+    public ReadOnlySpan<PluginDescriptor> Plugins
+    {
+        get => _plugins;
+        internal init
+        {
+            _plugins = value.ToArray();
+            bool deterministic = true;
+            foreach (var plugin in _plugins)
+            {
+                deterministic &= plugin.Deterministic;
+            }
+
+            IsDeterministic = deterministic;
+        }
+    }
+
+    /// <summary>Overridable Systems that a later Plugin replaced (spec section 8); recorded in the save manifest.</summary>
+    public ReadOnlySpan<SystemOverride> SystemOverrides
+    {
+        get => _systemOverrides;
+        internal init => _systemOverrides = value.ToArray();
+    }
+
+    /// <summary>
+    /// False when any Plugin declared itself NonDeterministic (spec section 8): Worlds of this schema make no
+    /// cross-machine hash promise. A schema without Plugins is deterministic.
+    /// </summary>
+    public bool IsDeterministic { get; private init; } = true;
+
+    internal ReadOnlySpan<int> ComponentOwners
+    {
+        get => _componentOwners;
+        init => _componentOwners = value.ToArray();
+    }
+
+    internal ReadOnlySpan<int> ResourceOwners
+    {
+        get => _resourceOwners;
+        init => _resourceOwners = value.ToArray();
+    }
+
+    /// <summary>The index into <see cref="Plugins"/> of the Plugin that registered <paramref name="type"/>, or -1 when the Game registered it directly.</summary>
+    public int ComponentOwner(ComponentType type)
+    {
+        ValidateType(type);
+        return _componentOwners[type.Id];
+    }
+
+    /// <summary>The index into <see cref="Plugins"/> of the Plugin that registered <paramref name="type"/>, or -1 when the Game (or Core) registered it directly.</summary>
+    public int ResourceOwner(ResourceType type)
+    {
+        ValidateResource(type);
+        return _resourceOwners[type.Id];
+    }
+
+    /// <summary>The Plugin registered under <paramref name="id"/>, or false when none did.</summary>
+    public bool TryGetPlugin(string id, out PluginDescriptor plugin)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        foreach (ref readonly var candidate in Plugins)
+        {
+            if (string.Equals(candidate.Id, id, StringComparison.Ordinal))
+            {
+                plugin = candidate;
+                return true;
+            }
+        }
+
+        plugin = default;
+        return false;
+    }
+
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);
 
