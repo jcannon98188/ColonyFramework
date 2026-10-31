@@ -283,7 +283,7 @@ internal sealed class SystemSchedule
         /// <summary>System ids in stable topological order.</summary>
         public int[] Systems { get; }
 
-        /// <summary>Wave of the System at the same index of <see cref="Systems"/>; waves are non-decreasing in this order.</summary>
+        /// <summary>Wave of the System at the same index of <see cref="Systems"/>: its longest-path level over conflict-or-constraint edges. Not monotone along <see cref="Systems"/>; the runner scans the list once per wave.</summary>
         public int[] WaveOf { get; }
 
         public int WaveCount { get; }
