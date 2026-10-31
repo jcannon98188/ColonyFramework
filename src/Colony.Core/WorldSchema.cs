@@ -13,6 +13,7 @@ public sealed class WorldSchema
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
     private readonly Phase[] _phases;
+    private readonly WorldExtensionDefinition[] _extensions;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
@@ -20,12 +21,14 @@ public sealed class WorldSchema
         Dictionary<string, int> byName,
         List<Phase> phases,
         SystemSchedule schedule,
+        List<WorldExtensionDefinition> extensions,
         bool debugValidation)
     {
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
         _phases = [.. phases];
+        _extensions = [.. extensions];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
@@ -38,6 +41,11 @@ public sealed class WorldSchema
             sizes[i] = _components[i].Size;
             slots[i] = _components[i].IsNonFragmenting ? nonFragmenting++ : -1;
             hash = Hashing.Hash64.Combine(hash, _components[i].LayoutHash);
+        }
+
+        foreach (var extension in _extensions)
+        {
+            hash = Hashing.Hash64.Combine(hash, extension.LayoutHash);
         }
 
         Sizes = sizes;
@@ -129,6 +137,9 @@ public sealed class WorldSchema
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
     public ReadOnlySpan<Phase> Phases => _phases;
+
+    /// <summary>Registered World extensions in registration order (their layout hashes are part of <see cref="SchemaHash"/>).</summary>
+    public ReadOnlySpan<WorldExtensionDefinition> Extensions => _extensions;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);
