@@ -15,13 +15,15 @@ public sealed class CommandBuffer
     private const int PageSize = 16 * 1024;
     private const int HeaderSize = 16;
     private const int PayloadCapacity = PageSize - HeaderSize;
+    private const int ResolvedBlockShift = 13;
+    private const int ResolvedBlockSize = 1 << ResolvedBlockShift;
 
     private readonly WorldSchema _schema;
     private nint _firstPage;
     private nint _currentPage;
     private uint _arenaGeneration;
     private int _createCount;
-    private nint _resolved;
+    private nint _resolvedDirectory;
     private int _resolvedCount;
     private uint _resolvedGeneration;
 
@@ -121,7 +123,7 @@ public sealed class CommandBuffer
             throw new ArgumentException("Only deferred handles from Create can be resolved.", nameof(deferred));
         }
 
-        if (_resolved == 0 || _resolvedGeneration != World.Scratch.Generation)
+        if (_resolvedDirectory == 0 || _resolvedGeneration != World.Scratch.Generation)
         {
             throw new InvalidOperationException("The deferred handle cannot be resolved: the buffer has not been played back since it was recorded, or the scratch arena was reset.");
         }
@@ -132,8 +134,11 @@ public sealed class CommandBuffer
             throw new ArgumentOutOfRangeException(nameof(deferred), deferred, "The handle was not created by this buffer's last playback.");
         }
 
-        return ((EntityId*)_resolved)[ordinal];
+        return ResolvedAt((EntityId**)_resolvedDirectory, ordinal);
     }
+
+    private static unsafe EntityId ResolvedAt(EntityId** directory, int ordinal)
+        => directory[ordinal >> ResolvedBlockShift][ordinal & (ResolvedBlockSize - 1)];
 
     /// <summary>Drops every recorded command without applying it.</summary>
     public void Clear()
@@ -157,10 +162,13 @@ public sealed class CommandBuffer
             throw new InvalidOperationException("The command buffer outlived the scratch arena it was recorded into; play buffers back before ResetScratch.");
         }
 
-        _resolved = (nint)arena.Alloc(Math.Max(1, _createCount) * sizeof(ulong), sizeof(ulong));
+        // The resolution table is a directory of 64 KiB blocks (8192 ids each), filled lazily as creates
+        // are applied, so any number of creates fits the arena's per-allocation limit.
+        int blocks = Math.Max(1, (_createCount + ResolvedBlockSize - 1) >> ResolvedBlockShift);
+        _resolvedDirectory = (nint)arena.Alloc(blocks * sizeof(nint), sizeof(nint));
         _resolvedCount = 0;
         _resolvedGeneration = arena.Generation;
-        var resolved = (EntityId*)_resolved;
+        var resolved = (EntityId**)_resolvedDirectory;
 
         for (nint page = _firstPage; page != 0; page = ((PageHeader*)page)->Next)
         {
@@ -173,7 +181,14 @@ public sealed class CommandBuffer
                 {
                     var signature = Unsafe.ReadUnaligned<ComponentMask>(p);
                     p += sizeof(ComponentMask);
-                    resolved[_resolvedCount++] = World.CreateEntity(signature);
+                    if ((_resolvedCount & (ResolvedBlockSize - 1)) == 0)
+                    {
+                        resolved[_resolvedCount >> ResolvedBlockShift] = (EntityId*)arena.Alloc(ResolvedBlockSize * sizeof(ulong), sizeof(ulong));
+                    }
+
+                    var created = World.CreateEntity(signature);
+                    resolved[_resolvedCount >> ResolvedBlockShift][_resolvedCount & (ResolvedBlockSize - 1)] = created;
+                    _resolvedCount++;
                     continue;
                 }
 
@@ -208,7 +223,7 @@ public sealed class CommandBuffer
         Clear();
     }
 
-    private unsafe EntityId Target(ulong raw, EntityId* resolved)
+    private unsafe EntityId Target(ulong raw, EntityId** resolved)
     {
         var id = new EntityId(raw);
         if (!id.IsDeferred)
@@ -222,7 +237,7 @@ public sealed class CommandBuffer
             throw new InvalidOperationException($"{id} targets an Entity this buffer has not created.");
         }
 
-        return resolved[ordinal];
+        return ResolvedAt(resolved, ordinal);
     }
 
     private unsafe byte* Reserve(int bytes)
