@@ -10,9 +10,10 @@ public sealed partial class World
     /// <summary>
     /// The World hash (spec section 6): <see cref="Hash64"/> over the schema hash, the Tick, every
     /// archetype's chunks in archetype id then chunk order (the Entity column and each Component column
-    /// over the live rows only, each with its enable bits), the non-fragmenting Components of every live Entity in slot order, the
-    /// persistent Resources in id order and the RNG state. Padding rows, change versions, the asleep bit,
-    /// transient Resources (including non-persistent event queues) and caches are excluded. Linear in the
+    /// over the live rows only, each with its enable bits), the non-fragmenting Components of every live
+    /// Entity in slot order, the persistent Resources in id order, every extension's state in registration
+    /// order (<see cref="IWorldExtension.Hash"/>), and the RNG state. Padding rows, change versions, the
+    /// asleep bit, transient Resources (including non-persistent event queues) and caches are excluded. Linear in the
     /// live data, so it is cheap enough to run every few Ticks in a test. Equal on 1 or N threads, JIT or
     /// Native AOT, for the same seed and inputs (Tier 1 determinism, ADR 0002).
     /// </summary>
@@ -85,6 +86,11 @@ public sealed partial class World
                 state.Append(count);
                 state.Append(new ReadOnlySpan<byte>(_resources.QueuePointer(id), count * descriptor.Size));
             }
+        }
+
+        foreach (var extension in _extensions)
+        {
+            extension.Hash(ref state);
         }
 
         state.Append(_sharedRandom.Stream.Seed);

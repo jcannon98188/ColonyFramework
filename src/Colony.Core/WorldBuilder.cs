@@ -9,10 +9,7 @@ namespace Colony;
 /// </summary>
 public sealed class WorldBuilder
 {
-    /// <summary>Seed for Component layout hashes ("LAYT"), so they never collide with a World hash by construction.</summary>
-    private const ulong LayoutHashSeed = 0x4C41_5954UL;
-
-    /// <summary>Seed for Resource layout hashes ("RSRC").</summary>
+    /// <summary>Seed for Resource layout hashes ("RSRC"), so they never collide with a World or Component layout hash by construction.</summary>
     private const ulong ResourceLayoutHashSeed = 0x5253_5243UL;
 
     private readonly List<ComponentDescriptor> _components = [];
@@ -24,6 +21,25 @@ public sealed class WorldBuilder
     private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
+    private readonly List<WorldExtensionDefinition> _extensions = [];
+
+    /// <summary>
+    /// Registers a World extension (Fields, spatial index, ...). Extensions are frozen at <see cref="Build"/>,
+    /// hashed into the schema and created once per World, in registration order.
+    /// </summary>
+    public WorldBuilder AddExtension(WorldExtensionDefinition extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        ThrowIfBuilt();
+        ArgumentException.ThrowIfNullOrWhiteSpace(extension.Name, nameof(extension));
+        if (_extensions.Exists(e => string.Equals(e.Name, extension.Name, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"An extension named '{extension.Name}' is already registered.", nameof(extension));
+        }
+
+        _extensions.Add(extension);
+        return this;
+    }
 
     public WorldBuilder()
     {
@@ -105,6 +121,38 @@ public sealed class WorldBuilder
     public WorldBuilder AddComponent<T>(string name, ComponentOptions flags = ComponentOptions.None) where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return AddComponent<T>(name, flags, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
+    }
+
+    /// <summary>
+    /// Registers a source-generated Component (spec section 11) under its layout's stable name. The layout
+    /// hash covers the name, size, alignment and every field's name, type, offset and size (spec section 4.1).
+    /// </summary>
+    public WorldBuilder AddComponent<T>() where T : unmanaged, IComponent<T>
+    {
+        var layout = T.Layout;
+        ArgumentNullException.ThrowIfNull(layout, nameof(T));
+        layout.Validate(Unsafe.SizeOf<T>());
+        return AddComponent<T>(layout.Name, layout.Flags, layout.Fields);
+    }
+
+    /// <summary>The Phase named <paramref name="name"/>: one of the six named Phases or a Game Phase already added.</summary>
+    public Phase PhaseNamed(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (var phase in _phases)
+        {
+            if (string.Equals(phase.Name, name, StringComparison.Ordinal))
+            {
+                return phase;
+            }
+        }
+
+        throw new ArgumentException($"No Phase named '{name}' exists; add Game Phases with AddPhase before the Systems that use them.", nameof(name));
+    }
+
+    private WorldBuilder AddComponent<T>(string name, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields) where T : unmanaged
+    {
         ThrowIfBuilt();
         if (_byName.ContainsKey(name))
         {
@@ -131,11 +179,9 @@ public sealed class WorldBuilder
             throw new InvalidOperationException($"A schema may register at most {ComponentMask.Capacity} Components.");
         }
 
-        // Layout identity (spec section 4.1): the registered name, size and alignment, never the CLR type.
-        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), LayoutHashSeed);
-        hash = Hashing.Hash64.Combine(hash, (ulong)size);
-        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
-        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags));
+        // Layout identity (spec section 4.1): the registered name, size, alignment and fields, never the CLR type.
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
+        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags) { Fields = fields });
         _byName.Add(name, id);
         _byClrType.Add(typeof(T), id);
         return this;
@@ -263,7 +309,12 @@ public sealed class WorldBuilder
         ThrowIfBuilt();
         _built = true;
         var schedule = SystemSchedule.Build(_systems, _phases, _components.Count, _resources);
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _debugValidation);
+        foreach (var extension in _extensions)
+        {
+            extension.Freeze();
+        }
+
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _debugValidation);
     }
 
     private void ThrowIfBuilt()

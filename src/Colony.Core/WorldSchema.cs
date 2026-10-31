@@ -16,6 +16,7 @@ public sealed class WorldSchema
     private readonly Dictionary<Type, int> _resourceByClrType;
     private readonly Dictionary<string, int> _resourceByName;
     private readonly Phase[] _phases;
+    private readonly WorldExtensionDefinition[] _extensions;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
@@ -26,6 +27,7 @@ public sealed class WorldSchema
         Dictionary<string, int> resourceByName,
         List<Phase> phases,
         SystemSchedule schedule,
+        List<WorldExtensionDefinition> extensions,
         bool debugValidation)
     {
         _components = [.. components];
@@ -35,6 +37,7 @@ public sealed class WorldSchema
         _resourceByClrType = resourceByClrType;
         _resourceByName = resourceByName;
         _phases = [.. phases];
+        _extensions = [.. extensions];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
@@ -55,6 +58,11 @@ public sealed class WorldSchema
             resourceSizes[i] = _resources[i].Size;
             hash = Hashing.Hash64.Combine(hash, _resources[i].LayoutHash);
             hash = Hashing.Hash64.Combine(hash, _resources[i].IsPersistent ? 1UL : 0UL);
+        }
+
+        foreach (var extension in _extensions)
+        {
+            hash = Hashing.Hash64.Combine(hash, extension.LayoutHash);
         }
 
         Sizes = sizes;
@@ -195,6 +203,9 @@ public sealed class WorldSchema
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
     public ReadOnlySpan<Phase> Phases => _phases;
+
+    /// <summary>Registered World extensions in registration order (their layout hashes are part of <see cref="SchemaHash"/>).</summary>
+    public ReadOnlySpan<WorldExtensionDefinition> Extensions => _extensions;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);

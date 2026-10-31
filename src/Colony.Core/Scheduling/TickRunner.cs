@@ -31,7 +31,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             _states[i] = new SystemState { Id = i };
         }
 
-        _pool = new WorkerPool(workerCount, this);
+        _pool = new WorkerPool(workerCount);
         _workerErrors = new Exception?[_pool.WorkerCount];
         _workerErrorJobs = new int[_pool.WorkerCount];
     }
@@ -43,6 +43,12 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     public void RunTick(long tick)
     {
         _tick = tick;
+        var extensions = _world.Extensions;
+        for (int i = 0; i < extensions.Length; i++)
+        {
+            extensions[i].BeginTick(tick);
+        }
+
         var phases = _schedule.Phases;
         for (int p = 0; p < phases.Length; p++)
         {
@@ -60,9 +66,34 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             }
 
             Playback(plan);
+            for (int i = 0; i < extensions.Length; i++)
+            {
+                extensions[i].EndPhase(plan.Phase);
+            }
+        }
+
+        for (int i = 0; i < extensions.Length; i++)
+        {
+            extensions[i].EndTick(tick);
         }
 
         _world.ResetScratch();
+    }
+
+    /// <summary>Runs an index-keyed job on the pool (see <see cref="World.RunParallel"/>); fails when the pool is mid-wave.</summary>
+    public void RunParallel(int count, IIndexedJob job)
+    {
+        _parallel.Job = job;
+        _pool.Run(count, _parallel);
+    }
+
+    private readonly IndexedJobSource _parallel = new();
+
+    private sealed class IndexedJobSource : WorkerPool.IJobSource
+    {
+        public IIndexedJob? Job;
+
+        public void Run(int job, int worker) => Job!.Execute(job);
     }
 
     private void RunWave(SystemSchedule.PhasePlan plan, int wave)
@@ -103,7 +134,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             }
         }
 
-        _pool.Run(_jobCount);
+        _pool.Run(_jobCount, this);
         ThrowIfJobFaulted(plan.Phase);
 
         for (int k = 0; k < plan.Systems.Length; k++)
