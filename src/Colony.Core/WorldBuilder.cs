@@ -409,6 +409,76 @@ public sealed class WorldBuilder
         return new ResourceType(id);
     }
 
+    /// <summary>Seed for Input Command layout hashes ("INPT").</summary>
+    private const ulong InputCommandLayoutHashSeed = 0x494E_5054UL;
+
+    /// <summary>Registered name of the built-in <see cref="CommandRejected"/> queue, created with the first Input Command.</summary>
+    public const string CommandRejectedQueueName = "colony.command-rejected";
+
+    private readonly List<InputCommandDescriptor> _inputCommands = [];
+    private readonly Dictionary<Type, int> _inputByClrType = [];
+    private readonly Dictionary<string, int> _inputByName = new(StringComparer.Ordinal);
+    private ResourceType? _commandRejections;
+
+    /// <summary>
+    /// Registers an Input Command (spec section 7.3): a typed unmanaged struct submitted through
+    /// <see cref="WorldInputs.Submit{T}(InputSource, in T, long)"/> and applied by handler Systems in the Input Phase
+    /// through <see cref="SystemContext.Inputs{T}"/>. The layout hash (name, size, alignment) is part of the schema
+    /// hash and of every replay log header. The first registration also registers the <see cref="CommandRejections"/> queue.
+    /// </summary>
+    public InputCommandType AddInputCommand<T>(string name) where T : unmanaged
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        if (_inputByName.ContainsKey(name))
+        {
+            throw new ArgumentException($"An Input Command named '{name}' is already registered.", nameof(name));
+        }
+
+        if (_inputByClrType.ContainsKey(typeof(T)))
+        {
+            throw new ArgumentException($"The type {typeof(T).Name} is already registered as an Input Command.", nameof(T));
+        }
+
+        _commandRejections ??= AddResourceCore<CommandRejected>(CommandRejectedQueueName, ResourceKind.EventQueue, persistent: false);
+        int size = Unsafe.SizeOf<T>();
+        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
+        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), InputCommandLayoutHashSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)size);
+        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
+        var type = new InputCommandType(_inputCommands.Count);
+        _inputCommands.Add(new InputCommandDescriptor(type, name, size, alignment, hash));
+        _inputByName.Add(name, type.Id);
+        _inputByClrType.Add(typeof(T), type.Id);
+        return type;
+    }
+
+    /// <summary>The handle for the already-registered Input Command of CLR type <typeparamref name="T"/>.</summary>
+    public InputCommandType InputCommand<T>() where T : unmanaged
+    {
+        if (!_inputByClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as an Input Command; call AddInputCommand first.", nameof(T));
+        }
+
+        return new InputCommandType(id);
+    }
+
+    /// <summary>The handle for the already-registered Input Command named <paramref name="name"/>.</summary>
+    public InputCommandType InputCommand(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_inputByName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Input Command named '{name}' is registered; call AddInputCommand first.", nameof(name));
+        }
+
+        return new InputCommandType(id);
+    }
+
+    /// <summary>The built-in <see cref="CommandRejected"/> queue; exists once an Input Command is registered. Declare it in <see cref="SystemDefinition.ReadsResources"/> to read rejections.</summary>
+    public ResourceType CommandRejections => _commandRejections ?? throw new InvalidOperationException("No Input Command is registered; the CommandRejected queue is created by the first AddInputCommand.");
+
     private ResourceType AddResourceCore<T>(string name, ResourceKind kind, bool persistent) where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -465,7 +535,7 @@ public sealed class WorldBuilder
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters);
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections);
     }
 
     private void ThrowIfBuilt()

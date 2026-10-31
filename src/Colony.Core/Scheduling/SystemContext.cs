@@ -84,6 +84,21 @@ public readonly ref struct SystemContext
         return World.Events<T>(queue);
     }
 
+    /// <summary>
+    /// This Tick's Input Commands of type <typeparamref name="T"/> in canonical order (spec section 7.3), for a
+    /// handler System in the Input Phase. The list is fixed for the whole Tick and readable from any hook or job;
+    /// apply commands through <see cref="Commands"/>, draw randomness from <see cref="InputEntry{T}.Random"/>.
+    /// </summary>
+    public InputList<T> Inputs<T>(InputCommandType type) where T : unmanaged => World.Inputs.ListOf<T>(type);
+
+    /// <summary>
+    /// Rejects an Input Command deterministically (spec section 7.3): emits <see cref="CommandRejected"/> with the
+    /// source, sequence and <paramref name="reason"/> on the built-in <see cref="WorldSchema.CommandRejections"/>
+    /// queue through this job's command buffer. The command stays in the canonical list and the replay log.
+    /// </summary>
+    public void Reject<T>(in InputEntry<T> entry, int reason) where T : unmanaged
+        => Commands.Emit(World.Schema.CommandRejections, new CommandRejected(entry.Source, entry.Sequence, entry.Type, reason));
+
     public World World { get; }
 
     /// <summary>This job's command buffer. Serial hooks share job 0's buffer.</summary>
