@@ -101,6 +101,33 @@ public sealed class CommandBuffer
         Count++;
     }
 
+    /// <summary>
+    /// Wire-form <see cref="Add{T}"/> (spec section 10.2): the Component's value as exactly
+    /// <see cref="ComponentDescriptor.Size"/> raw bytes, for tooling and the C ABI that know Components by
+    /// name only. Buffer Components are refused (their value owns storage).
+    /// </summary>
+    public unsafe void Add(EntityId entity, ComponentType type, ReadOnlySpan<byte> value)
+    {
+        _schema.ValidateType(type);
+        int size = _schema.Sizes[type.Id];
+        if (value.Length != size)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is {size} bytes; the value has {value.Length}.", nameof(value));
+        }
+
+        if (_schema.Components[type.Id].IsBuffer)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is a buffer Component; add it zeroed and fill it through World.GetBuffer.", nameof(type));
+        }
+
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
+        *p = (byte)Kind.Add;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        value.CopyTo(new Span<byte>(p + 13, size));
+        Count++;
+    }
+
     /// <summary>Adds the Component zero-initialised (a tag, or a value filled in later), or zeroes it when already present.</summary>
     public unsafe void Add(EntityId entity, ComponentType type)
     {

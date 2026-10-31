@@ -196,7 +196,8 @@ public sealed partial class World : IDisposable
 
     internal ScratchArena Scratch { get; }
 
-    internal int ArchetypeCount => _archetypeCount;
+    /// <summary>Archetypes this World has created so far (per World, in creation order; see <see cref="DescribeArchetype"/>).</summary>
+    public int ArchetypeCount => _archetypeCount;
 
     internal Archetype ArchetypeAt(int index) => _archetypes[index];
 
