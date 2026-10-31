@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Colony.Jobs.Tests</RootNamespace>
+    <!-- Zero-allocation gates: tiered recompilation inside a measured window allocates (see Colony.Core.Tests). -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Colony\Colony.Colony.csproj" />
+    <!-- Scenarios run through the determinism and allocation harnesses (spec section 10.3). -->
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+  </ItemGroup>
+
+</Project>
