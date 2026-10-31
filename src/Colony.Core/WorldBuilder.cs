@@ -9,9 +9,6 @@ namespace Colony;
 /// </summary>
 public sealed class WorldBuilder
 {
-    /// <summary>Seed for Component layout hashes ("LAYT"), so they never collide with a World hash by construction.</summary>
-    private const ulong LayoutHashSeed = 0x4C41_5954UL;
-
     private readonly List<ComponentDescriptor> _components = [];
     private readonly Dictionary<Type, int> _byClrType = [];
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
@@ -105,6 +102,38 @@ public sealed class WorldBuilder
     public WorldBuilder AddComponent<T>(string name, ComponentOptions flags = ComponentOptions.None) where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return AddComponent<T>(name, flags, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
+    }
+
+    /// <summary>
+    /// Registers a source-generated Component (spec section 11) under its layout's stable name. The layout
+    /// hash covers the name, size, alignment and every field's name, type, offset and size (spec section 4.1).
+    /// </summary>
+    public WorldBuilder AddComponent<T>() where T : unmanaged, IComponent<T>
+    {
+        var layout = T.Layout;
+        ArgumentNullException.ThrowIfNull(layout, nameof(T));
+        layout.Validate(Unsafe.SizeOf<T>());
+        return AddComponent<T>(layout.Name, layout.Flags, layout.Fields);
+    }
+
+    /// <summary>The Phase named <paramref name="name"/>: one of the six named Phases or a Game Phase already added.</summary>
+    public Phase PhaseNamed(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (var phase in _phases)
+        {
+            if (string.Equals(phase.Name, name, StringComparison.Ordinal))
+            {
+                return phase;
+            }
+        }
+
+        throw new ArgumentException($"No Phase named '{name}' exists; add Game Phases with AddPhase before the Systems that use them.", nameof(name));
+    }
+
+    private WorldBuilder AddComponent<T>(string name, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields) where T : unmanaged
+    {
         ThrowIfBuilt();
         if (_byName.ContainsKey(name))
         {
@@ -131,11 +160,9 @@ public sealed class WorldBuilder
             throw new InvalidOperationException($"A schema may register at most {ComponentMask.Capacity} Components.");
         }
 
-        // Layout identity (spec section 4.1): the registered name, size and alignment, never the CLR type.
-        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), LayoutHashSeed);
-        hash = Hashing.Hash64.Combine(hash, (ulong)size);
-        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
-        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags));
+        // Layout identity (spec section 4.1): the registered name, size, alignment and fields, never the CLR type.
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
+        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags) { Fields = fields });
         _byName.Add(name, id);
         _byClrType.Add(typeof(T), id);
         return this;

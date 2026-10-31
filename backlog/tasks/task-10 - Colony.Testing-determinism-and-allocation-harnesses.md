@@ -1,9 +1,11 @@
 ---
 id: TASK-10
 title: 'Colony.Testing: determinism and allocation harnesses'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 07:55'
 labels:
   - ready-for-agent
   - implementation

@@ -9,6 +9,7 @@
     <Project Path="tests/Colony.Core.AotHost/Colony.Core.AotHost.csproj" />
     <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
     <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
+    <Project Path="tests/Colony.Generated.Tests/Colony.Generated.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
     <Project Path="tests/Colony.ProcGen.Tests/Colony.ProcGen.Tests.csproj" />
   </Folder>
