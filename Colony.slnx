@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Colony.Core/Colony.Core.csproj" />
+    <Project Path="src/Colony.Generators/Colony.Generators.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Colony.DependencyCheck/Colony.DependencyCheck.csproj" />
+    <Project Path="tools/Colony.DependencyCheck.Tests/Colony.DependencyCheck.Tests.csproj" />
+  </Folder>
+</Solution>

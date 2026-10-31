@@ -1,4 +1,5 @@
-# .NET build output
+# .NET build output (the solution uses UseArtifactsOutput: everything lands in artifacts/)
+artifacts/
 bin/
 obj/
 *.user

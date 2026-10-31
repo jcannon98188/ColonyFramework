@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Dependency check (spec section 3): reads every project in src/, tests/, tools/, benchmarks/ and
+    samples/, and fails (exit code 1) when a package references another outside the layering rules.
+    Run locally: dotnet run (from tools/Colony.DependencyCheck)
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Colony.Tools.DependencyCheck</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.DependencyCheck.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,6 @@
+<Project>
+  <!--
+    Deliberately empty. Prototypes under this folder are throwaway reference code (spec section 14):
+    they are not in the solution and must not inherit the Framework's build settings from the repo root.
+  -->
+</Project>
