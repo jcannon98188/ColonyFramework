@@ -79,6 +79,30 @@ public sealed class PluginSaveTests
     }
 
     [Fact]
+    public void The_C_ABI_version_of_a_native_plugin_is_recorded_in_the_schema_and_the_save()
+    {
+        var native = new DelegatePlugin(new PluginManifest { Id = "test.native", Version = "2.0.0", AbiVersion = ColonyApi.AbiVersion }, r => r.AddComponent<Soil>("native.soil"));
+        var schema = PluginWorlds.Build(new FarmingPlugin(), native);
+        using var world = schema.CreateWorld();
+        world.Tick();
+
+        var manifest = WorldPersistence.ReadManifest(world.SaveToBytes());
+
+        Assert.Equal([0, ColonyApi.AbiVersion], schema.Plugins.ToArray().Select(p => p.AbiVersion).ToArray());
+        Assert.Equal([0, ColonyApi.AbiVersion], manifest.Plugins.Select(p => p.AbiVersion).ToArray());
+    }
+
+    [Fact]
+    public void A_plugin_built_against_a_newer_C_ABI_fails_at_build()
+    {
+        var future = new DelegatePlugin(new PluginManifest { Id = "test.future", Version = "1.0.0", AbiVersion = ColonyApi.AbiVersion + 1 }, _ => { });
+
+        var error = Assert.Throws<PluginException>(() => PluginWorlds.Build(future));
+
+        Assert.Contains("C ABI", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Loading_with_a_missing_plugin_fails_by_default()
     {
         var schema = PluginWorlds.Build(new FarmingPlugin(), Tags);

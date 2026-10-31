@@ -78,7 +78,7 @@ public sealed class PluginHost
             var plugin = order[i];
             var manifest = plugin.Manifest;
             var registration = new PluginRegistration(this, builder, manifest, i, _options.Fields, _definitions.For(manifest, i));
-            builder.BeginPlugin(manifest.Id, manifest.Version, manifest.Deterministic);
+            builder.BeginPlugin(manifest.Id, manifest.Version, manifest.Deterministic, manifest.AbiVersion);
             try
             {
                 plugin.Register(registration);
@@ -132,6 +132,11 @@ public sealed class PluginHost
             if (manifest.RequiredApiVersion > ColonyApi.Version)
             {
                 throw new PluginException(manifest.Id, $"Plugin '{manifest.Id}' requires Colony API version {manifest.RequiredApiVersion}; this host provides {ColonyApi.Version}.");
+            }
+
+            if (manifest.AbiVersion < 0 || manifest.AbiVersion > ColonyApi.AbiVersion)
+            {
+                throw new PluginException(manifest.Id, $"Plugin '{manifest.Id}' was built against C ABI version {manifest.AbiVersion}; this host provides {ColonyApi.AbiVersion}.");
             }
 
             foreach (string dependency in manifest.Dependencies)
