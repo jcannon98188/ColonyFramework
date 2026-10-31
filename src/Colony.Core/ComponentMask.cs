@@ -85,6 +85,13 @@ public readonly struct ComponentMask : IEquatable<ComponentMask>
     public bool ContainsNone(ComponentMask other)
         => ((_w0 & other._w0) | (_w1 & other._w1) | (_w2 & other._w2) | (_w3 & other._w3)) == 0;
 
+    /// <summary>True when at least one Component is in both masks.</summary>
+    public bool Intersects(ComponentMask other) => !ContainsNone(other);
+
+    public ComponentMask Union(ComponentMask other) => new(_w0 | other._w0, _w1 | other._w1, _w2 | other._w2, _w3 | other._w3);
+
+    public ComponentMask Intersect(ComponentMask other) => new(_w0 & other._w0, _w1 & other._w1, _w2 & other._w2, _w3 & other._w3);
+
     /// <summary>Enumerates set ids in ascending order; <paramref name="ids"/> must hold <see cref="Count"/> entries.</summary>
     internal int CopyIds(Span<int> ids)
     {
@@ -124,10 +131,9 @@ public readonly struct ComponentMask : IEquatable<ComponentMask>
 
     public override int GetHashCode()
     {
-        ulong h = Fnv1a.Hash(_w0);
-        h = Fnv1a.Hash(_w1, h);
-        h = Fnv1a.Hash(_w2, h);
-        h = Fnv1a.Hash(_w3, h);
+        ulong h = Hashing.Hash64.Combine(_w0, _w1);
+        h = Hashing.Hash64.Combine(h, _w2);
+        h = Hashing.Hash64.Combine(h, _w3);
         return (int)h ^ (int)(h >> 32);
     }
 

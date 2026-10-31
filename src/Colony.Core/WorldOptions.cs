@@ -8,6 +8,18 @@ public sealed class WorldOptions
     /// <summary>Entity index slots reserved up front, so a World sized for its load allocates nothing later.</summary>
     public int InitialEntityCapacity { get; init; } = 1024;
 
+    /// <summary>The World seed: root of every <see cref="Colony.Numerics.RandomSource"/> a System draws from (spec section 6).</summary>
+    public ulong Seed { get; init; }
+
+    /// <summary>
+    /// Threads that run a Tick, including the one that calls <see cref="World.Tick"/>; 0 means one per
+    /// physical core (spec section 4.3). Results never depend on this number.
+    /// </summary>
+    public int WorkerThreads { get; init; }
+
+    /// <summary>When set, <see cref="World.Tick"/> runs only while the gate lets it (host pause, inspector step, lockstep waiting).</summary>
+    public TickGate? TickGate { get; init; }
+
     /// <summary>
     /// Receives the leak report when a debug-validated World is disposed with native memory still in
     /// use. When null, a leak throws <see cref="InvalidOperationException"/> from <see cref="World.Dispose"/>.

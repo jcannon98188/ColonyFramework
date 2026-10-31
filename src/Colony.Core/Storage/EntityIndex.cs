@@ -39,6 +39,9 @@ internal sealed class EntityIndex
         return !id.IsDeferred && (uint)index < (uint)HighWater && _generation[index] == id.Generation && _archetype[index] >= 0;
     }
 
+    /// <summary>True when the slot currently holds a live Entity (no generation check).</summary>
+    public bool IsAliveSlot(int index) => (uint)index < (uint)HighWater && _archetype[index] >= 0;
+
     public EntityId Allocate(int archetype, int chunk, int row)
     {
         int index;
