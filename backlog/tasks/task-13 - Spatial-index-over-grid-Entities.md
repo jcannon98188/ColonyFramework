@@ -1,9 +1,11 @@
 ---
 id: TASK-13
 title: Spatial index over grid Entities
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 07:45'
 labels:
   - ready-for-agent
   - implementation
