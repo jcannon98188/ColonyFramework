@@ -20,7 +20,8 @@ public sealed class StringTable : IDisposable
     private int[] _buckets = new int[128];    // open addressing: 0 = empty, otherwise id
     private int _count;
 
-    internal StringTable()
+    /// <summary>A standalone table (the World's own is <see cref="World.Strings"/>); the Definition registry interns Definition names in one.</summary>
+    public StringTable()
     {
     }
 
