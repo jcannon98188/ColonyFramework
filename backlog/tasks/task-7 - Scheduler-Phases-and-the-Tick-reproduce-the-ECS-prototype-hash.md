@@ -4,7 +4,7 @@ title: 'Scheduler, Phases and the Tick; reproduce the ECS prototype hash'
 status: To Do
 assignee: []
 created_date: '2026-10-31 01:56'
-updated_date: '2026-10-31 03:00'
+updated_date: '2026-10-31 03:17'
 labels:
   - ready-for-agent
   - implementation
@@ -46,5 +46,11 @@ author: @jason
 created: 2026-10-31 03:00
 ---
 Hand-forward from TASK-6: World.Playback is the sync point to call at each Phase boundary in System order; World.ResetScratch is the end-of-Tick sync point. Bulk playback paths (reserve N rows + memcpy) are not implemented; add them if the colonist scenario's playback shows up in profiles.
+---
+
+author: @jason
+created: 2026-10-31 03:17
+---
+Hand-forward from TASK-4: when wiring the World hash use Colony.Hashing.Hash64 and replace the internal Fnv1a placeholder used for Component layout identity (schema hash values will change; no saves exist yet).
 ---
 <!-- COMMENTS:END -->
