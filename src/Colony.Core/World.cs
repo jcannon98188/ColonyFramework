@@ -70,6 +70,22 @@ public sealed partial class World : IDisposable
         throw new InvalidOperationException($"No extension of type {typeof(T).Name} is registered in this World's schema.");
     }
 
+    /// <summary>The per-World state of a registered extension, or false when the schema registered none of that type (tooling probes with this).</summary>
+    public bool TryGetExtension<T>([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? extension) where T : class, IWorldExtension
+    {
+        foreach (var candidate in _extensions)
+        {
+            if (candidate is T match)
+            {
+                extension = match;
+                return true;
+            }
+        }
+
+        extension = null;
+        return false;
+    }
+
     /// <summary>Extensions in registration order, for the Tick runner and the hash.</summary>
     internal ReadOnlySpan<IWorldExtension> Extensions => _extensions;
 
