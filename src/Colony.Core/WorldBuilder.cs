@@ -41,8 +41,42 @@ public sealed class WorldBuilder
         _systems.Add(system);
         return this;
     }
+    private readonly List<string> _logMessages = [];
+    private readonly List<string> _counters = [];
+    private readonly HashSet<string> _counterNames = new(StringComparer.Ordinal);
     private bool _debugValidation = WorldSchema.DefaultDebugValidation;
     private bool _built;
+
+    /// <summary>
+    /// Registers a structured log message (spec section 10.1). The template uses <c>{0}</c> to <c>{3}</c> for
+    /// the numeric arguments a System passes to <see cref="SystemContext.Log"/>; it is formatted only when
+    /// the entries are drained.
+    /// </summary>
+    public Colony.Diagnostics.LogMessageId AddLogMessage(string template)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(template);
+        ThrowIfBuilt();
+        _logMessages.Add(template);
+        return new Colony.Diagnostics.LogMessageId(_logMessages.Count - 1);
+    }
+
+    /// <summary>
+    /// Registers a named diagnostics counter that appears in every Tick record (spec section 10.1). Plugins
+    /// register theirs here from <c>Register</c>; registration closes at <see cref="Build"/> so the record
+    /// layout is fixed.
+    /// </summary>
+    public Colony.Diagnostics.CounterId AddCounter(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        if (!_counterNames.Add(name))
+        {
+            throw new ArgumentException($"A counter named '{name}' is already registered.", nameof(name));
+        }
+
+        _counters.Add(name);
+        return new Colony.Diagnostics.CounterId(_counters.Count - 1);
+    }
 
     /// <summary>
     /// Adds a Game Phase directly after the named Phase <paramref name="after"/> (and after any Game Phase
@@ -163,7 +197,7 @@ public sealed class WorldBuilder
         ThrowIfBuilt();
         _built = true;
         var schedule = SystemSchedule.Build(_systems, _phases, _components.Count);
-        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _debugValidation);
+        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _debugValidation, _logMessages, _counters);
     }
 
     private void ThrowIfBuilt()

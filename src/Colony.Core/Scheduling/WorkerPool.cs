@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Colony.Diagnostics;
 
 namespace Colony;
 
@@ -7,7 +8,8 @@ namespace Colony;
 /// calling thread run the jobs of one wave. Job <c>i</c> belongs to worker <c>i mod N</c> (chunk affinity,
 /// so a chunk tends to meet the same core every Tick); a worker that runs out steals from the others.
 /// Idle workers spin briefly, then park on a kernel event, which allocates nothing. Which worker runs a
-/// job never influences results: jobs are keyed by index, not thread.
+/// job never influences results: jobs are keyed by index, not thread. With <see cref="Timing"/> on, each
+/// worker accounts its busy, spinning and parked time in its <see cref="WorkerClock"/> (spec section 10.1).
 /// </summary>
 internal sealed class WorkerPool : IDisposable
 {
@@ -23,12 +25,19 @@ internal sealed class WorkerPool : IDisposable
     private int _generation;
     private volatile bool _stop;
 
-    public WorkerPool(int workerCount, IJobSource source)
+    public WorkerPool(int workerCount, IJobSource source, bool timing = false)
     {
         WorkerCount = Math.Max(1, workerCount);
         _source = source;
+        Timing = timing;
         _cursors = new int[WorkerCount * Pad];
         _spinTicks = Stopwatch.Frequency * DefaultSpinMicroseconds / 1_000_000;
+        Clocks = new WorkerClock[WorkerCount];
+        for (int i = 0; i < Clocks.Length; i++)
+        {
+            Clocks[i] = new WorkerClock();
+        }
+
         _workers = new Worker[WorkerCount - 1];
         for (int i = 0; i < _workers.Length; i++)
         {
@@ -53,6 +62,12 @@ internal sealed class WorkerPool : IDisposable
     /// <summary>Workers including the calling thread (worker 0).</summary>
     public int WorkerCount { get; }
 
+    /// <summary>Whether workers account their time; fixed for the pool's lifetime.</summary>
+    public bool Timing { get; }
+
+    /// <summary>Cumulative time per worker (index 0 is the calling thread), valid while <see cref="Timing"/> is on.</summary>
+    public WorkerClock[] Clocks { get; }
+
     /// <summary>Managed bytes ever allocated by the dedicated worker threads, sampled after each wave they took part in.</summary>
     public long WorkerAllocatedBytes()
     {
@@ -73,11 +88,18 @@ internal sealed class WorkerPool : IDisposable
             return;
         }
 
+        var clock = Clocks[0];
         if (_workers.Length == 0 || jobCount == 1)
         {
+            long t0 = Timing ? Stopwatch.GetTimestamp() : 0;
             for (int i = 0; i < jobCount; i++)
             {
                 _source.Run(i, 0);
+            }
+
+            if (Timing)
+            {
+                clock.Busy += Stopwatch.GetTimestamp() - t0;
             }
 
             return;
@@ -99,11 +121,19 @@ internal sealed class WorkerPool : IDisposable
             }
         }
 
+        long start = Timing ? Stopwatch.GetTimestamp() : 0;
         Drain(0);
+        long drained = Timing ? Stopwatch.GetTimestamp() : 0;
         var spin = new SpinWait();
         while (Volatile.Read(ref _active) != 0)
         {
             spin.SpinOnce(-1);
+        }
+
+        if (Timing)
+        {
+            clock.Busy += drained - start;
+            clock.Spin += Stopwatch.GetTimestamp() - drained;
         }
     }
 
@@ -131,9 +161,13 @@ internal sealed class WorkerPool : IDisposable
     private void Loop(Worker worker, int index)
     {
         int seen = 0;
+        var clock = Clocks[index];
+        bool timing = Timing;
         while (true)
         {
             long spinStart = Stopwatch.GetTimestamp();
+            long spun = 0;
+            long parked = 0;
             while (Volatile.Read(ref _generation) == seen)
             {
                 if (Stopwatch.GetTimestamp() - spinStart < _spinTicks)
@@ -149,9 +183,12 @@ internal sealed class WorkerPool : IDisposable
                     break;
                 }
 
+                long parkStart = Stopwatch.GetTimestamp();
+                spun += parkStart - spinStart;
                 worker.Event.WaitOne();
                 Volatile.Write(ref worker.Sleeping, 0);
                 spinStart = Stopwatch.GetTimestamp();
+                parked += spinStart - parkStart;
             }
 
             if (_stop)
@@ -159,8 +196,17 @@ internal sealed class WorkerPool : IDisposable
                 return;
             }
 
+            long busyStart = Stopwatch.GetTimestamp();
+            spun += busyStart - spinStart;
             seen = Volatile.Read(ref _generation);
             Drain(index);
+            if (timing)
+            {
+                clock.Busy += Stopwatch.GetTimestamp() - busyStart;
+                clock.Spin += spun;
+                clock.Park += parked;
+            }
+
             worker.AllocatedBytes = GC.GetAllocatedBytesForCurrentThread();
             Interlocked.Decrement(ref _active);
         }

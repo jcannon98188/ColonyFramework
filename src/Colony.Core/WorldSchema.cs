@@ -13,6 +13,8 @@ public sealed class WorldSchema
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
     private readonly Phase[] _phases;
+    private readonly string[] _logMessages;
+    private readonly string[] _counters;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
@@ -20,12 +22,16 @@ public sealed class WorldSchema
         Dictionary<string, int> byName,
         List<Phase> phases,
         SystemSchedule schedule,
-        bool debugValidation)
+        bool debugValidation,
+        List<string> logMessages,
+        List<string> counters)
     {
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
         _phases = [.. phases];
+        _logMessages = [.. logMessages];
+        _counters = [.. counters];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
@@ -129,6 +135,12 @@ public sealed class WorldSchema
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
     public ReadOnlySpan<Phase> Phases => _phases;
+
+    /// <summary>Log message templates by <see cref="Colony.Diagnostics.LogMessageId"/> (spec section 10.1).</summary>
+    public ReadOnlySpan<string> LogMessages => _logMessages;
+
+    /// <summary>Registered counter names by <see cref="Colony.Diagnostics.CounterId"/>.</summary>
+    public ReadOnlySpan<string> Counters => _counters;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);
