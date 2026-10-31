@@ -9,16 +9,19 @@ public sealed class WorldSchema
     private readonly ComponentDescriptor[] _components;
     private readonly Dictionary<Type, int> _byClrType;
     private readonly Dictionary<string, int> _byName;
+    private readonly Phase[] _phases;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
         Dictionary<Type, int> byClrType,
         Dictionary<string, int> byName,
+        List<Phase> phases,
         bool debugValidation)
     {
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
+        _phases = [.. phases];
         DebugValidation = debugValidation;
 
         var sizes = new int[_components.Length];
@@ -99,6 +102,9 @@ public sealed class WorldSchema
     }
 
     public ReadOnlySpan<ComponentDescriptor> Components => _components;
+
+    /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>
+    public ReadOnlySpan<Phase> Phases => _phases;
 
     /// <summary>Creates a World with default options.</summary>
     public World CreateWorld() => new(this, WorldOptions.Default);

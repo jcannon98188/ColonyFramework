@@ -12,8 +12,44 @@ public sealed class WorldBuilder
     private readonly List<ComponentDescriptor> _components = [];
     private readonly Dictionary<Type, int> _byClrType = [];
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
+    private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
     private bool _debugValidation = WorldSchema.DefaultDebugValidation;
     private bool _built;
+
+    /// <summary>
+    /// Adds a Game Phase directly after the named Phase <paramref name="after"/> (and after any Game Phase
+    /// already added there), so it runs before the next named Phase. Game Phases go only between named
+    /// ones (spec section 4.3); nothing can follow <see cref="Phase.End"/>.
+    /// </summary>
+    public Phase AddPhase(string name, Phase after)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        if (!after.IsNamed)
+        {
+            throw new ArgumentException($"Game Phases are inserted relative to a named Phase, not to '{after.Name}'.", nameof(after));
+        }
+
+        if (after == Phase.End)
+        {
+            throw new ArgumentException("No Phase can follow End.", nameof(after));
+        }
+
+        if (Phase.IsNamedName(name) || _phases.Exists(p => string.Equals(p.Name, name, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"A Phase named '{name}' already exists.", nameof(name));
+        }
+
+        var phase = new Phase(_phases.Count, name);
+        int index = _phases.IndexOf(after) + 1;
+        while (!_phases[index].IsNamed)
+        {
+            index++;
+        }
+
+        _phases.Insert(index, phase);
+        return phase;
+    }
 
     /// <summary>
     /// Registers an unmanaged Component under a stable <paramref name="name"/>. The layout hash is
@@ -74,7 +110,7 @@ public sealed class WorldBuilder
     {
         ThrowIfBuilt();
         _built = true;
-        return new WorldSchema(_components, _byClrType, _byName, _debugValidation);
+        return new WorldSchema(_components, _byClrType, _byName, _phases, _debugValidation);
     }
 
     private void ThrowIfBuilt()
