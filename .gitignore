@@ -26,4 +26,4 @@ prototypes/**/native/**/*.zip
 Thumbs.db
 
 # Local tooling state
-.claude/settings.local.json
+.claude/
