@@ -1,9 +1,11 @@
 ---
 id: TASK-4
 title: 'Deterministic math layer, fixed-point and counter-based RNG'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 02:34'
 labels:
   - ready-for-agent
   - implementation
