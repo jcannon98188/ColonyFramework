@@ -91,7 +91,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
 
     private void RunWave(SystemSchedule.PhasePlan plan, int wave)
     {
-        uint counter = ++_world.ChangeCounter;
+        uint counter = _world.BeginWave();
         _jobCount = 0;
         for (int k = 0; k < plan.Systems.Length; k++)
         {

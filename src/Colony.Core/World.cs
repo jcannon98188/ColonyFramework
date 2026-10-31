@@ -109,8 +109,17 @@ public sealed partial class World : IDisposable
     /// <summary>Threads a Tick runs on, including the caller; fixed when the first Tick starts.</summary>
     public int WorkerCount => _runner?.WorkerCount ?? ResolveWorkerCount();
 
-    /// <summary>Monotonic counter of waves run, stamped on columns as they change (chunk skipping, spec section 4.3).</summary>
+    /// <summary>Monotonic counter of change epochs (waves and sync points), stamped on columns as they change (chunk skipping, spec section 4.3).</summary>
     internal uint ChangeCounter;
+
+    private uint _waveCounter;
+
+    /// <summary>Opens a wave's change epoch; a System that runs in it remembers the value as its last run.</summary>
+    internal uint BeginWave()
+    {
+        _waveCounter = ++ChangeCounter;
+        return _waveCounter;
+    }
 
     /// <summary>
     /// Runs one Tick: every Phase in order, Systems in waves on the worker pool, command buffers merged at
@@ -190,6 +199,13 @@ public sealed partial class World : IDisposable
         if (!ReferenceEquals(buffer.World, this))
         {
             throw new ArgumentException("The command buffer belongs to another World.", nameof(buffer));
+        }
+
+        // A sync point is its own change epoch: its structural changes are stamped above the wave that just
+        // ended, so a change-filtered System that ran in that wave (last run = wave counter) still sees them.
+        if (ChangeCounter == _waveCounter)
+        {
+            ChangeCounter++;
         }
 
         buffer.Playback();
