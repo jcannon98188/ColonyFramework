@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.ProcGen\Colony.ProcGen.csproj" />
+  </ItemGroup>
+
+</Project>
