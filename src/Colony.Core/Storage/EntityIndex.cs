@@ -119,6 +119,54 @@ internal sealed class EntityIndex
         _row[index] = row;
     }
 
+    // ---- Save/load seams (TASK-14). The free list order and the generations of dead slots are not hashed but
+    // decide which ids future creates hand out, so a load restores them exactly. ----
+
+    public uint GenerationAt(int index) => _generation[index];
+
+    public uint FreedEpochAt(int index) => _freedEpoch[index];
+
+    /// <summary>The free slots, bottom to top: the last entry is the next slot <see cref="Allocate"/> reuses.</summary>
+    public ReadOnlySpan<int> FreeSlots => _free.AsSpan(0, _freeCount);
+
+    /// <summary>Replaces the whole index with saved slot state: every slot dead, generations and the free stack as saved. <see cref="RestoreSlot"/> then revives the live ones.</summary>
+    public void Restore(int highWater, ReadOnlySpan<uint> generations, ReadOnlySpan<uint> freedEpochs, ReadOnlySpan<int> freeSlots)
+    {
+        if (generations.Length != highWater || freedEpochs.Length != highWater)
+        {
+            throw new ArgumentException("Generations and freed epochs must have one entry per slot up to the high-water mark.", nameof(generations));
+        }
+
+        int capacity = Math.Max(_archetype.Length, highWater);
+        _archetype = new int[capacity];
+        _chunk = new int[capacity];
+        _row = new int[capacity];
+        _generation = new uint[capacity];
+        _freedEpoch = new uint[capacity];
+        Array.Fill(_archetype, -1);
+        generations.CopyTo(_generation);
+        freedEpochs.CopyTo(_freedEpoch);
+        _free = new int[Math.Max(16, Math.Max(freeSlots.Length, capacity / 4))];
+        freeSlots.CopyTo(_free);
+        _freeCount = freeSlots.Length;
+        HighWater = highWater;
+        AliveCount = 0;
+    }
+
+    /// <summary>Revives a saved slot at its saved location (after <see cref="Restore"/>).</summary>
+    public void RestoreSlot(int index, int archetype, int chunk, int row)
+    {
+        if ((uint)index >= (uint)HighWater || _archetype[index] >= 0)
+        {
+            throw new ArgumentException($"Entity slot {index} is outside the saved index or appears twice.", nameof(index));
+        }
+
+        _archetype[index] = archetype;
+        _chunk[index] = chunk;
+        _row[index] = row;
+        AliveCount++;
+    }
+
     private void Grow()
     {
         int capacity = _archetype.Length * 2;

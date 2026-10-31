@@ -223,6 +223,73 @@ public sealed class FieldSet : IWorldExtension
         }
     }
 
+    /// <summary>
+    /// One section per Field chunk (spec section 7.1), named <c>&lt;field&gt;/&lt;ordinal&gt;</c>: a kind byte (0 uniform,
+    /// 1 dense) then the uniform value or the cells in storage order. Versions and the change feed are not saved.
+    /// </summary>
+    void IWorldExtension.Save(ExtensionStateWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        byte[]? buffer = null;
+        for (int f = 0; f < _storage.Length; f++)
+        {
+            var storage = _storage[f];
+            int chunkBytes = storage.CellSize * FieldChunk.CellCount;
+            if (buffer is null || buffer.Length < chunkBytes + 1)
+            {
+                buffer = new byte[chunkBytes + 1];
+            }
+
+            for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
+            {
+                string name = SectionName(f, ordinal);
+                if (storage.IsUniform(ordinal))
+                {
+                    buffer[0] = 0;
+                    storage.UniformValue(ordinal).CopyTo(buffer.AsSpan(1));
+                    writer.WriteSection(name, buffer.AsSpan(0, 1 + storage.CellSize));
+                }
+                else
+                {
+                    buffer[0] = 1;
+                    storage.ReadCells(ordinal).CopyTo(buffer.AsSpan(1));
+                    writer.WriteSection(name, buffer.AsSpan(0, 1 + chunkBytes));
+                }
+            }
+        }
+    }
+
+    void IWorldExtension.Load(ExtensionStateReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        for (int f = 0; f < _storage.Length; f++)
+        {
+            var storage = _storage[f];
+            int chunkBytes = storage.CellSize * FieldChunk.CellCount;
+            for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
+            {
+                string name = SectionName(f, ordinal);
+                var payload = reader.Section(name);
+                if (payload.Length == 1 + storage.CellSize && payload[0] == 0)
+                {
+                    storage.Fill(ordinal, payload[1..]);
+                }
+                else if (payload.Length == 1 + chunkBytes && payload[0] == 1)
+                {
+                    payload[1..].CopyTo(storage.WriteCells(ordinal));
+                }
+                else
+                {
+                    throw new InvalidDataException($"Field '{_fields[f].Name}' chunk {ordinal}: section '{name}' holds {payload.Length} bytes, not a uniform value ({1 + storage.CellSize}) or a dense chunk ({1 + chunkBytes}).");
+                }
+
+                _versions[f][ordinal] = 0;
+            }
+        }
+    }
+
+    private string SectionName(int field, int ordinal) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{_fields[field].Name}/{ordinal}");
+
     public void Dispose()
     {
         if (_disposed)

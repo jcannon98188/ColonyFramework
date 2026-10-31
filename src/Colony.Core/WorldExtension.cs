@@ -46,6 +46,57 @@ public interface IWorldExtension : IDisposable
     /// bytes, nothing derived or cached. Called after the Entity storage and before the RNG state.
     /// </summary>
     public void Hash(ref Hash64State state);
+
+    /// <summary>
+    /// Writes this extension's saved state as named sections (spec section 7.1): exactly the state
+    /// <see cref="Hash"/> covers, in a layout the extension owns (Field chunks write one section per chunk).
+    /// Derived state (a spatial index, caches) writes nothing and rebuilds in <see cref="Load"/>. Called at
+    /// a Tick boundary on the Tick thread; the default saves nothing.
+    /// </summary>
+    public void Save(ExtensionStateWriter writer)
+    {
+    }
+
+    /// <summary>
+    /// Restores the state written by <see cref="Save"/> into a freshly created World whose Entity storage,
+    /// Resources and tables are already loaded; extensions load in registration order. Throw a clear error
+    /// when a section is missing or malformed. The default restores nothing.
+    /// </summary>
+    public void Load(ExtensionStateReader reader)
+    {
+    }
+}
+
+/// <summary>Where an extension writes its saved sections (<see cref="IWorldExtension.Save"/>); the save container implements it.</summary>
+public abstract class ExtensionStateWriter
+{
+    /// <summary>Adds one section; names are unique per extension and bytes are copied before the call returns.</summary>
+    public abstract void WriteSection(string name, ReadOnlySpan<byte> payload);
+}
+
+/// <summary>The saved sections of one extension (<see cref="IWorldExtension.Load"/>), verified against their hashes before they are handed over.</summary>
+public abstract class ExtensionStateReader
+{
+    /// <summary>The name of the extension whose sections these are, for error messages.</summary>
+    public abstract string ExtensionName { get; }
+
+    public abstract int SectionCount { get; }
+
+    public abstract string SectionName(int index);
+
+    /// <summary>The payload of a section, or false when the save has none by that name.</summary>
+    public abstract bool TryGetSection(string name, out ReadOnlySpan<byte> payload);
+
+    /// <summary>The payload of a section; throws a clear error naming the extension and section when it is missing.</summary>
+    public ReadOnlySpan<byte> Section(string name)
+    {
+        if (!TryGetSection(name, out var payload))
+        {
+            throw new InvalidDataException($"The save has no section '{name}' for extension '{ExtensionName}'.");
+        }
+
+        return payload;
+    }
 }
 
 /// <summary>

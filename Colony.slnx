@@ -4,6 +4,7 @@
     <Project Path="src/Colony.Diagnostics/Colony.Diagnostics.csproj" />
     <Project Path="src/Colony.Fields/Colony.Fields.csproj" />
     <Project Path="src/Colony.Generators/Colony.Generators.csproj" />
+    <Project Path="src/Colony.Persistence/Colony.Persistence.csproj" />
     <Project Path="src/Colony.ProcGen/Colony.ProcGen.csproj" />
     <Project Path="src/Colony.Testing/Colony.Testing.csproj" />
   </Folder>
@@ -14,6 +15,7 @@
     <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
     <Project Path="tests/Colony.Generated.Tests/Colony.Generated.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
+    <Project Path="tests/Colony.Persistence.Tests/Colony.Persistence.Tests.csproj" />
     <Project Path="tests/Colony.ProcGen.Tests/Colony.ProcGen.Tests.csproj" />
     <Project Path="tests/Colony.Testing.AotHost/Colony.Testing.AotHost.csproj" />
     <Project Path="tests/Colony.Testing.Tests/Colony.Testing.Tests.csproj" />
