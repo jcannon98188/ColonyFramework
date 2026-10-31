@@ -77,12 +77,56 @@ public sealed class DependencyRulesTests
     [InlineData("Colony.Plugins")]
     public void No_package_may_reference_Diagnostics_Testing_or_Plugins(string forbidden)
     {
-        // Colony.Abstractions has no explicit allow list, so only the global rule can catch this.
-        var projects = new[] { Src(forbidden), Src("Colony.Abstractions", SrcPath(forbidden)) };
+        // Colony.ProcGen's allow list permits Core only, so the global rule and the allow list both object; one violation per reference.
+        var projects = new[] { Src(forbidden), Src("Colony.ProcGen", SrcPath(forbidden)) };
+
+        var violation = Assert.Single(DependencyRules.Check(projects));
+        Assert.Equal("Colony.ProcGen", violation.Project);
+        Assert.Contains(forbidden, violation.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Colony.Core", "Colony.Plugins")]
+    [InlineData("Colony.Core", "Colony.Abstractions")]
+    [InlineData("Colony.Fields", "Colony.Plugins")]
+    [InlineData("Colony.Fields", "Colony.Abstractions")]
+    public void Core_and_Fields_never_reference_the_Plugin_packages(string package, string forbidden)
+    {
+        // TASK-16 AC #6: a Game builds on Core and Fields alone; Colony.Plugins and Colony.Abstractions sit on top, never underneath.
+        var projects = new List<ProjectNode> { Src(forbidden), Src(package, SrcPath(forbidden)) };
+        if (package != "Colony.Core")
+        {
+            projects.Add(Src("Colony.Core"));
+        }
+
+        var violation = Assert.Single(DependencyRules.Check(projects));
+        Assert.Equal(package, violation.Project);
+        Assert.Contains(forbidden, violation.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Abstractions_references_nothing_in_the_repository()
+    {
+        // Spec section 8: Colony.Abstractions is BCL-only so a Plugin can be compiled against it alone.
+        var projects = new[] { Src("Colony.Core"), Src("Colony.Abstractions", SrcPath("Colony.Core")) };
 
         var violation = Assert.Single(DependencyRules.Check(projects));
         Assert.Equal("Colony.Abstractions", violation.Project);
-        Assert.Contains(forbidden, violation.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Plugins_may_reference_Abstractions_Core_Fields_and_Persistence()
+    {
+        var projects = new[]
+        {
+            Src("Colony.Abstractions"),
+            Src("Colony.Core"),
+            Src("Colony.Fields", SrcPath("Colony.Core")),
+            Src("Colony.Persistence", SrcPath("Colony.Core")),
+            Src("Colony.Plugins", SrcPath("Colony.Abstractions"), SrcPath("Colony.Core"), SrcPath("Colony.Fields"), SrcPath("Colony.Persistence")),
+        };
+
+        Assert.Empty(DependencyRules.Check(projects));
     }
 
     [Fact]
