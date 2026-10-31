@@ -21,7 +21,8 @@ public sealed class BlobStore : IDisposable
     private int[] _elementSizes = new int[32];
     private int _count;
 
-    internal BlobStore()
+    /// <summary>A standalone store (the World's own is <see cref="World.Blobs"/>); the Definition registry bakes Definitions into one.</summary>
+    public BlobStore()
     {
     }
 

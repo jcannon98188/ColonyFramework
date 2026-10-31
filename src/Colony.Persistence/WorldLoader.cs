@@ -21,8 +21,9 @@ internal static unsafe class WorldLoader
     public static World Load(SaveContainer.Reader reader, WorldSchema schema, LoadOptions options)
     {
         var manifest = reader.Manifest;
-        var plans = PlanComponents(manifest, schema, options.Migrations);
-        PlanResources(manifest, schema);
+        CheckPlugins(manifest, schema, options);
+        var plans = PlanComponents(manifest, schema, options);
+        PlanResources(manifest, schema, options.DropUnknownComponents);
         PlanExtensions(manifest, schema);
 
         var entities = reader.Section(SaveContainer.EntitiesSection);
@@ -53,8 +54,8 @@ internal static unsafe class WorldLoader
             }
 
             world.RestoreEntityIndex(highWater, generations, freedEpochs, freeSlots);
-            LoadArchetypes(reader, world, plans);
-            LoadNonFragmenting(reader, world, plans);
+            LoadArchetypes(reader, world, manifest, plans);
+            LoadNonFragmenting(reader, world, manifest, plans);
             LoadResources(reader, world, manifest);
             LoadTables(reader, world);
             // Change versions are rebuildable (spec section 7.1): every chunk counts as changed once, before the
@@ -82,14 +83,38 @@ internal static unsafe class WorldLoader
         }
     }
 
-    private static ColumnPlan[] PlanComponents(SaveManifest manifest, WorldSchema schema, MigrationRegistry migrations)
+    /// <summary>A save made with a Plugin the schema lacks fails here unless the host opted into dropping what that Plugin owned (spec section 8).</summary>
+    private static void CheckPlugins(SaveManifest manifest, WorldSchema schema, LoadOptions options)
     {
-        var plans = new ColumnPlan[manifest.Components.Length];
+        if (options.DropUnknownComponents)
+        {
+            return;
+        }
+
+        foreach (var saved in manifest.Plugins)
+        {
+            if (!schema.TryGetPlugin(saved.Id, out _))
+            {
+                throw new MissingPluginException(saved.Id, $"The save was made with Plugin '{saved.Id}' {saved.Version}, which the schema does not have ({saved.Components.Length} Components, {saved.Resources.Length} Resources). Load with LoadOptions.DropUnknownComponents to drop them and continue without the Plugin.");
+            }
+        }
+    }
+
+    /// <summary>One plan per saved Component; null where the Component is unknown and <see cref="LoadOptions.DropUnknownComponents"/> drops it.</summary>
+    private static ColumnPlan?[] PlanComponents(SaveManifest manifest, WorldSchema schema, LoadOptions options)
+    {
+        var migrations = options.Migrations;
+        var plans = new ColumnPlan?[manifest.Components.Length];
         for (int i = 0; i < plans.Length; i++)
         {
             var saved = manifest.Components[i];
             if (!schema.TryGetComponent(saved.Name, out var type))
             {
+                if (options.DropUnknownComponents)
+                {
+                    continue;
+                }
+
                 throw new MigrationException($"Component '{saved.Name}' (saved layout 0x{saved.LayoutHash:X16}) is not registered in the schema; a removed Component cannot be loaded.");
             }
 
@@ -127,7 +152,7 @@ internal static unsafe class WorldLoader
         return plans;
     }
 
-    private static void PlanResources(SaveManifest manifest, WorldSchema schema)
+    private static void PlanResources(SaveManifest manifest, WorldSchema schema, bool dropUnknown)
     {
         foreach (var saved in manifest.Resources)
         {
@@ -138,6 +163,11 @@ internal static unsafe class WorldLoader
 
             if (!schema.TryGetResource(saved.Name, out var type))
             {
+                if (dropUnknown)
+                {
+                    continue;
+                }
+
                 throw new MigrationException($"Persistent Resource '{saved.Name}' is not registered in the schema.");
             }
 
@@ -173,11 +203,13 @@ internal static unsafe class WorldLoader
         }
     }
 
-    private static void LoadArchetypes(SaveContainer.Reader reader, World world, ColumnPlan[] plans)
+    private static void LoadArchetypes(SaveContainer.Reader reader, World world, SaveManifest manifest, ColumnPlan?[] plans)
     {
         var schema = world.Schema;
         var index = world.EntityIndex;
         var heap = world.BufferHeap;
+        // Dropping Components can give two saved archetypes the same signature; they merge into one.
+        bool dropping = Array.IndexOf(plans, null) >= 0;
         var table = new ByteReader(reader.Section(SaveContainer.ArchetypesSection), SaveContainer.ArchetypesSection);
         int archetypeCount = table.ReadCount(4);
         Span<byte> scratch = stackalloc byte[0];
@@ -196,10 +228,13 @@ internal static unsafe class WorldLoader
                 }
 
                 savedIds[i] = id;
-                signature = signature.With(plans[id].Current.Type);
+                if (plans[id] is { } kept)
+                {
+                    signature = signature.With(kept.Current.Type);
+                }
             }
 
-            var archetype = world.RestoreArchetype(signature);
+            var archetype = world.RestoreArchetype(signature, mergeExisting: dropping);
             string section = SaveContainer.ArchetypePrefix + a.ToString(global::System.Globalization.CultureInfo.InvariantCulture);
             var r = new ByteReader(reader.Section(section), section);
             int chunkCount = r.ReadCount(4);
@@ -210,6 +245,13 @@ internal static unsafe class WorldLoader
                 if (rows <= 0 || rows > archetype.Capacity)
                 {
                     throw new SaveFormatException($"Section '{section}' chunk {c} holds {rows} rows; the archetype's capacity is {archetype.Capacity}.");
+                }
+
+                if (dropping)
+                {
+                    // A merged archetype cannot take whole chunks (only its last chunk may be partial): rows go in one by one.
+                    LoadRowsScattered(ref r, world, archetype, manifest, plans, savedIds, rows, section, ref migrationScratch);
+                    continue;
                 }
 
                 int chunk = archetype.AppendChunk(world.Allocator, rows);
@@ -230,6 +272,26 @@ internal static unsafe class WorldLoader
                 foreach (int savedId in savedIds)
                 {
                     var plan = plans[savedId];
+                    if (plan is null)
+                    {
+                        // Dropped: step over the column's values and its enable bits.
+                        var dropped = manifest.Components[savedId];
+                        if ((dropped.Flags & ComponentOptions.Buffer) != 0)
+                        {
+                            for (int row = 0; row < rows; row++)
+                            {
+                                SkipBuffer(ref r, in dropped, section);
+                            }
+                        }
+                        else
+                        {
+                            r.ReadBytes(rows * dropped.Size);
+                        }
+
+                        r.ReadBytes((rows + 7) / 8);
+                        continue;
+                    }
+
                     var current = plan.Current;
                     int column = archetype.ColumnOf(current.Type.Id);
                     byte* destination = memory + archetype.Offsets[column];
@@ -274,7 +336,94 @@ internal static unsafe class WorldLoader
         _ = scratch;
     }
 
-    private static void LoadNonFragmenting(SaveContainer.Reader reader, World world, ColumnPlan[] plans)
+    /// <summary>
+    /// Drop mode's chunk loader: appends each saved row through <see cref="Archetype.AddRow"/> so saved archetypes
+    /// that collapsed onto one signature share it, then scatters every kept column's bytes and enable bits to the
+    /// rows' new places. Dropped columns are stepped over. Sleep state is not kept (it is a rebuildable optimisation).
+    /// </summary>
+    private static void LoadRowsScattered(ref ByteReader r, World world, Archetype archetype, SaveManifest manifest, ColumnPlan?[] plans, int[] savedIds, int rows, string section, ref byte[]? migrationScratch)
+    {
+        var index = world.EntityIndex;
+        var heap = world.BufferHeap;
+        var placed = new (int Chunk, int Row)[rows];
+        var entityColumn = MemoryMarshal.Cast<byte, ulong>(r.ReadBytes(rows * Archetype.EntityColumnElementSize));
+        for (int row = 0; row < rows; row++)
+        {
+            var id = new EntityId(entityColumn[row]);
+            if ((uint)id.Index >= (uint)index.HighWater || index.GenerationAt(id.Index) != id.Generation)
+            {
+                throw new SaveFormatException($"Section '{section}' row {row} holds {id}, which the saved Entity index does not know.");
+            }
+
+            var slot = archetype.AddRow(world.Allocator);
+            ((ulong*)archetype.ChunkPointer(slot.Chunk))[slot.Row] = entityColumn[row];
+            index.RestoreSlot(id.Index, archetype.Id, slot.Chunk, slot.Row);
+            placed[row] = slot;
+        }
+
+        foreach (int savedId in savedIds)
+        {
+            var plan = plans[savedId];
+            if (plan is null)
+            {
+                var dropped = manifest.Components[savedId];
+                if ((dropped.Flags & ComponentOptions.Buffer) != 0)
+                {
+                    for (int row = 0; row < rows; row++)
+                    {
+                        SkipBuffer(ref r, in dropped, section);
+                    }
+                }
+                else
+                {
+                    r.ReadBytes(rows * dropped.Size);
+                }
+
+                r.ReadBytes((rows + 7) / 8);
+                continue;
+            }
+
+            var current = plan.Current;
+            int column = archetype.ColumnOf(current.Type.Id);
+            int offset = archetype.Offsets[column];
+            int size = current.Size;
+            for (int row = 0; row < rows; row++)
+            {
+                var (chunk, slotRow) = placed[row];
+                byte* destination = archetype.ChunkPointer(chunk) + offset + ((long)slotRow * size);
+                if (current.IsBuffer)
+                {
+                    ReadBuffer(ref r, destination, in current, heap, section);
+                }
+                else if (plan.Chain is null)
+                {
+                    r.ReadBytes(size).CopyTo(new Span<byte>(destination, size));
+                }
+                else
+                {
+                    if (migrationScratch is null || migrationScratch.Length < plan.MaxStepSize * 2)
+                    {
+                        migrationScratch = new byte[plan.MaxStepSize * 2];
+                    }
+
+                    Migrate(plan, r.ReadBytes(plan.Saved.Size), new Span<byte>(destination, size), migrationScratch);
+                }
+            }
+
+            // AddRow enables every Component; clear the bits the save had clear.
+            var bits = r.ReadBytes((rows + 7) / 8);
+            for (int row = 0; row < rows; row++)
+            {
+                if ((bits[row >> 3] & (1 << (row & 7))) == 0)
+                {
+                    var (chunk, slotRow) = placed[row];
+                    archetype.SetEnabled(chunk, column, slotRow, false);
+                }
+            }
+        }
+    }
+
+    private static void LoadNonFragmenting(SaveContainer.Reader reader, World world, SaveManifest manifest, ColumnPlan?[] plans)
     {
         var schema = world.Schema;
         var index = world.EntityIndex;
@@ -285,6 +434,33 @@ internal static unsafe class WorldLoader
         for (int savedId = 0; savedId < plans.Length; savedId++)
         {
             var plan = plans[savedId];
+            if (plan is null)
+            {
+                var dropped = manifest.Components[savedId];
+                if ((dropped.Flags & ComponentOptions.NonFragmenting) == 0)
+                {
+                    continue;
+                }
+
+                int droppedCount = r.ReadCount(5);
+                for (int n = 0; n < droppedCount; n++)
+                {
+                    r.ReadInt32();
+                    if ((dropped.Flags & ComponentOptions.Buffer) != 0)
+                    {
+                        SkipBuffer(ref r, in dropped, SaveContainer.NonFragmentingSection);
+                    }
+                    else
+                    {
+                        r.ReadBytes(dropped.Size);
+                    }
+
+                    r.ReadByte();
+                }
+
+                continue;
+            }
+
             if (!plan.Current.IsNonFragmenting)
             {
                 continue;
@@ -342,12 +518,12 @@ internal static unsafe class WorldLoader
                 continue;
             }
 
-            var type = schema.Resource(saved.Name);
-            var current = schema.DescribeResource(type);
+            // An unknown Resource only gets here in drop mode (PlanResources threw otherwise): its bytes are stepped over.
+            bool keep = schema.TryGetResource(saved.Name, out var type) && schema.DescribeResource(type).IsPersistent;
             if (saved.Kind == ResourceKind.Value)
             {
                 var bytes = r.ReadBytes(saved.Size);
-                if (current.IsPersistent)
+                if (keep)
                 {
                     bytes.CopyTo(new Span<byte>(resources.Pointer(type.Id), saved.Size));
                 }
@@ -358,7 +534,7 @@ internal static unsafe class WorldLoader
                 for (int i = 0; i < count; i++)
                 {
                     var record = r.ReadBytes(saved.Size);
-                    if (current.IsPersistent)
+                    if (keep)
                     {
                         fixed (byte* source = record)
                         {
@@ -446,6 +622,18 @@ internal static unsafe class WorldLoader
             elements.CopyTo(new Span<byte>(heap.Pointer(handle), elements.Length));
             header->Handle = handle;
         }
+    }
+
+    /// <summary>Steps over a dropped buffer Component's saved content (length, then elements) without restoring it.</summary>
+    private static void SkipBuffer(ref ByteReader r, in SavedComponent dropped, string section)
+    {
+        int length = r.ReadInt32();
+        if (length < 0 || (long)length * dropped.ElementSize > BufferHeap.MaxBlockSize)
+        {
+            throw new SaveFormatException($"Section '{section}' holds a buffer '{dropped.Name}' of {length} elements.");
+        }
+
+        r.ReadBytes(length * dropped.ElementSize);
     }
 
     private static void Migrate(ColumnPlan plan, ReadOnlySpan<byte> saved, Span<byte> destination, byte[] scratch)

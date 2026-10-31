@@ -19,10 +19,17 @@ public static class DependencyRules
     {
         // Core depends only on the BCL.
         ["Colony.Core"] = [],
-        // Fields, Persistence, Plugins depend on Core.
+        // Abstractions holds only contracts and depends on the BCL alone.
+        ["Colony.Abstractions"] = [],
+        // Fields, Persistence depend on Core; Plugins on Core, Fields, Persistence (shared Fields registration,
+        // manifest) and the Abstractions it implements.
         ["Colony.Fields"] = ["Colony.Core"],
         ["Colony.Persistence"] = ["Colony.Core"],
-        ["Colony.Plugins"] = ["Colony.Core"],
+        ["Colony.Plugins"] = ["Colony.Abstractions", "Colony.Core", "Colony.Fields", "Colony.Persistence"],
+        // Testing exercises Core, Fields, Persistence and Plugins (spec section 3, implementation exception).
+        ["Colony.Testing"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence", "Colony.Plugins"],
+        // Native hosts the C ABI whose host lives in Plugins, and takes whatever Plugins takes.
+        ["Colony.Native"] = ["Colony.Abstractions", "Colony.Core", "Colony.Fields", "Colony.Persistence", "Colony.Plugins"],
         // Pathfinding, Colony, ProcGen depend on Core and Fields (and Persistence only where they save state).
         ["Colony.Pathfinding"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
         ["Colony.Colony"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],

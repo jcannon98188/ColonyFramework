@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Zero-allocation gates (Definition lookups during Ticks) need fully optimised code from the first call; see Colony.Core.Tests. -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Plugins\Colony.Plugins.csproj" />
+    <!-- The Plugin set and System overrides travel in the save manifest (AC #3, #5). -->
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

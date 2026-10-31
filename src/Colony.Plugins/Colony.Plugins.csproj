@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Plugins: the Plugin loader (manifest, dependency order, Overridable Systems), the Definition
+    registry with its reference JSON source, and later the C ABI host (spec section 8). Depends on Core,
+    Fields (shared Fields registration) and Abstractions; enforced by tools/Colony.DependencyCheck. Nothing
+    depends on it: a Game runs with Core and Fields alone.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework plugins: Plugin manifest and loader, Definition registry and JSON Definition source.</Description>
+    <RootNamespace>Colony.Plugins</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Abstractions\Colony.Abstractions.csproj" />
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Plugins.Tests" />
+  </ItemGroup>
+
+</Project>

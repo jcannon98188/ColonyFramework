@@ -100,6 +100,9 @@ public sealed partial class World : IDisposable
 
     public WorldSchema Schema { get; }
 
+    /// <summary>False when any Plugin of the schema declared itself NonDeterministic (spec section 8); see <see cref="WorldSchema.IsDeterministic"/>.</summary>
+    public bool IsDeterministic => Schema.IsDeterministic;
+
     /// <summary>The seed every random stream in this World derives from.</summary>
     public ulong Seed => _options.Seed;
 
