@@ -305,7 +305,7 @@ Surveys: `ecs-designs.md`, `gpu-compute-options.md`, `dotnet-11-performance-feat
 
 ## 14. Repo structure and tooling
 
-One solution: `src/<Package>/`, `tests/<Package>.Tests/`, `benchmarks/`, `samples/` (a minimal headless host and a C native host), `docs/`, `prototypes/` (throwaway, never referenced or built by the solution), `tools/` (development-only tooling, never referenced by `src/`, not shipped), central package management, shared `Directory.Build.props` (analyzers, AOT and determinism flags) and `global.json` pinning the SDK. License, remote hosting and CI service are chosen when the repo gets a remote.
+One solution: `src/<Package>/`, `tests/<Package>.Tests/`, `benchmarks/`, `samples/` (a minimal headless host and a C native host), `docs/`, `prototypes/` (throwaway, never referenced or built by the solution), `tools/` (development-only tooling, never referenced by `src/`, not shipped), central package management, shared `Directory.Build.props` (analyzers, AOT and determinism flags) and `global.json` pinning the SDK. Licensed MIT (`LICENSE` at the repo root); hosted at `github.com/jcannon98188/ColonyFramework`. The CI service is still to be chosen.
 
 ## 15. Implementation hand-off
 
