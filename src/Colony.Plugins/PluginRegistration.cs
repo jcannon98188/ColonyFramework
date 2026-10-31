@@ -88,6 +88,13 @@ public sealed class PluginRegistration
 
     public RelationType AddRelation(string name, RelationOptions options = RelationOptions.None) => Builder.AddRelation(name, options);
 
+    /// <summary>Registers an Input Command (spec section 7.3) owned by this Plugin; handler Systems read it with <c>context.Inputs&lt;T&gt;(type)</c>.</summary>
+    public InputCommandType AddInputCommand<T>(string name) where T : unmanaged => Builder.AddInputCommand<T>(name);
+
+    public InputCommandType InputCommand<T>() where T : unmanaged => Builder.InputCommand<T>();
+
+    public InputCommandType InputCommand(string name) => Builder.InputCommand(name);
+
     public ComponentType Component<T>() where T : unmanaged => Builder.Component<T>();
 
     public ComponentType Component(string name) => Builder.Component(name);

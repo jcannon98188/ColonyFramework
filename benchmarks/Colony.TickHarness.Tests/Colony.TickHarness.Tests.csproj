@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Colony.Benchmarks.TickHarness.Tests</RootNamespace>
+    <!-- The smoke tests run the harness in-process with its allocation gate armed; tiered recompilation inside the measured window allocates (see Colony.Core.Tests). -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.TickHarness\Colony.TickHarness.csproj" />
+  </ItemGroup>
+
+</Project>

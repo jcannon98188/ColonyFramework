@@ -34,8 +34,16 @@ public sealed class WorldSchema
         List<RelationDescriptor> relations,
         bool debugValidation,
         List<string> logMessages,
-        List<string> counters)
+        List<string> counters,
+        List<InputCommandDescriptor> inputCommands,
+        Dictionary<Type, int> inputByClrType,
+        Dictionary<string, int> inputByName,
+        ResourceType? commandRejections)
     {
+        _inputCommands = [.. inputCommands];
+        _inputByClrType = inputByClrType;
+        _inputByName = inputByName;
+        _commandRejections = commandRejections;
         _components = [.. components];
         _byClrType = byClrType;
         _byName = byName;
@@ -84,6 +92,12 @@ public sealed class WorldSchema
         foreach (var extension in _extensions)
         {
             hash = Hashing.Hash64.Combine(hash, extension.LayoutHash);
+        }
+
+        // Input Commands (spec section 7.3) follow the extensions, so a schema without any hashes as before.
+        foreach (var input in _inputCommands)
+        {
+            hash = Hashing.Hash64.Combine(hash, input.LayoutHash);
         }
 
         Sizes = sizes;
@@ -281,6 +295,62 @@ public sealed class WorldSchema
     {
         ValidateResource(type);
         return _resources[type.Id];
+    }
+
+    private readonly InputCommandDescriptor[] _inputCommands;
+    private readonly Dictionary<Type, int> _inputByClrType;
+    private readonly Dictionary<string, int> _inputByName;
+    private readonly ResourceType? _commandRejections;
+
+    /// <summary>Every registered Input Command (spec section 7.3) in id order; their layout hashes are part of <see cref="SchemaHash"/>.</summary>
+    public ReadOnlySpan<InputCommandDescriptor> InputCommands => _inputCommands;
+
+    public int InputCommandCount => _inputCommands.Length;
+
+    public bool HasInputCommands => _inputCommands.Length > 0;
+
+    /// <summary>The built-in <see cref="CommandRejected"/> event queue (<see cref="WorldBuilder.CommandRejections"/>); throws when the schema has no Input Commands.</summary>
+    public ResourceType CommandRejections => _commandRejections ?? throw new InvalidOperationException("The schema has no Input Commands, so no CommandRejected queue; register one with WorldBuilder.AddInputCommand.");
+
+    /// <summary>The handle for the Input Command registered with CLR type <typeparamref name="T"/>.</summary>
+    public InputCommandType InputCommand<T>() where T : unmanaged
+    {
+        if (!_inputByClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as an Input Command in this schema.", nameof(T));
+        }
+
+        return new InputCommandType(id);
+    }
+
+    /// <summary>The handle for the Input Command registered under <paramref name="name"/>.</summary>
+    public InputCommandType InputCommand(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_inputByName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Input Command named '{name}' is registered in this schema.", nameof(name));
+        }
+
+        return new InputCommandType(id);
+    }
+
+    public bool TryGetInputCommand(string name, out InputCommandType type)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        bool found = _inputByName.TryGetValue(name, out int id);
+        type = new InputCommandType(id);
+        return found;
+    }
+
+    public InputCommandDescriptor DescribeInputCommand(InputCommandType type)
+    {
+        if ((uint)type.Id >= (uint)_inputCommands.Length)
+        {
+            throw new ArgumentException($"{type} does not belong to this schema.", nameof(type));
+        }
+
+        return _inputCommands[type.Id];
     }
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>

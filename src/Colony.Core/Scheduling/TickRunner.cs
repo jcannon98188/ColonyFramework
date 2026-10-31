@@ -65,6 +65,8 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     {
         _tick = tick;
         _diagnostics.BeginTick(tick);
+        // The Tick boundary of spec section 7.3: the canonical input list is fixed before any Phase runs.
+        _world.Inputs.BeginTick(tick);
         var extensions = _world.Extensions;
         for (int i = 0; i < extensions.Length; i++)
         {

@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/HelloColony/HelloColony.csproj" />
+    <Project Path="samples/HelloColony.Tests/HelloColony.Tests.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Colony.Abstractions/Colony.Abstractions.csproj" />
     <Project Path="src/Colony.Colony/Colony.Colony.csproj" />
@@ -14,7 +18,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Colony.Colony.Tests/Colony.Colony.Tests.csproj" />
     <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
-    <Project Path="tests/Colony.Diagnostics.CountersHost/Colony.Diagnostics.CountersHost.csproj" />
     <Project Path="tests/Colony.Diagnostics.Tests/Colony.Diagnostics.Tests.csproj" />
     <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
     <Project Path="tests/Colony.Generated.Tests/Colony.Generated.Tests.csproj" />
@@ -24,6 +27,12 @@
     <Project Path="tests/Colony.ProcGen.Tests/Colony.ProcGen.Tests.csproj" />
     <Project Path="tests/Colony.Testing.AotHost/Colony.Testing.AotHost.csproj" />
     <Project Path="tests/Colony.Testing.Tests/Colony.Testing.Tests.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Colony.Benchmarks/Colony.Benchmarks.csproj" />
+    <Project Path="benchmarks/Colony.Benchmarks.Tests/Colony.Benchmarks.Tests.csproj" />
+    <Project Path="benchmarks/Colony.TickHarness/Colony.TickHarness.csproj" />
+    <Project Path="benchmarks/Colony.TickHarness.Tests/Colony.TickHarness.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Colony.DependencyCheck/Colony.DependencyCheck.csproj" />

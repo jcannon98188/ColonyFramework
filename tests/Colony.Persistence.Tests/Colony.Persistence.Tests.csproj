@@ -15,6 +15,8 @@
     <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistHarnessScenario.cs" Link="Scenarios\ColonistHarnessScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
     <Compile Include="..\Colony.Colony.Tests\Scenarios\ClaimScenario.cs" Link="Scenarios\ClaimScenario.cs" />
+    <!-- TASK-15's input oracle drives the replay log tests. -->
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\InputScenario.cs" Link="Scenarios\InputScenario.cs" />
   </ItemGroup>
 
   <ItemGroup>

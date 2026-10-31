@@ -39,6 +39,49 @@ public sealed class PluginRegistrationTests
         Assert.True(world.IsDeterministic);
     }
 
+    public struct Plant
+    {
+        public int Seeds;
+    }
+
+    private struct Planted
+    {
+        public long Seeds;
+    }
+
+    [Fact]
+    public void A_plugin_registers_input_commands_and_handlers_in_the_input_phase_apply_them()
+    {
+        var schema = PluginWorlds.Build(new FarmingPlugin(), new DelegatePlugin("test.planting", r =>
+        {
+            var plant = r.AddInputCommand<Plant>("farming.plant");
+            r.AddResource<Planted>("farming.planted");
+            var planted = r.Resource<Planted>();
+            r.AddSystem(new SystemDefinition
+            {
+                Name = "farming.plant",
+                Phase = Phase.Input,
+                WritesResources = ResourceMask.Of(planted),
+                Begin = (in SystemContext context) =>
+                {
+                    foreach (var entry in context.Inputs<Plant>(plant))
+                    {
+                        context.Resource<Planted>(planted).Seeds += entry.Command.Seeds;
+                    }
+                },
+            });
+        }, FarmingPlugin.Id));
+        using var world = schema.CreateWorld(new WorldOptions { Seed = 1, WorkerThreads = 1 });
+
+        world.Inputs.Submit(new InputSource(1), new Plant { Seeds = 3 });
+        world.Inputs.Submit(new InputSource(2), new Plant { Seeds = 4 });
+        world.Tick();
+        world.Tick();
+
+        Assert.Equal(7, world.Resource<Planted>(schema.Resource<Planted>()).Seeds);
+        Assert.Equal(schema.InputCommand<Plant>(), schema.InputCommand("farming.plant"));
+    }
+
     [Fact]
     public void Registration_after_build_fails()
     {
