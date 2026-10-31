@@ -1,9 +1,11 @@
 ---
 id: TASK-11
 title: 'Source generator: Components, Systems and typed queries'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 03:51'
 labels:
   - ready-for-agent
   - implementation
