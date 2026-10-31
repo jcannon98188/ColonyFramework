@@ -4,7 +4,7 @@ title: 'Resources, typed events, enable bits and System rates'
 status: To Do
 assignee: []
 created_date: '2026-10-31 01:56'
-updated_date: '2026-10-31 03:00'
+updated_date: '2026-10-31 03:51'
 labels:
   - ready-for-agent
   - implementation
@@ -34,6 +34,7 @@ Spec sections 4.1 and 4.3: Resources are World-owned singleton unmanaged structs
 - [ ] #3 Enable bits per Component exist, iteration respects them, and flipping a bit causes no structural change
 - [ ] #4 Every-N-Ticks with offset runs Systems on the expected Ticks; chunks skipped by change version or asleep bit are counted and never visited
 - [ ] #5 All of the above pass the determinism harness scenario across thread counts with zero steady-state allocation
+- [ ] #6 A structural op that loses a same-Phase conflict (spec 4.1 first-in-stable-order) produces a deterministic failure event delivered the next Phase, naming the Entity and the op
 <!-- AC:END -->
 
 ## Comments
