@@ -48,6 +48,7 @@ public sealed partial class World : IDisposable
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
         Diagnostics = new WorldDiagnostics(this, schema, options.Diagnostics, ResolveWorkerCount());
+        Inputs = new WorldInputs(this);
         _extensions = new IWorldExtension[schema.Extensions.Length];
         for (int i = 0; i < _extensions.Length; i++)
         {
@@ -90,6 +91,9 @@ public sealed partial class World : IDisposable
 
     /// <summary>Per-Tick records, logs, counters and the hash trail of this World (spec section 10.1). Reading allocates nothing.</summary>
     public WorldDiagnostics Diagnostics { get; }
+
+    /// <summary>Input Command intake and this Tick's canonical input list (spec section 7.3): <c>world.Inputs.Submit(source, command)</c> from any thread.</summary>
+    public WorldInputs Inputs { get; }
 
     /// <summary>Stream key of the World's root <see cref="RandomSource"/> ("WRLD").</summary>
     private const ulong RootRandomKey = 0x5752_4C44UL;
