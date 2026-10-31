@@ -36,3 +36,7 @@ Default five-label vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, 
 ### Domain docs
 
 Single-context: one `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Build and test loop
+
+.NET SDK pinned by `global.json`; solution `Colony.slnx`; xUnit v3 on Microsoft.Testing.Platform. The warm Roslyn compiler server already makes builds take 1-2 s, so there is no dev daemon (TASK-2, decided against). While iterating, run only the test project you touch: `dotnet test tests/<Project> -c Debug` (1-6 s). Before handing work off, run `dotnet test Colony.slnx -c Release` (about 50 s) and `dotnet run --project tools/Colony.DependencyCheck`; both must be green. The Native AOT comparison test skips unless `tests/Colony.Testing.AotHost` was published (`dotnet publish tests/Colony.Testing.AotHost -c Release -r win-x64`).
