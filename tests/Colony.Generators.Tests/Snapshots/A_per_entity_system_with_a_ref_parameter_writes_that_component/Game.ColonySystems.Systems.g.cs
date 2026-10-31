@@ -49,6 +49,12 @@ namespace Game
                 Hunger = chunk.Column<global::Game.Hunger>(hungerType);
             }
 
+            /// <summary>Binds the query to a chunk by schema lookup; the generated entry passes the Component types directly instead.</summary>
+            public StarveQuery(in global::Colony.ChunkView chunk, global::Colony.WorldSchema schema)
+                : this(in chunk, schema.Component<global::Game.Hunger>())
+            {
+            }
+
             /// <summary>The underlying chunk view (asleep bit, signature, padded columns).</summary>
             public global::Colony.ChunkView Chunk => _chunk;
 

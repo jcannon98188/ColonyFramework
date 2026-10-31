@@ -5,6 +5,12 @@ namespace Colony;
 /// <see cref="IComponent{TSelf}"/> with a field-level layout, plus equality members, so the struct registers
 /// with <see cref="WorldBuilder.AddComponent{T}()"/> under a stable name and layout hash.
 /// </summary>
+/// <remarks>
+/// Components are plain data with public fields (spec section 2, principle 4). The generated equality members
+/// satisfy CA1815; CA1051 (public instance fields) cannot be satisfied by a struct that is meant to be written
+/// through <c>ref</c>, so a Game disables it for its Component files, for example in <c>.editorconfig</c>:
+/// <c>dotnet_diagnostic.CA1051.severity = none</c>.
+/// </remarks>
 [AttributeUsage(AttributeTargets.Struct, Inherited = false, AllowMultiple = false)]
 public sealed class ComponentAttribute : Attribute
 {

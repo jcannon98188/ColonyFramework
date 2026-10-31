@@ -158,6 +158,10 @@ internal static class SystemEmitter
 
         w.Close();
         w.Line();
+        w.Line("/// <summary>Binds the query to a chunk by schema lookup; the generated entry passes the Component types directly instead.</summary>");
+        w.Open($"public {m}Query(in {ChunkView} chunk, global::Colony.WorldSchema schema)", $": this(in chunk{string.Concat(system.Columns.Select(c => $", schema.Component<{c.TypeCode}>()"))})");
+        w.Close();
+        w.Line();
         w.Line("/// <summary>The underlying chunk view (asleep bit, signature, padded columns).</summary>");
         w.Line($"public {ChunkView} Chunk => _chunk;");
         w.Line();

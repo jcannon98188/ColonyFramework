@@ -35,7 +35,7 @@ public sealed class SnapshotHarnessTests
             File.WriteAllText(Path.Combine(directory, "A.g.cs"), "line 1\nline 2\n");
             var generated = System.Collections.Immutable.ImmutableArray.Create(new GeneratorHarness.GeneratedFile("A.g.cs", "line 1\nline changed\n"));
 
-            var failure = Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => GeneratorHarness.CompareSnapshots(generated, directory));
+            var failure = Assert.ThrowsAny<Xunit.Sdk.XunitException>(() => GeneratorHarness.CompareSnapshots(generated, directory, acceptReceived: false));
 
             Assert.Contains("Snapshot drift", failure.Message, StringComparison.Ordinal);
             Assert.Contains("line changed", failure.Message, StringComparison.Ordinal);

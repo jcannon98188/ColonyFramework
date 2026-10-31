@@ -19,9 +19,15 @@ internal sealed class SourceWriter
         return this;
     }
 
-    public SourceWriter Open(string header)
+    /// <summary>Opens a block; <paramref name="continuation"/> (a base/this initializer) goes on its own line before the brace.</summary>
+    public SourceWriter Open(string header, string? continuation = null)
     {
         Line(header);
+        if (continuation is not null)
+        {
+            Line("    " + continuation);
+        }
+
         Line("{");
         _indent++;
         return this;

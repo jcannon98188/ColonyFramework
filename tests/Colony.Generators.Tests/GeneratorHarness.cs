@@ -77,9 +77,9 @@ internal static class GeneratorHarness
     /// <summary>Snippets may use members the generator will emit (the typed query type, the interface); those errors vanish after generation.</summary>
     private static bool IsExpectedBeforeGeneration(Diagnostic d) => d.Id is "CS0246" or "CS0103" or "CS0117" or "CS1061";
 
-    internal static void CompareSnapshots(ImmutableArray<GeneratedFile> generated, string directory)
+    internal static void CompareSnapshots(ImmutableArray<GeneratedFile> generated, string directory, bool? acceptReceived = null)
     {
-        bool accept = string.Equals(Environment.GetEnvironmentVariable("COLONY_ACCEPT_SNAPSHOTS"), "1", StringComparison.Ordinal);
+        bool accept = acceptReceived ?? string.Equals(Environment.GetEnvironmentVariable("COLONY_ACCEPT_SNAPSHOTS"), "1", StringComparison.Ordinal);
         Directory.CreateDirectory(directory);
         var failures = new StringBuilder();
         var expectedFiles = new HashSet<string>(Directory.EnumerateFiles(directory, "*.cs").Where(f => !f.EndsWith(".received.cs", StringComparison.Ordinal)), StringComparer.OrdinalIgnoreCase);

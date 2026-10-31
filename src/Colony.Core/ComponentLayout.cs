@@ -75,6 +75,9 @@ public sealed class ComponentLayout
         return hash;
     }
 
+    /// <summary>The layout a generated Component declares; the generator implements the interface explicitly, so this is the public accessor.</summary>
+    public static ComponentLayout Of<T>() where T : unmanaged, IComponent<T> => T.Layout;
+
     /// <summary>The name, size and alignment hash used when a Component is registered without a layout.</summary>
     internal static ulong ComputeBaseHash(string name, int size, int alignment)
     {
