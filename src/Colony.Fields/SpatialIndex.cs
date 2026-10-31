@@ -64,6 +64,12 @@ public sealed class SpatialIndex : IWorldExtension
     /// <summary>Entities in the bucket of one chunk ordinal.</summary>
     public int CountInChunk(int ordinal) => _bucketCount[ordinal];
 
+    /// <summary>(Entity, TilePos) pairs the last update examined: the rows of every chunk whose TilePos column changed. Diagnostics.</summary>
+    public int LastUpdateEntries { get; private set; }
+
+    /// <summary>Entities the last update dropped because they were destroyed or lost TilePos. Diagnostics.</summary>
+    public int LastUpdateRemoved { get; private set; }
+
     // ---- Incremental update (Late Phase). ----
 
     internal void BeginUpdate(int jobCount)
@@ -105,23 +111,37 @@ public sealed class SpatialIndex : IWorldExtension
     /// <summary>Applies the collected chunks in job order, then sweeps dead Entities out if anything was destroyed or removed.</summary>
     internal void EndUpdate()
     {
+        int examined = 0;
         for (int job = 0; job < _jobCount; job++)
         {
             var entries = _jobEntries[job];
             int count = _jobCounts[job];
+            examined += count;
             for (int i = 0; i < count; i++)
             {
                 Upsert(entries[i].Entity, entries[i].Position);
             }
         }
 
+        LastUpdateEntries = examined;
+        LastUpdateRemoved = 0;
         var counters = _world.Counters;
         if (counters.Destroys != _seenDestroys || counters.Removes != _seenRemoves)
         {
-            Sweep();
+            LastUpdateRemoved = Sweep();
             _seenDestroys = counters.Destroys;
             _seenRemoves = counters.Removes;
         }
+    }
+
+    /// <summary>Empties the index; queries find nothing until the next update or <see cref="Rebuild"/>.</summary>
+    public void Clear()
+    {
+        Array.Fill(_head, NoEntry);
+        Array.Clear(_bucketCount);
+        Array.Clear(_ids, 0, _highWater);
+        Count = 0;
+        _highWater = 0;
     }
 
     /// <summary>
@@ -131,21 +151,21 @@ public sealed class SpatialIndex : IWorldExtension
     /// </summary>
     public void Rebuild()
     {
-        Array.Fill(_head, NoEntry);
-        Array.Clear(_bucketCount);
-        Array.Clear(_ids, 0, _highWater);
-        Count = 0;
-        _highWater = 0;
+        Clear();
+        int examined = 0;
         foreach (var chunk in _world.Query(_tilePos))
         {
             var entities = chunk.Entities;
             var positions = chunk.Column<TilePos>(_tilePos);
+            examined += entities.Length;
             for (int i = 0; i < entities.Length; i++)
             {
                 Upsert(entities[i], positions[i]);
             }
         }
 
+        LastUpdateEntries = examined;
+        LastUpdateRemoved = 0;
         var counters = _world.Counters;
         _seenDestroys = counters.Destroys;
         _seenRemoves = counters.Removes;
@@ -176,16 +196,20 @@ public sealed class SpatialIndex : IWorldExtension
         _ids[slot] = EntityId.Null;
     }
 
-    private void Sweep()
+    private int Sweep()
     {
+        int removed = 0;
         for (int slot = 0; slot < _highWater; slot++)
         {
             var id = _ids[slot];
             if (!id.IsNull && !(_world.IsAlive(id) && _world.Has(id, _tilePos)))
             {
                 Remove(slot);
+                removed++;
             }
         }
+
+        return removed;
     }
 
     private int OrdinalOf(TilePos position)
