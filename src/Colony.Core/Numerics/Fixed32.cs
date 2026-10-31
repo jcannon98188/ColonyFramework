@@ -78,6 +78,12 @@ public readonly partial struct Fixed32 : IEquatable<Fixed32>, IComparable<Fixed3
 
     public static Fixed32 FromSingle(float value) => FromDouble(value);
 
+    /// <summary>
+    /// The ratio <paramref name="numerator"/>/<paramref name="denominator"/> rounded to nearest (ties away
+    /// from zero) and saturated. A zero denominator saturates by the sign of the numerator, like division.
+    /// </summary>
+    public static Fixed32 FromRatio(int numerator, int denominator) => FromInt32(numerator) / FromInt32(denominator);
+
     /// <summary>Truncates toward zero.</summary>
     public int ToInt32() => Raw < 0 ? -(int)((-(long)Raw) >> FractionalBits) : Raw >> FractionalBits;
 

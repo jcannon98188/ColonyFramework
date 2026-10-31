@@ -80,7 +80,7 @@ internal static class AnalyzerHarness
         }
     }
 
-    private static string Describe(IEnumerable<ExpectedDiagnostic> diagnostics, string source)
+    public static string Describe(IEnumerable<ExpectedDiagnostic> diagnostics, string source)
     {
         var builder = new StringBuilder();
         foreach (var diagnostic in diagnostics)
@@ -93,7 +93,7 @@ internal static class AnalyzerHarness
     }
 
     /// <summary>Strips <c>{|ID:...|}</c> markers and returns the clean source with the expected (id, span) pairs.</summary>
-    private static (string Source, List<ExpectedDiagnostic> Expected) ParseMarkup(string markup)
+    public static (string Source, List<ExpectedDiagnostic> Expected) ParseMarkup(string markup)
     {
         var source = new StringBuilder(markup.Length);
         var expected = new List<ExpectedDiagnostic>();
@@ -144,5 +144,5 @@ internal static class AnalyzerHarness
             .ToImmutableArray();
     }
 
-    private readonly record struct ExpectedDiagnostic(string Id, TextSpan Span);
+    public readonly record struct ExpectedDiagnostic(string Id, TextSpan Span);
 }

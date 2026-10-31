@@ -13,4 +13,10 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Generator snapshots are compared as text by GeneratorHarness, never compiled. -->
+    <Compile Remove="Snapshots\**" />
+    <None Include="Snapshots\**" />
+  </ItemGroup>
+
 </Project>
