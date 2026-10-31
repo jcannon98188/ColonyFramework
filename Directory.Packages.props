@@ -1,0 +1,20 @@
+<Project>
+
+  <!-- Central package management: every PackageReference in the solution takes its version from here. -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="Roslyn (source generators and analyzers target netstandard2.0)">
+    <!-- 4.14 keeps Colony.Generators loadable by older IDEs; the SDK ships a newer compiler and loads it fine. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing (Microsoft.Testing.Platform via xUnit v3)">
+    <PackageVersion Include="xunit.v3" Version="4.0.2" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    Shared settings applied after each project file is read, so they can key off properties the
+    project itself sets (IsTestProject). Test projects anywhere in the repo (tests/, tools/) run on
+    Microsoft.Testing.Platform through xUnit v3; `dotnet test` uses the MTP runner via global.json.
+  -->
+
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <!-- CA1515 (make types internal) conflicts with xUnit's public test class convention;
+         CA1707 (no underscores) conflicts with Sentence_case_test_names. -->
+    <NoWarn>$(NoWarn);CA1515;CA1707</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="xunit.v3" />
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

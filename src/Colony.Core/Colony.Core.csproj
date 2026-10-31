@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Core: Entity/Component storage, memory model, scheduler, command buffers, Resources,
+    events, Relations, World/Tick API, math layer, fixed-point, RNG, hashing (spec section 3).
+    Depends only on the BCL: no ProjectReference, no PackageReference (enforced by tools/Colony.DependencyCheck).
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework core: Entities, Components, Systems, scheduler, World and Tick.</Description>
+    <!-- Hot data is unmanaged; unsafe is confined to internal code (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Core.Tests" />
+  </ItemGroup>
+
+</Project>
