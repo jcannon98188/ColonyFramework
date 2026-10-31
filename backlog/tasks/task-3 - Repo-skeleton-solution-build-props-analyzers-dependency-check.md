@@ -1,10 +1,11 @@
 ---
 id: TASK-3
 title: 'Repo skeleton: solution, build props, analyzers, dependency check'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:52'
-updated_date: '2026-10-31 02:08'
+updated_date: '2026-10-31 02:13'
 labels:
   - ready-for-agent
   - implementation
