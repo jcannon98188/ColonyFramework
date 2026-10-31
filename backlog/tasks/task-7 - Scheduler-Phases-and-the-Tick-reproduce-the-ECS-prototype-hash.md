@@ -1,8 +1,9 @@
 ---
 id: TASK-7
 title: 'Scheduler, Phases and the Tick; reproduce the ECS prototype hash'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
 updated_date: '2026-10-31 03:17'
 labels:
