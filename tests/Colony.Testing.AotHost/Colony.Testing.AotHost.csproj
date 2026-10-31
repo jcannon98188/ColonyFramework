@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Native AOT host for the determinism harness (spec section 6, Tier 1; section 10.3): runs a named scenario
+    through Colony.Testing's HarnessHost and prints its World hashes, so the AOT comparison tests can check a
+    Native AOT build (IlcInstructionSet x86-64-v3) against the JIT run. Replaces TASK-7's Colony.Core.AotHost.
+    Publish:  dotnet publish tests/Colony.Testing.AotHost -c Release -r win-x64   (or linux-x64)
+    Output:   artifacts/publish/Colony.Testing.AotHost/release_<rid>/Colony.Testing.AotHost(.exe)
+    Run:      Colony.Testing.AotHost [scenario colonist] [ticks 30] [workers 1,4] [every 1]; see HarnessHost for the option names.
+    Not a test project: it links the scenario sources from Colony.Testing.Tests instead of referencing it.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <PublishAot>true</PublishAot>
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>Colony.Testing.AotHost</RootNamespace>
+    <!-- CA1515 wants internal types; the scenario types are public so the test project can share the files. -->
+    <NoWarn>$(NoWarn);CA1515;CA1051;CA1815</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
+  </ItemGroup>
+
+</Project>

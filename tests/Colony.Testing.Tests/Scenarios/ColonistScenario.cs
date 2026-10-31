@@ -1,11 +1,12 @@
-using Colony;
+using Colony.Testing;
 
-namespace Colony.Scenario;
+namespace Colony.Testing.Tests.Scenarios;
 
 // The acceptance oracle for TASK-7 (spec "Core slice" acceptance): the ECS prototype's colonist scenario
 // rebuilt on the real World.Tick with hand-written Systems. 100k colonists wander, get hungry, walk to the
 // nearest food and eat it (destroying it through command buffers); food regrows; 1% of the colony churns
-// every Tick. This file has no test-framework dependency: the Native AOT host compiles it as well.
+// every Tick. Run through Colony.Testing's harnesses (TASK-10). This file has no test-framework dependency:
+// the Native AOT host (tests/Colony.Testing.AotHost) compiles it as well.
 // Component names are prefixed so they never collide with the test project's own Components.
 
 public struct ColonistPosition
@@ -35,7 +36,7 @@ public struct FoodItem
     public int Nutrition;
 }
 
-public static class ColonistScenario
+public sealed class ColonistScenario : Scenario
 {
     public const int DefaultColonists = 100_000;
     public const int DefaultFood = 5_000;
@@ -48,10 +49,25 @@ public static class ColonistScenario
     public const float StarvingThreshold = 100f;
     public const int ChurnPercent = 1;
 
-    /// <summary>Builds the schema and Systems. The scenario's scratch state is per schema, so create one World per schema.</summary>
-    public static WorldSchema BuildSchema(bool sabotage = false, int foodTarget = DefaultFood)
+    /// <summary>The negative control is a separate scenario name so it never shares a golden file with the real one.</summary>
+    public override string Name => Sabotage ? "colonist-negative-control" : "colonist";
+
+    public override ulong Seed { get; init; } = DefaultSeed;
+
+    public int Colonists { get; init; } = DefaultColonists;
+
+    public int Food { get; init; } = DefaultFood;
+
+    /// <summary>Negative control: key the Wander RNG by worker thread, which must break the cross-thread hash comparison.</summary>
+    public bool Sabotage { get; init; }
+
+    public override int InitialEntityCapacity => (Colonists + Food) * 2;
+
+    /// <summary>Registers the Components and Systems. The scenario's scratch state is per schema, so the harness composes once per World.</summary>
+    public override void Compose(WorldBuilder builder)
     {
-        var builder = new WorldBuilder()
+        ArgumentNullException.ThrowIfNull(builder);
+        builder
             .AddComponent<ColonistPosition>("colonist.position")
             .AddComponent<ColonistTarget>("colonist.target")
             .AddComponent<ColonistHunger>("colonist.hunger")
@@ -65,9 +81,9 @@ public static class ColonistScenario
         var food = builder.Component<FoodItem>();
         var colonist = ComponentMask.Of(position, target, hunger, health);
         var foodSignature = ComponentMask.Of(position, food);
-        var state = new ScenarioState(foodTarget, sabotage);
+        var state = new ScenarioState(Food, Sabotage);
 
-        return builder
+        builder
             .AddSystem(new SystemDefinition
             {
                 Name = "FoodIndex",
@@ -171,20 +187,14 @@ public static class ColonistScenario
                 All = colonist,
                 Reads = ComponentMask.Of(health),
                 ForEachChunk = (in SystemContext context, in ChunkView chunk) => Churn(in context, in chunk, colonist, position, target, hunger, health),
-            })
-            .Build();
+            });
     }
 
-    /// <summary>Creates a World on <paramref name="workers"/> threads populated with colonists and food, ready to Tick.</summary>
-    public static World CreateWorld(WorldSchema schema, int workers, ulong seed = DefaultSeed, int colonists = DefaultColonists, int food = DefaultFood)
+    /// <summary>Populates the World with colonists and food, drawing from <see cref="World.Random"/>, ready to Tick.</summary>
+    public override void Populate(World world)
     {
-        ArgumentNullException.ThrowIfNull(schema);
-        var world = schema.CreateWorld(new WorldOptions
-        {
-            Seed = seed,
-            WorkerThreads = workers,
-            InitialEntityCapacity = (colonists + food) * 2,
-        });
+        ArgumentNullException.ThrowIfNull(world);
+        var schema = world.Schema;
         var position = schema.Component<ColonistPosition>();
         var target = schema.Component<ColonistTarget>();
         var hunger = schema.Component<ColonistHunger>();
@@ -192,7 +202,7 @@ public static class ColonistScenario
         var foodType = schema.Component<FoodItem>();
         var init = world.Random.Derive("init");
         var buffer = world.CreateCommandBuffer();
-        for (int i = 0; i < colonists; i++)
+        for (int i = 0; i < Colonists; i++)
         {
             var block = init.BlockAt((ulong)i);
             var e = buffer.Create(ComponentMask.Of(position, target, hunger, health));
@@ -203,9 +213,9 @@ public static class ColonistScenario
             buffer.Add(e, health, new ColonistHealth { Value = 100 });
         }
 
-        for (int i = 0; i < food; i++)
+        for (int i = 0; i < Food; i++)
         {
-            var block = init.BlockAt((ulong)(colonists + i));
+            var block = init.BlockAt((ulong)(Colonists + i));
             var e = buffer.Create(ComponentMask.Of(position, foodType));
             buffer.Add(e, position, RandomTile(block[0], block[1]));
             buffer.Add(e, foodType, new FoodItem { Nutrition = 50 });
@@ -213,26 +223,6 @@ public static class ColonistScenario
 
         world.Playback(buffer);
         world.ResetScratch();
-        return world;
-    }
-
-    /// <summary>Runs <paramref name="ticks"/> Ticks and returns the World hash after each Tick listed in <paramref name="checkpoints"/>, plus the final hash last.</summary>
-    public static ulong[] Run(World world, int ticks, ReadOnlySpan<int> checkpoints)
-    {
-        ArgumentNullException.ThrowIfNull(world);
-        var hashes = new ulong[checkpoints.Length + 1];
-        int next = 0;
-        for (int t = 1; t <= ticks; t++)
-        {
-            world.Tick();
-            if (next < checkpoints.Length && checkpoints[next] == t)
-            {
-                hashes[next++] = world.Hash();
-            }
-        }
-
-        hashes[^1] = world.Hash();
-        return hashes;
     }
 
     public static ColonistPosition RandomTile(uint a, uint b)
@@ -512,7 +502,7 @@ public static class ColonistScenario
             var targets = chunk.Column<ColonistTarget>(target);
             var hungers = chunk.Column<ColonistHunger>(hunger);
             var entities = chunk.Entities;
-            // Negative control (AC #7): keying the stream by the worker thread must break the cross-thread hash comparison.
+            // Negative control (TASK-7 AC #7, TASK-10 AC #2): keying the stream by the worker thread must break the cross-thread hash comparison.
             var random = _sabotage ? context.Random.Derive((ulong)Environment.CurrentManagedThreadId) : context.Random;
             for (int i = 0; i < positions.Length; i++)
             {
