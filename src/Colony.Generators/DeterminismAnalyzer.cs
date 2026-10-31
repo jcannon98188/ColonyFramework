@@ -45,6 +45,12 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
         "Guid.NewGuid in System code",
         "'{0}' is random per call; derive ids from Entity IDs or the counter-based RNG instead (spec section 6)");
 
+    /// <summary>COL1005: GetHashCode on a reference type (identity hash or randomised string hash).</summary>
+    public static readonly DiagnosticDescriptor ReferenceTypeHashCode = Rule(
+        "COL1005",
+        "GetHashCode on a reference type in System code",
+        "'{0}' hashes a reference type, which varies per process; hash unmanaged Component data or Entity IDs instead (spec section 6)");
+
     /// <summary>COL1007: System.Random.</summary>
     public static readonly DiagnosticDescriptor SystemRandom = Rule(
         "COL1007",
@@ -53,7 +59,7 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
 
     // Declared after the descriptors: static field initializers run in textual order.
     private static readonly ImmutableArray<DiagnosticDescriptor> All =
-        ImmutableArray.Create(NonDeterministicMath, VariableWidthVector, WallClockTime, NewGuid, SystemRandom);
+        ImmutableArray.Create(NonDeterministicMath, VariableWidthVector, WallClockTime, NewGuid, ReferenceTypeHashCode, SystemRandom);
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => All;
@@ -94,10 +100,19 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (symbol is IMethodSymbol method && BannedMath.IsBanned(method))
+        if (symbol is IMethodSymbol method)
         {
-            Report(context, NonDeterministicMath, method);
-            return;
+            if (BannedMath.IsBanned(method))
+            {
+                Report(context, NonDeterministicMath, method);
+                return;
+            }
+
+            if (HashesAReferenceType(context, method))
+            {
+                Report(context, ReferenceTypeHashCode, method);
+                return;
+            }
         }
 
         if (symbol is ITypeSymbol type)
@@ -126,6 +141,56 @@ public sealed class DeterminismAnalyzer : DiagnosticAnalyzer
             Report(context, ownerRule, symbol);
         }
     }
+
+    /// <summary>
+    /// GetHashCode whose hashed operand is a reference type (or an unconstrained type parameter), including
+    /// RuntimeHelpers.GetHashCode, IEqualityComparer.GetHashCode(T), string.GetHashCode(span) and HashCode.Combine/Add
+    /// with reference-type arguments.
+    /// </summary>
+    private static bool HashesAReferenceType(SyntaxNodeAnalysisContext context, IMethodSymbol method)
+    {
+        if (method.Name == "GetHashCode")
+        {
+            if (method.ContainingType.SpecialType == SpecialType.System_String)
+            {
+                return true;
+            }
+
+            if (method.Parameters.Length == 1)
+            {
+                return MayBeReference(method.Parameters[0].Type);
+            }
+
+            if (method.Parameters.Length == 0)
+            {
+                return MayBeReference(ReceiverType(context, method));
+            }
+
+            return false;
+        }
+
+        if (method.Name is "Combine" or "Add"
+            && method.ContainingType.ToDisplayString() == "System.HashCode")
+        {
+            return method.TypeArguments.Any(MayBeReference);
+        }
+
+        return false;
+    }
+
+    private static ITypeSymbol? ReceiverType(SyntaxNodeAnalysisContext context, IMethodSymbol method)
+    {
+        if (context.Node.Parent is MemberAccessExpressionSyntax { Expression: var receiver })
+        {
+            return context.SemanticModel.GetTypeInfo(receiver, context.CancellationToken).Type;
+        }
+
+        // Bare "GetHashCode()": the receiver is "this" (or the overridden base when the method is a base member).
+        return method.IsStatic ? null : context.ContainingSymbol?.ContainingType;
+    }
+
+    private static bool MayBeReference(ITypeSymbol? type) =>
+        type is not null && (type.IsReferenceType || (type is ITypeParameterSymbol tp && !tp.IsValueType));
 
     private static bool ReceiverIsUnreported(SyntaxNodeAnalysisContext context, SystemScope scope)
     {
