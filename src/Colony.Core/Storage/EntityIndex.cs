@@ -97,6 +97,9 @@ internal sealed class EntityIndex
         }
     }
 
+    /// <summary>The id of the Entity in a live slot.</summary>
+    public EntityId IdAt(int index) => new(index, _generation[index]);
+
     public int ArchetypeOf(int index) => _archetype[index];
 
     public int ChunkOf(int index) => _chunk[index];

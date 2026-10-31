@@ -41,6 +41,7 @@ public sealed partial class World : IDisposable
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
+        _relations = new RelationIndex(schema.RelationCount, _entities.Capacity);
         _resources = new ResourceStore(schema);
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
@@ -437,11 +438,16 @@ public sealed partial class World : IDisposable
         archetype.MarkChanged(chunk, ChangeCounter);
         var id = _entities.Allocate(archetype.Id, chunk, row);
         _nonFragmenting.EnsureCapacity(_entities.Capacity);
+        _relations.EnsureCapacity(_entities.Capacity);
         ((ulong*)archetype.ChunkPointer(chunk))[row] = id.Value;
         _creates++;
         return id;
     }
 
+    /// <summary>
+    /// Destroys an Entity and, through cascading Relations (<see cref="RelationOptions.CascadeDelete"/>),
+    /// its descendants: an explicit work list, no recursion, no allocation once it has grown.
+    /// </summary>
     internal bool DestroyEntity(EntityId id)
     {
         if (!_entities.IsAlive(id))
@@ -450,17 +456,40 @@ public sealed partial class World : IDisposable
             return false;
         }
 
-        int index = id.Index;
+        DestroyCore(id.Index);
+        while (_cascadeCount > 0)
+        {
+            var next = _cascade[--_cascadeCount];
+            if (_entities.IsAlive(next))
+            {
+                DestroyCore(next.Index);
+            }
+        }
+
+        return true;
+    }
+
+    private void DestroyCore(int index)
+    {
+        if (Schema.RelationCount > 0)
+        {
+            DetachRelations(index);
+        }
+
         RemoveFromArchetype(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), _entities.RowOf(index));
         _nonFragmenting.ClearEntity(index);
         _entities.Free(index, StructuralEpoch);
         _destroys++;
-        return true;
     }
 
     /// <summary>Adds (or overwrites) a Component; <paramref name="source"/> null means zero-initialised.</summary>
     internal unsafe bool AddComponent(EntityId id, int componentId, byte* source)
     {
+        if (Schema.RelationOfComponent[componentId] >= 0)
+        {
+            return Relate(id, componentId, source is null ? EntityId.Null : Unsafe.ReadUnaligned<RelationLink>(source).Target);
+        }
+
         if (!_entities.IsAlive(id))
         {
             ReportFailure(id, StructuralOp.Add, componentId);
@@ -510,6 +539,12 @@ public sealed partial class World : IDisposable
         int slot = Schema.NonFragmentingSlots[componentId];
         if (slot >= 0)
         {
+            int relation = Schema.RelationOfComponent[componentId];
+            if (relation >= 0)
+            {
+                UnlinkOutgoing(relation, slot, index);
+            }
+
             _nonFragmenting.Remove(slot, index);
         }
         else

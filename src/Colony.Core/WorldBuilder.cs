@@ -22,6 +22,7 @@ public sealed class WorldBuilder
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
     private readonly List<WorldExtensionDefinition> _extensions = [];
+    private readonly List<RelationDescriptor> _relations = [];
 
     /// <summary>
     /// Registers a World extension (Fields, spatial index, ...). Extensions are frozen at <see cref="Build"/>,
@@ -153,12 +154,12 @@ public sealed class WorldBuilder
 
     private WorldBuilder AddComponent<T>(string name, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields) where T : unmanaged
     {
-        ThrowIfBuilt();
-        if (_byName.ContainsKey(name))
+        if ((flags & (ComponentOptions.Relation | ComponentOptions.Buffer)) != 0)
         {
-            throw new ArgumentException($"A Component named '{name}' is already registered.", nameof(name));
+            throw new ArgumentException($"Component '{name}': the Relation and Buffer flags are set by AddRelation and AddBufferComponent, not by AddComponent.", nameof(flags));
         }
 
+        ThrowIfBuilt();
         if (_byClrType.ContainsKey(typeof(T)))
         {
             throw new ArgumentException($"The type {typeof(T).Name} is already registered as a Component.", nameof(T));
@@ -166,11 +167,26 @@ public sealed class WorldBuilder
 
         int size = Unsafe.SizeOf<T>();
         int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
+        int id = AddComponentCore(name, size, alignment, hash, flags, fields, elementSize: 0, inlineCapacity: 0);
+        _byClrType.Add(typeof(T), id);
+        return this;
+    }
+
+    /// <summary>Registers a Component by layout alone (no CLR type binding); returns its id.</summary>
+    private int AddComponentCore(string name, int size, int alignment, ulong layoutHash, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields, int elementSize, int inlineCapacity)
+    {
+        ThrowIfBuilt();
+        if (_byName.ContainsKey(name))
+        {
+            throw new ArgumentException($"A Component named '{name}' is already registered.", nameof(name));
+        }
+
         if (size > Archetype.MaxComponentSize)
         {
             throw new ArgumentException(
                 $"Component '{name}' is {size} bytes; a Component must fit {Archetype.MinCapacity} rows in a {SlabAllocator.ChunkSize} byte chunk ({Archetype.MaxComponentSize} bytes at most).",
-                nameof(T));
+                nameof(name));
         }
 
         int id = _components.Count;
@@ -180,11 +196,65 @@ public sealed class WorldBuilder
         }
 
         // Layout identity (spec section 4.1): the registered name, size, alignment and fields, never the CLR type.
-        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
-        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags) { Fields = fields });
+        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, layoutHash, flags)
+        {
+            Fields = fields,
+            ElementSize = elementSize,
+            InlineCapacity = inlineCapacity,
+        });
         _byName.Add(name, id);
-        _byClrType.Add(typeof(T), id);
-        return this;
+        return id;
+    }
+
+    /// <summary>Seed mixed into a Relation's layout hash ("RELN"), so a Relation and a plain 8-byte Component of the same name differ.</summary>
+    private const ulong RelationLayoutSeed = 0x5245_4C4EUL;
+
+    /// <summary>Registered name of the built-in parent/child Relation (<see cref="AddHierarchy"/>).</summary>
+    public const string HierarchyRelationName = "colony.parent";
+
+    /// <summary>
+    /// Registers a Relation (spec section 4.1): a named link from a source Entity to one target Entity,
+    /// stored as a non-fragmenting Component named <paramref name="name"/> and indexed in reverse by the
+    /// World. Set it with <see cref="CommandBuffer.Relate"/>; read it with <see cref="World.TargetOf"/> and
+    /// <see cref="World.SourcesOf"/>. With <see cref="RelationOptions.CascadeDelete"/>, destroying a target
+    /// destroys its sources too.
+    /// </summary>
+    public RelationType AddRelation(string name, RelationOptions options = RelationOptions.None)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        int size = Unsafe.SizeOf<RelationLink>();
+        int alignment = Unsafe.SizeOf<AlignmentProbe<RelationLink>>() - size;
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
+        hash = Hashing.Hash64.Combine(hash, RelationLayoutSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)options);
+        int componentId = AddComponentCore(name, size, alignment, hash, ComponentOptions.NonFragmenting | ComponentOptions.Relation, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty, 0, 0);
+        var type = new RelationType(_relations.Count, new ComponentType(componentId));
+        _relations.Add(new RelationDescriptor(type, name, options));
+        return type;
+    }
+
+    /// <summary>
+    /// Registers the built-in parent/child hierarchy (spec section 4.1): the Relation named
+    /// <see cref="HierarchyRelationName"/> from child to parent, with cascade delete by default. Use
+    /// <see cref="CommandBuffer.SetParent"/>, <see cref="World.ParentOf"/> and <see cref="World.ChildrenOf"/>.
+    /// </summary>
+    public RelationType AddHierarchy(bool cascadeDelete = true)
+        => AddRelation(HierarchyRelationName, cascadeDelete ? RelationOptions.CascadeDelete : RelationOptions.None);
+
+    /// <summary>The handle for the already-registered Relation named <paramref name="name"/>.</summary>
+    public RelationType Relation(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (var relation in _relations)
+        {
+            if (string.Equals(relation.Name, name, StringComparison.Ordinal))
+            {
+                return relation.Type;
+            }
+        }
+
+        throw new ArgumentException($"No Relation named '{name}' is registered; call AddRelation first.", nameof(name));
     }
 
     /// <summary>The handle for the already-registered Component of CLR type <typeparamref name="T"/>, for use in System definitions before <see cref="Build"/>.</summary>
@@ -314,7 +384,7 @@ public sealed class WorldBuilder
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _debugValidation);
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation);
     }
 
     private void ThrowIfBuilt()

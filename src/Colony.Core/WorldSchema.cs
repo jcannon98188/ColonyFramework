@@ -17,6 +17,7 @@ public sealed class WorldSchema
     private readonly Dictionary<string, int> _resourceByName;
     private readonly Phase[] _phases;
     private readonly WorldExtensionDefinition[] _extensions;
+    private readonly RelationDescriptor[] _relations;
 
     internal WorldSchema(
         List<ComponentDescriptor> components,
@@ -28,6 +29,7 @@ public sealed class WorldSchema
         List<Phase> phases,
         SystemSchedule schedule,
         List<WorldExtensionDefinition> extensions,
+        List<RelationDescriptor> relations,
         bool debugValidation)
     {
         _components = [.. components];
@@ -38,19 +40,32 @@ public sealed class WorldSchema
         _resourceByName = resourceByName;
         _phases = [.. phases];
         _extensions = [.. extensions];
+        _relations = [.. relations];
         Schedule = schedule;
         DebugValidation = debugValidation;
 
         var sizes = new int[_components.Length];
         var slots = new int[_components.Length];
+        var relationOf = new int[_components.Length];
+        Array.Fill(relationOf, -1);
+        foreach (var relation in _relations)
+        {
+            relationOf[relation.Component.Id] = relation.Type.Id;
+        }
+
         int nonFragmenting = 0;
+        bool anyBuffer = false;
         ulong hash = Hashing.Hash64.Compute(ReadOnlySpan<byte>.Empty, SchemaHashSeed);
         for (int i = 0; i < _components.Length; i++)
         {
             sizes[i] = _components[i].Size;
             slots[i] = _components[i].IsNonFragmenting ? nonFragmenting++ : -1;
+            anyBuffer |= _components[i].IsBuffer;
             hash = Hashing.Hash64.Combine(hash, _components[i].LayoutHash);
         }
+
+        RelationOfComponent = relationOf;
+        HasBufferComponents = anyBuffer;
 
         var resourceSizes = new int[_resources.Length];
         for (int i = 0; i < _resources.Length; i++)
@@ -99,6 +114,67 @@ public sealed class WorldSchema
     internal int[] NonFragmentingSlots { get; }
 
     internal int NonFragmentingCount { get; }
+
+    /// <summary>Per Component id: the Relation it stores, or -1.</summary>
+    internal int[] RelationOfComponent { get; }
+
+    /// <summary>True when any Component is a buffer Component (the structural paths then free overflow blocks).</summary>
+    internal bool HasBufferComponents { get; }
+
+    public int RelationCount => _relations.Length;
+
+    /// <summary>Every registered Relation in id order.</summary>
+    public ReadOnlySpan<RelationDescriptor> Relations => _relations;
+
+    /// <summary>The Relation registered under <paramref name="name"/>.</summary>
+    public RelationDescriptor Relation(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!TryGetRelation(name, out var type))
+        {
+            throw new ArgumentException($"No Relation named '{name}' is registered in this schema.", nameof(name));
+        }
+
+        return _relations[type.Id];
+    }
+
+    public bool TryGetRelation(string name, out RelationType type)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (ref readonly var relation in Relations)
+        {
+            if (string.Equals(relation.Name, name, StringComparison.Ordinal))
+            {
+                type = relation.Type;
+                return true;
+            }
+        }
+
+        type = default;
+        return false;
+    }
+
+    public RelationDescriptor DescribeRelation(RelationType type)
+    {
+        ValidateRelation(type);
+        return _relations[type.Id];
+    }
+
+    /// <summary>True when <see cref="WorldBuilder.AddHierarchy"/> registered the parent/child Relation.</summary>
+    public bool HasHierarchy => TryGetRelation(WorldBuilder.HierarchyRelationName, out _);
+
+    /// <summary>The built-in parent/child Relation (<see cref="WorldBuilder.AddHierarchy"/>); throws when the schema has none.</summary>
+    public RelationType Hierarchy => TryGetRelation(WorldBuilder.HierarchyRelationName, out var type)
+        ? type
+        : throw new InvalidOperationException("The schema has no hierarchy; call WorldBuilder.AddHierarchy.");
+
+    internal void ValidateRelation(RelationType type)
+    {
+        if ((uint)type.Id >= (uint)_relations.Length || _relations[type.Id].Component != type.Component)
+        {
+            throw new ArgumentException($"{type} does not belong to this schema.", nameof(type));
+        }
+    }
 
     internal SystemSchedule Schedule { get; }
 
