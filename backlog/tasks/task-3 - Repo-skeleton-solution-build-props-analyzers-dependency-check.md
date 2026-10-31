@@ -4,7 +4,7 @@ title: 'Repo skeleton: solution, build props, analyzers, dependency check'
 status: To Do
 assignee: []
 created_date: '2026-10-31 01:52'
-updated_date: '2026-10-31 01:53'
+updated_date: '2026-10-31 02:08'
 labels:
   - ready-for-agent
   - implementation
@@ -33,4 +33,11 @@ First implementation ticket of the v1 architecture spec (Backlog doc-1 and doc-2
 - [ ] #3 Colony.Core and Colony.Core.Tests exist; the test project runs one passing test on Microsoft.Testing.Platform
 - [ ] #4 A locally runnable dependency check fails the build when a package references another outside the spec section 3 rules (Core depends only on the BCL; nothing depends on Diagnostics, Testing or Plugins)
 - [ ] #5 A Colony.Generators scaffold (netstandard2.0) is referenced by Colony.Core.Tests and produces no diagnostics
+- [ ] #6 A GitHub Actions workflow runs build, tests and the dependency check on pull requests and pushes to main, on a Windows x64 and Linux x64 JIT matrix
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CI service decided after the repo got its remote: GitHub Actions (spec sections 10.3 and 14). Nightly AOT/ISA/ARM64/soak jobs and the self-hosted benchmark runner are later tickets' concern; this ticket only needs the PR matrix.
+<!-- SECTION:NOTES:END -->

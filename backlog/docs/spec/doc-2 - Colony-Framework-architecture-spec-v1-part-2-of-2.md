@@ -3,7 +3,7 @@ id: doc-2
 title: 'Colony Framework architecture spec (v1), part 2 of 2'
 type: specification
 created_date: '2026-10-31 01:46'
-updated_date: '2026-10-31 02:04'
+updated_date: '2026-10-31 02:09'
 tags:
   - architecture
   - spec
@@ -74,7 +74,7 @@ One versioned inspection protocol (compact binary with a JSON mapping), served i
 - **ABI conformance:** a C host loads the Framework, registers a Native Plugin and exercises every entry on JIT and AOT; `colony.h` is checked in and diffed in CI.
 - **Benchmarks:** BenchmarkDotNet micro-benchmarks plus a custom Tick harness (100k/1M colonists, churn, Fields, save/load) with JSON output. Performance is tracked, not gated, on shared runners; hard gates only on deterministic counts. A dedicated machine runs nightly comparisons.
 - **Model-based tests** against slow reference implementations (dictionary ECS, naive grid). Hashes prove sameness, not correctness.
-- **CI:** PR matrix Windows x64 and Linux x64 on JIT; nightly adds Native AOT, ISA variants, ARM64 Linux, soak. CI service chosen when the repo gets a remote.
+- **CI:** PR matrix Windows x64 and Linux x64 on JIT; nightly adds Native AOT, ISA variants, ARM64 Linux, soak. CI runs on GitHub Actions; the dedicated benchmark machine is a self-hosted runner.
 - Fixtures: a non-shipped test content package, scenarios defined by seed plus parameters, committed golden saves per container version.
 
 ## 11. Public API shape
@@ -135,7 +135,7 @@ Surveys: `ecs-designs.md`, `gpu-compute-options.md`, `dotnet-11-performance-feat
 
 ## 14. Repo structure and tooling
 
-One solution: `src/<Package>/`, `tests/<Package>.Tests/`, `benchmarks/`, `samples/` (a minimal headless host and a C native host), `docs/`, `prototypes/` (throwaway, never referenced or built by the solution), `tools/` (development-only tooling, never referenced by `src/`, not shipped), central package management, shared `Directory.Build.props` (analyzers, AOT and determinism flags) and `global.json` pinning the SDK. Licensed MIT (`LICENSE` at the repo root); hosted at `github.com/jcannon98188/ColonyFramework`. The CI service is still to be chosen.
+One solution: `src/<Package>/`, `tests/<Package>.Tests/`, `benchmarks/`, `samples/` (a minimal headless host and a C native host), `docs/`, `prototypes/` (throwaway, never referenced or built by the solution), `tools/` (development-only tooling, never referenced by `src/`, not shipped), central package management, shared `Directory.Build.props` (analyzers, AOT and determinism flags) and `global.json` pinning the SDK. Licensed MIT (`LICENSE` at the repo root); hosted at `github.com/jcannon98188/ColonyFramework`; CI on GitHub Actions.
 
 ## 15. Implementation hand-off
 
