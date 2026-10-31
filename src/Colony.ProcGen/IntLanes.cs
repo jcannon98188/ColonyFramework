@@ -1,4 +1,5 @@
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace Colony.ProcGen;
 
@@ -144,13 +145,26 @@ internal readonly struct Lanes128 : IIntLanes<Lanes128>
 
     public static Lanes128 MultiplyQ16(Lanes128 a, Lanes128 b)
     {
+        if (Sse41.IsSupported)
+        {
+            // pmuldq multiplies the even int32 lanes into int64; shift the odd lanes down to multiply them too.
+            // Only the low 32 bits of (p + 0x8000) >> 16 are kept, so a logical 64-bit shift (which SSE2 has)
+            // gives the same bits as the arithmetic one.
+            var half = Vector128.Create(0x8000L);
+            var even = (Sse41.Multiply(a._value, b._value) + half) >>> 16;
+            var odd = (Sse41.Multiply((a._value.AsInt64() >>> 32).AsInt32(), (b._value.AsInt64() >>> 32).AsInt32()) + half) >>> 16;
+            return new(Vector128.ConditionalSelect(EvenLanes128, even.AsInt32(), (odd << 32).AsInt32()));
+        }
+
         var (aLower, aUpper) = Vector128.Widen(a._value);
         var (bLower, bUpper) = Vector128.Widen(b._value);
-        var half = Vector128.Create(0x8000L);
-        var lower = Vector128.ShiftRightArithmetic((aLower * bLower) + half, 16);
-        var upper = Vector128.ShiftRightArithmetic((aUpper * bUpper) + half, 16);
+        var round = Vector128.Create(0x8000L);
+        var lower = Vector128.ShiftRightArithmetic((aLower * bLower) + round, 16);
+        var upper = Vector128.ShiftRightArithmetic((aUpper * bUpper) + round, 16);
         return new(Vector128.Narrow(lower, upper));
     }
+
+    private static Vector128<int> EvenLanes128 => Vector128.Create(-1, 0, -1, 0);
 
     public static Lanes128 ShiftLeft(Lanes128 a, int shift) => new(Vector128.ShiftLeft(a._value, shift));
 
@@ -207,13 +221,24 @@ internal readonly struct Lanes256 : IIntLanes<Lanes256>
 
     public static Lanes256 MultiplyQ16(Lanes256 a, Lanes256 b)
     {
+        if (Avx2.IsSupported)
+        {
+            // vpmuldq on the even lanes, then on the odd lanes shifted down; see Lanes128.MultiplyQ16.
+            var half = Vector256.Create(0x8000L);
+            var even = (Avx2.Multiply(a._value, b._value) + half) >>> 16;
+            var odd = (Avx2.Multiply((a._value.AsInt64() >>> 32).AsInt32(), (b._value.AsInt64() >>> 32).AsInt32()) + half) >>> 16;
+            return new(Vector256.ConditionalSelect(EvenLanes256, even.AsInt32(), (odd << 32).AsInt32()));
+        }
+
         var (aLower, aUpper) = Vector256.Widen(a._value);
         var (bLower, bUpper) = Vector256.Widen(b._value);
-        var half = Vector256.Create(0x8000L);
-        var lower = Vector256.ShiftRightArithmetic((aLower * bLower) + half, 16);
-        var upper = Vector256.ShiftRightArithmetic((aUpper * bUpper) + half, 16);
+        var round = Vector256.Create(0x8000L);
+        var lower = Vector256.ShiftRightArithmetic((aLower * bLower) + round, 16);
+        var upper = Vector256.ShiftRightArithmetic((aUpper * bUpper) + round, 16);
         return new(Vector256.Narrow(lower, upper));
     }
+
+    private static Vector256<int> EvenLanes256 => Vector256.Create(-1, 0, -1, 0, -1, 0, -1, 0);
 
     public static Lanes256 ShiftLeft(Lanes256 a, int shift) => new(Vector256.ShiftLeft(a._value, shift));
 

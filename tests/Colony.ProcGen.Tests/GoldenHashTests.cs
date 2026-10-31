@@ -19,8 +19,46 @@ public sealed class GoldenHashTests
     /// <summary>(function, seed) to expected hash. Produced by <see cref="Report"/>.</summary>
     private static readonly Dictionary<string, ulong> Expected = new(StringComparer.Ordinal)
     {
-        // GOLDEN-TABLE-START
-        // GOLDEN-TABLE-END
+        ["Value2D@1"] = 0x1C7221B572E8BC9AUL,
+        ["Value3D@1"] = 0xDB7165C5F49F878EUL,
+        ["Gradient2D@1"] = 0x9F3F02B6E5B02BD3UL,
+        ["Gradient3D@1"] = 0x3015D22A41D63477UL,
+        ["Simplex2D@1"] = 0xA437DAFDFB1D2E83UL,
+        ["Simplex3D@1"] = 0xE2AE15DE7753947DUL,
+        ["CellularF1_2D@1"] = 0xBDB1BE74FD635E6FUL,
+        ["CellularF2_2D@1"] = 0x948A02B8D9D42846UL,
+        ["CellularCell_2D@1"] = 0x27E86E10621AFF8FUL,
+        ["CellularF1_3D@1"] = 0x3757FE556DC0C358UL,
+        ["CellularF2_3D@1"] = 0x152AFD8B4ADA797EUL,
+        ["CellularCell_3D@1"] = 0x766AEA3E92421D56UL,
+        ["Fbm2D@1"] = 0x08D0F182E4B3AA1CUL,
+        ["Fbm3D@1"] = 0xCACC672A0E0EC7C7UL,
+        ["WarpX2D@1"] = 0x68AA3F8A40F118E0UL,
+        ["WarpY2D@1"] = 0x9B0CBC474BE876FDUL,
+        ["WarpX3D@1"] = 0x78FEA225E460717EUL,
+        ["WarpY3D@1"] = 0x69730911E3FA4605UL,
+        ["WarpZ3D@1"] = 0x8E66D7E87704DF92UL,
+        ["Spots@1"] = 0x9449C30DE979D547UL,
+        ["Value2D@C0FFEEBADF00D"] = 0xB5D4B5EC749771F9UL,
+        ["Value3D@C0FFEEBADF00D"] = 0xDF0FC9C15C0140C0UL,
+        ["Gradient2D@C0FFEEBADF00D"] = 0x0D4BC0DE5F6028ADUL,
+        ["Gradient3D@C0FFEEBADF00D"] = 0x0ED5FE21BD16E5F9UL,
+        ["Simplex2D@C0FFEEBADF00D"] = 0x7F251A1B50195F81UL,
+        ["Simplex3D@C0FFEEBADF00D"] = 0x257E644F3A8F90E2UL,
+        ["CellularF1_2D@C0FFEEBADF00D"] = 0x4CB4CD2636EB6239UL,
+        ["CellularF2_2D@C0FFEEBADF00D"] = 0xC72061FB325CD6DEUL,
+        ["CellularCell_2D@C0FFEEBADF00D"] = 0xC96E0C493528F627UL,
+        ["CellularF1_3D@C0FFEEBADF00D"] = 0x0FAF4A1152E0693DUL,
+        ["CellularF2_3D@C0FFEEBADF00D"] = 0x75BF91EFA38E436FUL,
+        ["CellularCell_3D@C0FFEEBADF00D"] = 0x6E4F033230A1F924UL,
+        ["Fbm2D@C0FFEEBADF00D"] = 0xE6BB3DDDD90CC031UL,
+        ["Fbm3D@C0FFEEBADF00D"] = 0xBBD63AE5E3E03FE7UL,
+        ["WarpX2D@C0FFEEBADF00D"] = 0x817004C4448A1803UL,
+        ["WarpY2D@C0FFEEBADF00D"] = 0xBB393716BBDC9D53UL,
+        ["WarpX3D@C0FFEEBADF00D"] = 0x29333D623F3A4080UL,
+        ["WarpY3D@C0FFEEBADF00D"] = 0x0FB1876ED4E71C75UL,
+        ["WarpZ3D@C0FFEEBADF00D"] = 0xE751519780BA5754UL,
+        ["Spots@C0FFEEBADF00D"] = 0xE7CEFCA504405DA8UL,
     };
 
     public static IEnumerable<TheoryDataRow<string, ulong>> Cases()
@@ -135,7 +173,7 @@ public sealed class GoldenHashTests
                 return Hash64.Compute<Fixed32>(function == "WarpX3D" ? x3 : function == "WarpY3D" ? y3 : z3);
             case "Spots":
                 var spots = new Spot[8];
-                var state = new Hash64State();
+                var state = new Hash64State(0);
                 for (int ry = -2; ry < 2; ry++)
                 {
                     for (int rx = -2; rx < 2; rx++)
