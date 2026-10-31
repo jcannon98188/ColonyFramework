@@ -68,10 +68,30 @@ Relations, Fields, events, change detection or access enforcement, so the number
 Re-measured on the real implementation (same machine: i9-9900KF, 8 physical / 16 logical cores, Windows 11,
 .NET 11 RC2, Release, JIT, Fields on, 100 warm-up + 60 measured Ticks; TASK-30 report, 2026-10-31):
 
-BASELINE_TABLE
+| Scenario | Workers | Fields | Mean ms/Tick | p50 | p99 | Alloc | Chunks visited | Save / Load | vs prototype |
+|---|---|---|---|---|---|---|---|---|---|
+| colonist-100k | 1 | on | 16.748 | 16.751 | 18.155 | 0 B | 21 750 | 56.4 ms (1.89 MB) / 41.4 ms | n/a (prototype had no Fields) |
+| colonist-100k | 1 | off (`--no-fields`) | 1.649 | 1.610 | 2.193 | 0 B | 21 750 | - | 1.02 ms -> 1.65 ms (+62%) |
+| colonist-100k | 8 (all cores) | on | 6.246 | 6.486 | - | 0 B | 21 750 | - | - |
+| colonist-100k | 8 (all cores) | off | 0.727 | 0.589 | 4.892 | 0 B | 21 750 | - | - |
+| colonist-1m | 1 | on | 34.851 | 34.759 | 36.178 | 0 B | 216 195 | 133.7 ms (17.1 MB) / 106.2 ms | n/a |
+| colonist-1m | 1 | off | 19.560 | 19.463 | 21.448 | 0 B | 216 195 | - | 7.8 ms -> 19.6 ms (+151%) |
+| colonist-1m | 8 (all cores) | on | 11.829 | 12.287 | - | 0 B | 216 195 | - | - |
+
+The two Field stencils (Diffuse double-buffered + Life in-place over 40 chunks) account for roughly 15 ms of the
+single-threaded 100k Tick; the ECS part alone is 1.65 ms. The 1M scenario is ~2.5x slower than the prototype
+single-threaded, attributable to enable bits, change filters, Relations and access enforcement that the prototype
+did not have. The prototype cap of 1.02 ms is therefore not met by the full implementation; treat these as the new
+baselines and track regressions against them with `--baseline`.
 
 Off-vs-Standard diagnostics overhead (TASK-17's 1% gate, `DiagnosticsOverheadBenchmarks`, 100k colonists):
 
-OVERHEAD_TABLE
+| Measurement | Off | Standard | Overhead |
+|---|---|---|---|
+| BenchmarkDotNet `TickOff` / `TickStandard`, Workers=1 (10 iterations, CI 99.9% +-3%) | 1.695 ms | 1.699 ms | +0.2% |
+| Tick harness colonist-100k, Workers=1, Fields on (mean / p50) | 16.748 / 16.751 ms | 16.754 / 16.590 ms | +0.04% / -1.0% (noise) |
+
+Standard diagnostics stay well under TASK-17's deferred 1% gate; the difference is inside the run-to-run noise of
+both tools. The Workers=4 BenchmarkDotNet case did not complete in the hand-off run (see the TASK-30 report).
 
 A `tick-harness.json` from the nightly machine is the authoritative record; this table is the hand-off snapshot.
