@@ -118,6 +118,9 @@ public sealed partial class World : IDisposable
     /// <summary>Ticks completed so far; the Tick about to run has this number.</summary>
     public long CurrentTick { get; private set; }
 
+    /// <summary>The gate the host passed in <see cref="WorldOptions.TickGate"/> (pause and step, spec section 4.3), or null.</summary>
+    public TickGate? TickGate => _options.TickGate;
+
     /// <summary>Set when a System threw: the World no longer Ticks (spec section 4.3).</summary>
     public WorldFault? Fault { get; private set; }
 

@@ -71,6 +71,24 @@ public sealed class DependencyRulesTests
         Assert.Empty(DependencyRules.Check(projects));
     }
 
+    [Fact]
+    public void Diagnostics_may_reference_Core_Fields_and_Persistence_and_nothing_else()
+    {
+        // TASK-29 / spec section 3: the inspection server reads Fields and the replay log; Plugin inspectors reach it through Core's schema.
+        var projects = new[]
+        {
+            Src("Colony.Core"),
+            Src("Colony.Fields", SrcPath("Colony.Core")),
+            Src("Colony.Persistence", SrcPath("Colony.Core")),
+            Src("Colony.Abstractions"),
+            Src("Colony.Diagnostics", SrcPath("Colony.Core"), SrcPath("Colony.Fields"), SrcPath("Colony.Persistence"), SrcPath("Colony.Abstractions")),
+        };
+
+        var violation = Assert.Single(DependencyRules.Check(projects));
+        Assert.Equal("Colony.Diagnostics", violation.Project);
+        Assert.Contains("Colony.Abstractions", violation.Message, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("Colony.Diagnostics")]
     [InlineData("Colony.Testing")]
