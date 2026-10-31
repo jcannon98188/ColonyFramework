@@ -3,7 +3,7 @@ using Colony.Numerics;
 namespace Colony.Core.Tests.Numerics;
 
 /// <summary>
-/// Golden values come from an independent high-precision computation (scratchpad gen_tables.py),
+/// Golden values come from an independent high-precision computation (tools/scripts/gen_fixed_tables.py),
 /// quantised to the input type. Fixed32 results must land within one ulp (2^-16); Fixed64 results,
 /// which come from a 1024-step quarter-wave table with linear interpolation, within 2^-21.
 /// </summary>
