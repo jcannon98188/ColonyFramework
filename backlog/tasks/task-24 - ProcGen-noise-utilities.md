@@ -1,9 +1,11 @@
 ---
 id: TASK-24
 title: ProcGen noise utilities
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 03:17'
 labels:
   - ready-for-agent
   - implementation
