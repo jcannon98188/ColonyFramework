@@ -12,9 +12,15 @@ public sealed class WorldBuilder
     /// <summary>Seed for Component layout hashes ("LAYT"), so they never collide with a World hash by construction.</summary>
     private const ulong LayoutHashSeed = 0x4C41_5954UL;
 
+    /// <summary>Seed for Resource layout hashes ("RSRC").</summary>
+    private const ulong ResourceLayoutHashSeed = 0x5253_5243UL;
+
     private readonly List<ComponentDescriptor> _components = [];
     private readonly Dictionary<Type, int> _byClrType = [];
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
+    private readonly List<ResourceDescriptor> _resources = [];
+    private readonly Dictionary<Type, int> _resourceByClrType = [];
+    private readonly Dictionary<string, int> _resourceByName = new(StringComparer.Ordinal);
     private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
@@ -146,6 +152,73 @@ public sealed class WorldBuilder
     }
 
     /// <summary>
+    /// Registers a World-owned singleton Resource (spec section 4.1): one zero-initialised value of
+    /// <typeparamref name="T"/> per World, saved and hashed with it unless <see cref="ResourceOptions.Transient"/>.
+    /// Systems declare access with <see cref="SystemDefinition.ReadsResources"/> and <see cref="SystemDefinition.WritesResources"/>.
+    /// </summary>
+    public WorldBuilder AddResource<T>(string name, ResourceOptions options = ResourceOptions.None) where T : unmanaged
+    {
+        AddResourceCore<T>(name, ResourceKind.Value, persistent: (options & ResourceOptions.Transient) == 0);
+        return this;
+    }
+
+    /// <summary>The handle for the already-registered Resource of CLR type <typeparamref name="T"/>.</summary>
+    public ResourceType Resource<T>() where T : unmanaged
+    {
+        if (!_resourceByClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as a Resource; call AddResource or AddEvent first.", nameof(T));
+        }
+
+        return new ResourceType(id);
+    }
+
+    /// <summary>The handle for the already-registered Resource named <paramref name="name"/>.</summary>
+    public ResourceType Resource(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_resourceByName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Resource named '{name}' is registered; call AddResource or AddEvent first.", nameof(name));
+        }
+
+        return new ResourceType(id);
+    }
+
+    private ResourceType AddResourceCore<T>(string name, ResourceKind kind, bool persistent) where T : unmanaged
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        if (_resourceByName.ContainsKey(name))
+        {
+            throw new ArgumentException($"A Resource named '{name}' is already registered.", nameof(name));
+        }
+
+        if (_resourceByClrType.ContainsKey(typeof(T)))
+        {
+            throw new ArgumentException($"The type {typeof(T).Name} is already registered as a Resource.", nameof(T));
+        }
+
+        int id = _resources.Count;
+        if (id >= ResourceMask.Capacity)
+        {
+            throw new InvalidOperationException($"A schema may register at most {ResourceMask.Capacity} Resources.");
+        }
+
+        int size = Unsafe.SizeOf<T>();
+        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
+        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), ResourceLayoutHashSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)size);
+        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
+        hash = Hashing.Hash64.Combine(hash, (ulong)kind);
+        var type = new ResourceType(id);
+        _resources.Add(new ResourceDescriptor(type, name, size, alignment, hash, kind, persistent));
+        _resourceByName.Add(name, id);
+        _resourceByClrType.Add(typeof(T), id);
+        return type;
+    }
+
+    /// <summary>
     /// Turns debug validation on or off for Worlds of this schema: structural-version checks on chunk
     /// views and refs, poisoning of freed memory and a leak report on dispose (spec section 4.2). The
     /// default follows the Framework build configuration.
@@ -162,8 +235,8 @@ public sealed class WorldBuilder
     {
         ThrowIfBuilt();
         _built = true;
-        var schedule = SystemSchedule.Build(_systems, _phases, _components.Count);
-        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _debugValidation);
+        var schedule = SystemSchedule.Build(_systems, _phases, _components.Count, _resources);
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _debugValidation);
     }
 
     private void ThrowIfBuilt()

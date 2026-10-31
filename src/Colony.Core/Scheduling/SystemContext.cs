@@ -11,15 +11,47 @@ namespace Colony;
 /// </summary>
 public readonly ref struct SystemContext
 {
-    internal SystemContext(World world, CommandBuffer commands, long tick, int systemId, int jobIndex, int jobCount, RandomSource random)
+    private readonly SystemDefinition _definition;
+
+    internal SystemContext(World world, SystemDefinition definition, CommandBuffer commands, long tick, int systemId, int jobIndex, int jobCount, RandomSource random)
     {
         World = world;
+        _definition = definition;
         Commands = commands;
         Tick = tick;
         SystemId = systemId;
         JobIndex = jobIndex;
         JobCount = jobCount;
         Random = random;
+    }
+
+    /// <summary>
+    /// A value Resource this System declared in <see cref="SystemDefinition.ReadsResources"/> or
+    /// <see cref="SystemDefinition.WritesResources"/>. Reading an undeclared Resource throws, because the
+    /// scheduler could then run this System concurrently with its writer.
+    /// </summary>
+    public ref readonly T ReadResource<T>(ResourceType type) where T : unmanaged
+    {
+        if (!_definition.ReadsResources.Contains(type) && !_definition.WritesResources.Contains(type))
+        {
+            throw new InvalidOperationException($"System '{_definition.Name}' reads {World.Schema.DescribeResource(type).Name} without declaring it in ReadsResources.");
+        }
+
+        return ref World.Resource<T>(type);
+    }
+
+    /// <summary>
+    /// A value Resource this System declared in <see cref="SystemDefinition.WritesResources"/>, writable.
+    /// Write it from <see cref="SystemDefinition.Begin"/> or <see cref="SystemDefinition.End"/>, never from a chunk job (jobs run concurrently).
+    /// </summary>
+    public ref T Resource<T>(ResourceType type) where T : unmanaged
+    {
+        if (!_definition.WritesResources.Contains(type))
+        {
+            throw new InvalidOperationException($"System '{_definition.Name}' writes {World.Schema.DescribeResource(type).Name} without declaring it in WritesResources.");
+        }
+
+        return ref World.Resource<T>(type);
     }
 
     public World World { get; }

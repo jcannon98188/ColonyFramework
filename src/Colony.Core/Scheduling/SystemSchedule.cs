@@ -28,7 +28,7 @@ internal sealed class SystemSchedule
 
     public int SystemCount => Definitions.Length;
 
-    public static SystemSchedule Build(List<SystemDefinition> definitions, List<Phase> phases, int componentCount)
+    public static SystemSchedule Build(List<SystemDefinition> definitions, List<Phase> phases, int componentCount, IReadOnlyList<ResourceDescriptor> resources)
     {
         var defs = definitions.ToArray();
         var byName = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -37,12 +37,23 @@ internal sealed class SystemSchedule
             byName.Add(defs[i].Name, i);
         }
 
+        // Event queues are written through per-System buffers merged at the Phase boundary, so they never
+        // conflict; only value Resources take part in conflict detection.
+        var values = ResourceMask.Empty;
+        for (int i = 0; i < resources.Count; i++)
+        {
+            if (resources[i].Kind == ResourceKind.Value)
+            {
+                values = values.With(resources[i].Type);
+            }
+        }
+
         var descriptors = new SystemDescriptor[defs.Length];
         var queries = new ComponentMask[defs.Length];
         var plans = new PhasePlan[phases.Count];
         for (int p = 0; p < phases.Count; p++)
         {
-            plans[p] = BuildPhase(phases[p], defs, byName, descriptors);
+            plans[p] = BuildPhase(phases[p], defs, byName, descriptors, values, resources);
         }
 
         for (int i = 0; i < defs.Length; i++)
@@ -58,10 +69,27 @@ internal sealed class SystemSchedule
             ValidateMask(def.Reads, componentCount, def.Name, "Reads");
             ValidateMask(def.Writes, componentCount, def.Name, "Writes");
             ValidateMask(def.ChangeFilter, componentCount, def.Name, "ChangeFilter");
+            ValidateResourceMask(def.ReadsResources, resources.Count, def.Name, "ReadsResources");
+            ValidateResourceMask(def.WritesResources, resources.Count, def.Name, "WritesResources");
             queries[i] = def.All.IsEmpty ? def.Reads.Union(def.Writes) : def.All;
         }
 
         return new SystemSchedule(defs, descriptors, plans, queries);
+    }
+
+    private static void ValidateResourceMask(ResourceMask mask, int resourceCount, string system, string what)
+    {
+        if (mask.Count == 0)
+        {
+            return;
+        }
+
+        Span<int> ids = stackalloc int[mask.Count];
+        mask.CopyIds(ids);
+        if (ids[^1] >= resourceCount)
+        {
+            throw new InvalidOperationException($"System '{system}' names Resource id {ids[^1]} in {what}, but the schema registers only {resourceCount} Resources.");
+        }
     }
 
     private static void ValidateMask(ComponentMask mask, int componentCount, string system, string what)
@@ -79,7 +107,7 @@ internal sealed class SystemSchedule
         }
     }
 
-    private static PhasePlan BuildPhase(Phase phase, SystemDefinition[] defs, Dictionary<string, int> byName, SystemDescriptor[] descriptors)
+    private static PhasePlan BuildPhase(Phase phase, SystemDefinition[] defs, Dictionary<string, int> byName, SystemDescriptor[] descriptors, ResourceMask values, IReadOnlyList<ResourceDescriptor> resources)
     {
         var members = new List<int>();
         for (int i = 0; i < defs.Length; i++)
@@ -179,11 +207,11 @@ internal sealed class SystemSchedule
             {
                 int a = order[ka];
                 var ad = defs[members[a]];
-                bool conflicts = Conflicts(ad, bd);
+                bool conflicts = Conflicts(ad, bd) || ConflictsOnResources(ad, bd, values);
                 if (conflicts && !reach[a, b])
                 {
                     throw new InvalidOperationException(
-                        $"Systems '{ad.Name}' and '{bd.Name}' in Phase '{phase.Name}' both touch {DescribeConflict(ad, bd)} but no After/Before constraint orders them; declare one so the result cannot depend on scheduling.");
+                        $"Systems '{ad.Name}' and '{bd.Name}' in Phase '{phase.Name}' both touch {DescribeConflict(ad, bd, values, resources)} but no After/Before constraint orders them; declare one so the result cannot depend on scheduling.");
                 }
 
                 if (conflicts || reach[a, b])
@@ -243,14 +271,42 @@ internal sealed class SystemSchedule
     internal static bool Conflicts(SystemDefinition a, SystemDefinition b)
         => a.Writes.Intersects(b.Reads) || a.Writes.Intersects(b.Writes) || b.Writes.Intersects(a.Reads);
 
-    private static string DescribeConflict(SystemDefinition a, SystemDefinition b)
+    /// <summary>Value Resources conflict like Components; event queues (not in <paramref name="values"/>) never do.</summary>
+    internal static bool ConflictsOnResources(SystemDefinition a, SystemDefinition b, ResourceMask values)
     {
+        var aw = a.WritesResources.Intersect(values);
+        var bw = b.WritesResources.Intersect(values);
+        return aw.Intersects(b.ReadsResources) || aw.Intersects(bw) || bw.Intersects(a.ReadsResources);
+    }
+
+    private static string DescribeConflict(SystemDefinition a, SystemDefinition b, ResourceMask values, IReadOnlyList<ResourceDescriptor> resources)
+    {
+        var parts = new List<string>();
         var shared = a.Writes.Intersect(b.Reads.Union(b.Writes)).Union(b.Writes.Intersect(a.Reads));
-        Span<int> ids = stackalloc int[shared.Count];
-        shared.CopyIds(ids);
-        return ids.Length == 1
-            ? $"Component {ids[0]}"
-            : $"Components {string.Join(", ", ids.ToArray())}";
+        if (!shared.IsEmpty)
+        {
+            Span<int> ids = stackalloc int[shared.Count];
+            shared.CopyIds(ids);
+            parts.Add(ids.Length == 1 ? $"Component {ids[0]}" : $"Components {string.Join(", ", ids.ToArray())}");
+        }
+
+        var aw = a.WritesResources.Intersect(values);
+        var bw = b.WritesResources.Intersect(values);
+        var sharedResources = aw.Intersect(b.ReadsResources.Union(bw)).Union(bw.Intersect(a.ReadsResources));
+        if (!sharedResources.IsEmpty)
+        {
+            Span<int> ids = stackalloc int[sharedResources.Count];
+            sharedResources.CopyIds(ids);
+            var names = new string[ids.Length];
+            for (int i = 0; i < ids.Length; i++)
+            {
+                names[i] = $"'{resources[ids[i]].Name}'";
+            }
+
+            parts.Add(ids.Length == 1 ? $"Resource {names[0]}" : $"Resources {string.Join(", ", names)}");
+        }
+
+        return string.Join(" and ", parts);
     }
 
     private static string DescribeUnplaced(List<int> members, bool[] placed, SystemDefinition[] defs)

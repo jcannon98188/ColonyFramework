@@ -16,6 +16,7 @@ public sealed partial class World : IDisposable
     private readonly WorldOptions _options;
     private readonly EntityIndex _entities;
     private readonly NonFragmentingStore _nonFragmenting;
+    private readonly ResourceStore _resources;
     private readonly Dictionary<ComponentMask, Archetype> _bySignature = [];
     private readonly List<CommandBuffer> _buffers = [];
     private Archetype[] _archetypes = new Archetype[8];
@@ -38,6 +39,7 @@ public sealed partial class World : IDisposable
         Scratch = new ScratchArena(Allocator, poison: DebugValidation);
         _entities = new EntityIndex(options.InitialEntityCapacity);
         _nonFragmenting = new NonFragmentingStore(schema, _entities.Capacity);
+        _resources = new ResourceStore(schema);
         Random = new RandomSource(options.Seed, RootRandomKey);
         _sharedRandom = new RandomSequence(Random.Derive("world"));
     }
@@ -211,6 +213,17 @@ public sealed partial class World : IDisposable
         }
 
         return ref GetUnchecked<T>(id.Index, type.Id);
+    }
+
+    /// <summary>
+    /// The World's value of a Resource (spec section 4.1), by reference; stable for the World's lifetime.
+    /// Inside a System use <see cref="SystemContext.Resource{T}"/> / <see cref="SystemContext.ReadResource{T}"/>,
+    /// which check the declared access.
+    /// </summary>
+    public unsafe ref T Resource<T>(ResourceType type) where T : unmanaged
+    {
+        Schema.ValidateResource<T>(type, ResourceKind.Value);
+        return ref Unsafe.AsRef<T>(_resources.Pointer(type.Id));
     }
 
     /// <summary>Chunk-level iteration over every archetype that has all of <paramref name="all"/> and none of <paramref name="none"/>.</summary>
@@ -431,6 +444,7 @@ public sealed partial class World : IDisposable
 
         Scratch.Dispose();
         _nonFragmenting.Dispose();
+        _resources.Dispose();
         var report = new LeakReport(Allocator.ChunksInUse, (long)Allocator.ChunksInUse * SlabAllocator.ChunkSize);
         Allocator.Dispose();
         if (DebugValidation && report.HasLeaks)

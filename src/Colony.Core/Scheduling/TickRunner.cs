@@ -171,7 +171,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
 
     private void RunSerial(SystemAction action, int id, SystemState state, Phase phase)
     {
-        var context = new SystemContext(_world, state.Buffers[0], _tick, id, -1, state.Jobs, state.Random);
+        var context = new SystemContext(_world, _schedule.Definitions[id], state.Buffers[0], _tick, id, -1, state.Jobs, state.Random);
         try
         {
             action(in context);
@@ -190,7 +190,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         var state = _states[j.System];
         try
         {
-            var context = new SystemContext(_world, state.Buffers[j.JobIndex], _tick, j.System, j.JobIndex, state.Jobs, state.Random);
+            var context = new SystemContext(_world, def, state.Buffers[j.JobIndex], _tick, j.System, j.JobIndex, state.Jobs, state.Random);
             var view = new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation);
             def.ForEachChunk!(in context, in view);
             j.Archetype.MarkWritten(j.Chunk, def.Writes, _world.ChangeCounter);
