@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Runtime tests of source-generated Components and Systems (spec sections 4.3 and 11): the generator runs over
+    this project as an analyzer, exactly as it does over a Game, and the generated Systems run under the scheduler.
+    The hello-colony sample of spec section 11.1 (minus Fields and Save) lives here until samples/ exists (TASK-28).
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Generators\Colony.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

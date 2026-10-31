@@ -11,6 +11,7 @@
     <Project Path="tests/Colony.Core.Tests/Colony.Core.Tests.csproj" />
     <Project Path="tests/Colony.Diagnostics.Tests/Colony.Diagnostics.Tests.csproj" />
     <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
+    <Project Path="tests/Colony.Generated.Tests/Colony.Generated.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
     <Project Path="tests/Colony.ProcGen.Tests/Colony.ProcGen.Tests.csproj" />
   </Folder>

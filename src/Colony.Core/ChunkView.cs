@@ -80,6 +80,62 @@ public readonly ref struct ChunkView
         return Span<T>(Offset<T>(type), PaddedCount);
     }
 
+    // ---- Enable bits (spec section 4.1): per Component, per row. Spans above cover every live row; use these to honour the bits. ----
+
+    /// <summary>True when the Component is enabled on <paramref name="row"/>.</summary>
+    public bool IsEnabled(ComponentType type, int row)
+    {
+        Validate();
+        return _archetype.IsEnabled(ChunkIndex, Column(type), (uint)row < (uint)Count ? row : throw new ArgumentOutOfRangeException(nameof(row)));
+    }
+
+    /// <summary>
+    /// Flips the Component's enable bit on <paramref name="row"/>. Not a structural change. From a chunk
+    /// job, flip bits only in your own chunk and only for Components in your declared Writes.
+    /// </summary>
+    public void SetEnabled(ComponentType type, int row, bool enabled)
+    {
+        Validate();
+        if ((uint)row >= (uint)Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(row));
+        }
+
+        _archetype.SetEnabled(ChunkIndex, Column(type), row, enabled);
+    }
+
+    /// <summary>Live rows on which the Component is enabled.</summary>
+    public int EnabledCount(ComponentType type)
+    {
+        Validate();
+        return _archetype.EnabledCount(ChunkIndex, Column(type));
+    }
+
+    /// <summary>The Component's enable bitset (bit r = row r), covering the live rows; bits past <see cref="Count"/> are zero.</summary>
+    public unsafe ReadOnlySpan<ulong> EnabledBits(ComponentType type)
+    {
+        Validate();
+        return new ReadOnlySpan<ulong>(EnabledPointer(Column(type)), Archetype.EnabledWords(Count));
+    }
+
+    /// <summary>Enumerates (ascending) the rows on which <paramref name="type"/> is enabled.</summary>
+    public EnabledRowEnumerator EnabledRows(ComponentType type) => EnabledRows(ComponentMask.Of(type));
+
+    /// <summary>Enumerates (ascending) the rows on which every Component in <paramref name="components"/> that this chunk has is enabled.</summary>
+    public EnabledRowEnumerator EnabledRows(ComponentMask components)
+    {
+        Validate();
+        return new EnabledRowEnumerator(_archetype, _pointer, components, Count);
+    }
+
+    private int Column(ComponentType type)
+    {
+        int column = _archetype.ColumnOf(type.Id);
+        return column >= 0 ? column : throw new InvalidOperationException($"The chunk has no column for {type}.");
+    }
+
+    private unsafe void* EnabledPointer(int column) => (byte*)_pointer + _archetype.EnabledOffsets[column];
+
     /// <summary>
     /// The chunk's asleep bit: Systems with <see cref="SystemDefinition.SkipAsleepChunks"/> skip asleep chunks.
     /// A structural change in the chunk wakes it. Set it only from a job that owns this chunk, or outside a Tick.

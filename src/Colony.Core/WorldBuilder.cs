@@ -9,12 +9,15 @@ namespace Colony;
 /// </summary>
 public sealed class WorldBuilder
 {
-    /// <summary>Seed for Component layout hashes ("LAYT"), so they never collide with a World hash by construction.</summary>
-    private const ulong LayoutHashSeed = 0x4C41_5954UL;
+    /// <summary>Seed for Resource layout hashes ("RSRC"), so they never collide with a World or Component layout hash by construction.</summary>
+    private const ulong ResourceLayoutHashSeed = 0x5253_5243UL;
 
     private readonly List<ComponentDescriptor> _components = [];
     private readonly Dictionary<Type, int> _byClrType = [];
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
+    private readonly List<ResourceDescriptor> _resources = [];
+    private readonly Dictionary<Type, int> _resourceByClrType = [];
+    private readonly Dictionary<string, int> _resourceByName = new(StringComparer.Ordinal);
     private readonly List<Phase> _phases = [Phase.Streaming, Phase.Input, Phase.Begin, Phase.Simulate, Phase.Late, Phase.End];
     private readonly List<SystemDefinition> _systems = [];
     private readonly HashSet<string> _systemNames = new(StringComparer.Ordinal);
@@ -37,6 +40,19 @@ public sealed class WorldBuilder
         _extensions.Add(extension);
         return this;
     }
+
+    public WorldBuilder()
+    {
+        // Resource 0 in every schema: the queue that structural ops losing a conflict are reported on
+        // (spec section 4.1). Persistent, so load-then-continue delivers the same events.
+        StructuralFailures = AddResourceCore<StructuralFailure>(StructuralFailureQueueName, ResourceKind.EventQueue, persistent: true);
+    }
+
+    /// <summary>Registered name of the built-in <see cref="StructuralFailure"/> queue.</summary>
+    public const string StructuralFailureQueueName = "colony.structural-failure";
+
+    /// <summary>The built-in <see cref="StructuralFailure"/> event queue; declare it in <see cref="SystemDefinition.ReadsResources"/> to read it.</summary>
+    public ResourceType StructuralFailures { get; }
 
     /// <summary>
     /// Registers a System (spec section 4.3). Its id is the registration order, which breaks ordering ties.
@@ -139,6 +155,38 @@ public sealed class WorldBuilder
     public WorldBuilder AddComponent<T>(string name, ComponentOptions flags = ComponentOptions.None) where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return AddComponent<T>(name, flags, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
+    }
+
+    /// <summary>
+    /// Registers a source-generated Component (spec section 11) under its layout's stable name. The layout
+    /// hash covers the name, size, alignment and every field's name, type, offset and size (spec section 4.1).
+    /// </summary>
+    public WorldBuilder AddComponent<T>() where T : unmanaged, IComponent<T>
+    {
+        var layout = T.Layout;
+        ArgumentNullException.ThrowIfNull(layout, nameof(T));
+        layout.Validate(Unsafe.SizeOf<T>());
+        return AddComponent<T>(layout.Name, layout.Flags, layout.Fields);
+    }
+
+    /// <summary>The Phase named <paramref name="name"/>: one of the six named Phases or a Game Phase already added.</summary>
+    public Phase PhaseNamed(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (var phase in _phases)
+        {
+            if (string.Equals(phase.Name, name, StringComparison.Ordinal))
+            {
+                return phase;
+            }
+        }
+
+        throw new ArgumentException($"No Phase named '{name}' exists; add Game Phases with AddPhase before the Systems that use them.", nameof(name));
+    }
+
+    private WorldBuilder AddComponent<T>(string name, ComponentOptions flags, System.Collections.Immutable.ImmutableArray<ComponentField> fields) where T : unmanaged
+    {
         ThrowIfBuilt();
         if (_byName.ContainsKey(name))
         {
@@ -165,11 +213,9 @@ public sealed class WorldBuilder
             throw new InvalidOperationException($"A schema may register at most {ComponentMask.Capacity} Components.");
         }
 
-        // Layout identity (spec section 4.1): the registered name, size and alignment, never the CLR type.
-        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), LayoutHashSeed);
-        hash = Hashing.Hash64.Combine(hash, (ulong)size);
-        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
-        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags));
+        // Layout identity (spec section 4.1): the registered name, size, alignment and fields, never the CLR type.
+        ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
+        _components.Add(new ComponentDescriptor(new ComponentType(id), name, size, alignment, hash, flags) { Fields = fields });
         _byName.Add(name, id);
         _byClrType.Add(typeof(T), id);
         return this;
@@ -199,6 +245,87 @@ public sealed class WorldBuilder
     }
 
     /// <summary>
+    /// Registers a World-owned singleton Resource (spec section 4.1): one zero-initialised value of
+    /// <typeparamref name="T"/> per World, saved and hashed with it unless <see cref="ResourceOptions.Transient"/>.
+    /// Systems declare access with <see cref="SystemDefinition.ReadsResources"/> and <see cref="SystemDefinition.WritesResources"/>.
+    /// </summary>
+    public WorldBuilder AddResource<T>(string name, ResourceOptions options = ResourceOptions.None) where T : unmanaged
+    {
+        AddResourceCore<T>(name, ResourceKind.Value, persistent: (options & ResourceOptions.Transient) == 0);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a typed event queue (spec section 4.3): a Resource holding pending <typeparamref name="T"/>
+    /// events. Systems emit through their command buffer (<see cref="CommandBuffer.Emit{T}"/>), so events
+    /// merge at the Phase boundary in System, job then record order and are readable from the next Phase.
+    /// Every queue is cleared at the End Phase boundary, before the End Phase's own buffers merge; events
+    /// emitted in End are therefore delivered through the whole next Tick. Only
+    /// <see cref="EventOptions.Persistent"/> queues are saved and hashed. There are no callbacks.
+    /// </summary>
+    public WorldBuilder AddEvent<T>(string name, EventOptions options = EventOptions.None) where T : unmanaged
+    {
+        AddResourceCore<T>(name, ResourceKind.EventQueue, persistent: (options & EventOptions.Persistent) != 0);
+        return this;
+    }
+
+    /// <summary>The handle for the already-registered Resource of CLR type <typeparamref name="T"/>.</summary>
+    public ResourceType Resource<T>() where T : unmanaged
+    {
+        if (!_resourceByClrType.TryGetValue(typeof(T), out int id))
+        {
+            throw new ArgumentException($"{typeof(T).Name} is not registered as a Resource; call AddResource or AddEvent first.", nameof(T));
+        }
+
+        return new ResourceType(id);
+    }
+
+    /// <summary>The handle for the already-registered Resource named <paramref name="name"/>.</summary>
+    public ResourceType Resource(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_resourceByName.TryGetValue(name, out int id))
+        {
+            throw new ArgumentException($"No Resource named '{name}' is registered; call AddResource or AddEvent first.", nameof(name));
+        }
+
+        return new ResourceType(id);
+    }
+
+    private ResourceType AddResourceCore<T>(string name, ResourceKind kind, bool persistent) where T : unmanaged
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ThrowIfBuilt();
+        if (_resourceByName.ContainsKey(name))
+        {
+            throw new ArgumentException($"A Resource named '{name}' is already registered.", nameof(name));
+        }
+
+        if (_resourceByClrType.ContainsKey(typeof(T)))
+        {
+            throw new ArgumentException($"The type {typeof(T).Name} is already registered as a Resource.", nameof(T));
+        }
+
+        int id = _resources.Count;
+        if (id >= ResourceMask.Capacity)
+        {
+            throw new InvalidOperationException($"A schema may register at most {ResourceMask.Capacity} Resources.");
+        }
+
+        int size = Unsafe.SizeOf<T>();
+        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
+        ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), ResourceLayoutHashSeed);
+        hash = Hashing.Hash64.Combine(hash, (ulong)size);
+        hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
+        hash = Hashing.Hash64.Combine(hash, (ulong)kind);
+        var type = new ResourceType(id);
+        _resources.Add(new ResourceDescriptor(type, name, size, alignment, hash, kind, persistent));
+        _resourceByName.Add(name, id);
+        _resourceByClrType.Add(typeof(T), id);
+        return type;
+    }
+
+    /// <summary>
     /// Turns debug validation on or off for Worlds of this schema: structural-version checks on chunk
     /// views and refs, poisoning of freed memory and a leak report on dispose (spec section 4.2). The
     /// default follows the Framework build configuration.
@@ -215,13 +342,13 @@ public sealed class WorldBuilder
     {
         ThrowIfBuilt();
         _built = true;
-        var schedule = SystemSchedule.Build(_systems, _phases, _components.Count);
+        var schedule = SystemSchedule.Build(_systems, _phases, _components.Count, _resources);
         foreach (var extension in _extensions)
         {
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _phases, schedule, _extensions, _debugValidation, _logMessages, _counters);
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _debugValidation, _logMessages, _counters);
     }
 
     private void ThrowIfBuilt()

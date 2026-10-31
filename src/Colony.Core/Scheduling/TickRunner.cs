@@ -48,7 +48,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         _access = new ComponentMask[schedule.SystemCount];
         for (int i = 0; i < _states.Length; i++)
         {
-            _states[i] = new SystemState();
+            _states[i] = new SystemState { Id = i };
             _access[i] = schedule.Definitions[i].Reads.Union(schedule.Definitions[i].Writes);
         }
 
@@ -97,6 +97,13 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
                 }
             }
 
+            if (plan.Phase == Phase.End)
+            {
+                // The stated clearing point (spec section 4.3): End Systems saw this Tick's events; what the
+                // End Phase itself emits merges into empty queues and is delivered through the next Tick.
+                _world.ClearEvents();
+            }
+
             Playback(plan);
             for (int i = 0; i < extensions.Length; i++)
             {
@@ -136,7 +143,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     /// <summary>Runs the Systems of one wave, or only <paramref name="only"/> when it is a System id.</summary>
     private void RunWave(SystemSchedule.PhasePlan plan, int wave, int only)
     {
-        uint counter = ++_world.ChangeCounter;
+        uint counter = _world.BeginWave();
         _diagnostics.WaveStarted(plan.Phase.Id);
         _jobCount = 0;
         for (int k = 0; k < plan.Systems.Length; k++)
@@ -155,8 +162,11 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
             if (!state.Ran)
             {
                 _diagnostics.SystemScheduled(id, ran: false, 0);
+                _world.SchedulerCounts.SystemsSkippedByRate++;
                 continue;
             }
+
+            _world.SchedulerCounts.SystemRuns++;
 
             state.Random = _world.Random.Derive((ulong)id).Derive((ulong)_tick);
             int skipped = 0;
@@ -228,14 +238,25 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
                 if (def.SkipAsleepChunks && archetype.IsAsleep(c))
                 {
                     skipped++;
+                    _world.SchedulerCounts.ChunksSkippedAsleep++;
                     continue;
                 }
 
                 if (!def.ChangeFilter.IsEmpty && !archetype.HasChangedSince(c, def.ChangeFilter, state.LastRun))
                 {
                     skipped++;
+                    _world.SchedulerCounts.ChunksSkippedByChangeFilter++;
                     continue;
                 }
+
+                if (!def.IgnoreEnableBits && archetype.HasFullyDisabledColumn(c, all))
+                {
+                    skipped++;
+                    _world.SchedulerCounts.ChunksSkippedDisabled++;
+                    continue;
+                }
+
+                _world.SchedulerCounts.ChunksVisited++;
 
                 if (_jobCount == _jobs.Length)
                 {
@@ -261,12 +282,13 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         for (int i = old; i < state.Buffers.Length; i++)
         {
             state.Buffers[i] = _world.CreateCommandBuffer();
+            state.Buffers[i].OwnerSystemId = state.Id;
         }
     }
 
     private void RunSerial(SystemAction action, int id, SystemState state, Phase phase)
     {
-        var context = new SystemContext(_world, state.Buffers[0], _tick, id, -1, state.Jobs, state.Random, _slots[0]);
+        var context = new SystemContext(_world, _schedule.Definitions[id], state.Buffers[0], _tick, id, -1, state.Jobs, state.Random, _slots[0]);
         long allocated = _allocationCheck ? GC.GetAllocatedBytesForCurrentThread() : 0;
         long start = _timing ? Stopwatch.GetTimestamp() : 0;
         try
@@ -295,7 +317,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         int rows = 0;
         try
         {
-            var context = new SystemContext(_world, state.Buffers[j.JobIndex], _tick, j.System, j.JobIndex, state.Jobs, state.Random, slot);
+            var context = new SystemContext(_world, def, state.Buffers[j.JobIndex], _tick, j.System, j.JobIndex, state.Jobs, state.Random, slot);
             var view = _accessChecking
                 ? new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation, _access[j.System], def.Name)
                 : new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation);
@@ -350,28 +372,39 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         long allocated = _allocationCheck ? GC.GetAllocatedBytesForCurrentThread() : 0;
         long start = _timing ? Stopwatch.GetTimestamp() : 0;
         long commands = 0;
-        for (int k = 0; k < plan.Systems.Length; k++)
+
+        // Every Phase boundary is one structural epoch: an op whose Entity died in this epoch lost a
+        // same-Phase conflict; one whose Entity died earlier was stale when recorded.
+        _world.BeginPhaseMerge();
+        try
         {
-            int id = plan.Systems[k];
-            var state = _states[id];
-            if (!state.Ran)
+            for (int k = 0; k < plan.Systems.Length; k++)
             {
-                continue;
-            }
+                int id = plan.Systems[k];
+                var state = _states[id];
+                if (!state.Ran)
+                {
+                    continue;
+                }
 
-            int buffers = Math.Max(1, state.Jobs);
-            long systemCommands = 0;
-            for (int j = 0; j < buffers; j++)
-            {
-                systemCommands += state.Buffers[j].Count;
-                _world.Playback(state.Buffers[j]);
-            }
+                int buffers = Math.Max(1, state.Jobs);
+                long systemCommands = 0;
+                for (int j = 0; j < buffers; j++)
+                {
+                    systemCommands += state.Buffers[j].Count;
+                    _world.Playback(state.Buffers[j]);
+                }
 
-            if (systemCommands > 0)
-            {
-                _diagnostics.SystemCommands(id, systemCommands);
-                commands += systemCommands;
+                if (systemCommands > 0)
+                {
+                    _diagnostics.SystemCommands(id, systemCommands);
+                    commands += systemCommands;
+                }
             }
+        }
+        finally
+        {
+            _world.EndPhaseMerge();
         }
 
         long end = _timing ? Stopwatch.GetTimestamp() : 0;
@@ -403,6 +436,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
     private sealed class SystemState
     {
         public CommandBuffer[] Buffers = [];
+        public int Id;
         public int Jobs;
         public bool Ran;
         public uint LastRun;
