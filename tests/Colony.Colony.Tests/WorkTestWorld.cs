@@ -14,7 +14,7 @@ internal sealed class WorkTestWorld : IDisposable
     public const int Mine = 1;
     public const int Build = 2;
 
-    public WorkTestWorld(WorldSize size, int workers = 1, WorkIndexOptions? options = null, bool pathfinding = true)
+    public WorkTestWorld(WorldSize size, int workers = 1, WorkIndexOptions? options = null, bool pathfinding = true, Action<WorldBuilder, WorkIndexBuilder>? configure = null)
     {
         var builder = new WorldBuilder().DebugValidation(false);
         var fields = builder.AddFields(size);
@@ -27,6 +27,7 @@ internal sealed class WorkTestWorld : IDisposable
         }
 
         Index = builder.AddWorkIndex(fields, TilePos, options);
+        configure?.Invoke(builder, Index);
         Schema = builder.Build();
         World = Schema.CreateWorld(new WorldOptions { WorkerThreads = workers, Seed = 11 });
     }
