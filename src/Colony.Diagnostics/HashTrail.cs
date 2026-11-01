@@ -60,7 +60,7 @@ public sealed class TickHashes
 
 /// <summary>
 /// Collects a World's hash trail Tick by Tick through <see cref="IDiagnosticsListener"/>, so two runs
-/// (different thread counts, machines or builds) can be compared with <see cref="HashTrail.Compare"/>.
+/// (different thread counts, machines or builds) can be compared with <see cref="HashTrail.Compare(IReadOnlyList{TickHashes}, IReadOnlyList{TickHashes}, WorldSchema)"/>.
 /// Recording copies each Tick's hashes into a growing list on the Tick thread; it is a diagnostic tool,
 /// not a steady-state path, and only costs anything when the World's <see cref="DiagnosticsOptions.HashTrail"/> is on.
 /// </summary>
@@ -114,6 +114,18 @@ public static class HashTrail
         ArgumentNullException.ThrowIfNull(a);
         ArgumentNullException.ThrowIfNull(b);
         ArgumentNullException.ThrowIfNull(schema);
+        var order = new List<SystemOrder>(schema.Systems.Length);
+        foreach (ref readonly var descriptor in schema.Systems)
+        {
+            order.Add(new SystemOrder(descriptor.Id, descriptor.Phase.Id, descriptor.Wave, descriptor.Order));
+        }
+
+        return Compare(a, b, order);
+    }
+
+    /// <summary>The schema-free form: Systems described by id, Phase, wave and order (as a hash trail file stores them).</summary>
+    internal static HashDivergence? Compare(IReadOnlyList<TickHashes> a, IReadOnlyList<TickHashes> b, IReadOnlyList<SystemOrder> systems)
+    {
         int ticks = Math.Min(a.Count, b.Count);
         for (int t = 0; t < ticks; t++)
         {
@@ -132,7 +144,7 @@ public static class HashTrail
             int phases = Math.Min(x.PhaseHashesArray.Length, y.PhaseHashesArray.Length);
             for (int p = 0; p < phases; p++)
             {
-                int system = FirstDivergingSystem(x, y, schema, p);
+                int system = FirstDivergingSystem(x, y, systems, p);
                 if (x.PhaseHashesArray[p] == y.PhaseHashesArray[p] && system < 0)
                 {
                     continue;
@@ -147,14 +159,14 @@ public static class HashTrail
         return null;
     }
 
-    private static int FirstDivergingSystem(TickHashes x, TickHashes y, WorldSchema schema, int phaseId)
+    private static int FirstDivergingSystem(TickHashes x, TickHashes y, IReadOnlyList<SystemOrder> systems, int phaseId)
     {
         int best = -1;
         int bestWave = int.MaxValue;
         int bestOrder = int.MaxValue;
-        foreach (ref readonly var descriptor in schema.Systems)
+        foreach (var descriptor in systems)
         {
-            if (descriptor.Phase.Id != phaseId || descriptor.Id >= x.SystemHashesArray.Length || descriptor.Id >= y.SystemHashesArray.Length)
+            if (descriptor.Phase != phaseId || descriptor.Id >= x.SystemHashesArray.Length || descriptor.Id >= y.SystemHashesArray.Length)
             {
                 continue;
             }
@@ -191,3 +203,6 @@ public static class HashTrail
         return -1;
     }
 }
+
+/// <summary>Where a System runs: enough of the schema to order a hash-trail comparison.</summary>
+internal readonly record struct SystemOrder(int Id, int Phase, int Wave, int Order);

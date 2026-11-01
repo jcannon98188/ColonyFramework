@@ -291,7 +291,13 @@ public sealed class FieldSet : IWorldExtension
 
     internal ChunkLayout Layout => _layout;
 
-    internal FieldStorage StorageAt(int fieldId) => _storage[fieldId];
+    /// <summary>The storage behind the Field with id <paramref name="fieldId"/> (see <see cref="Fields"/>), for tooling that knows Fields by name only, such as the inspection server.</summary>
+    public FieldStorage StorageAt(int fieldId)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fieldId);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(fieldId, _storage.Length);
+        return _storage[fieldId];
+    }
 
     private readonly List<FieldStorage> _scratch = [];
 

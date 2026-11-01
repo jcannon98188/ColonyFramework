@@ -17,7 +17,8 @@ public readonly record struct SavedSystemOverride(string System, string Original
 /// <summary>
 /// One Plugin of the saved World's Plugin set, in load order: its id and version, whether it is deterministic,
 /// the Components and Resources it registered (names into <see cref="SaveManifest.Components"/> and
-/// <see cref="SaveManifest.Resources"/>) and the Systems it replaced.
+/// <see cref="SaveManifest.Resources"/>), the Systems it replaced, and the C ABI version a Native Plugin was
+/// built against (0 for a C# Plugin; spec section 8, versioning).
 /// </summary>
 public sealed record SavedPlugin(
     string Id,
@@ -25,7 +26,8 @@ public sealed record SavedPlugin(
     bool Deterministic,
     ImmutableArray<string> Components,
     ImmutableArray<string> Resources,
-    ImmutableArray<SavedSystemOverride> Overrides);
+    ImmutableArray<SavedSystemOverride> Overrides,
+    int AbiVersion = 0);
 
 /// <summary>
 /// The manifest section of a save (spec section 7.1): the embedded schema table (every Component with its
@@ -169,7 +171,7 @@ public sealed class SaveManifest
                 }
             }
 
-            plugins.Add(new SavedPlugin(plugin.Id, plugin.Version, plugin.Deterministic, components.ToImmutable(), resources.ToImmutable(), overrides.ToImmutable()));
+            plugins.Add(new SavedPlugin(plugin.Id, plugin.Version, plugin.Deterministic, components.ToImmutable(), resources.ToImmutable(), overrides.ToImmutable(), plugin.AbiVersion));
         }
 
         return plugins.MoveToImmutable();
@@ -243,6 +245,8 @@ public sealed class SaveManifest
                 w.WriteString(o.System);
                 w.WriteString(o.OriginalPlugin);
             }
+
+            w.WriteInt32(p.AbiVersion);
         }
 
 
@@ -327,7 +331,10 @@ public sealed class SaveManifest
             string id = r.ReadString();
             string version = r.ReadString();
             bool deterministic = r.ReadByte() != 0;
-            plugins.Add(new SavedPlugin(id, version, deterministic, ReadNames(ref r), ReadNames(ref r), ReadOverrides(ref r)));
+            var ownedComponents = ReadNames(ref r);
+            var ownedResources = ReadNames(ref r);
+            var overrides = ReadOverrides(ref r);
+            plugins.Add(new SavedPlugin(id, version, deterministic, ownedComponents, ownedResources, overrides, r.ReadInt32()));
         }
 
         if (r.Remaining > 0)

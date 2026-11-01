@@ -39,3 +39,23 @@ internal static class TestWorlds
         accessor[x, y, z] = value;
     }
 }
+
+/// <summary>A World carrying <see cref="Scenarios.PrototypeTerrain"/> with the scenario's walker class (walls and closed doors block, stairs climb).</summary>
+internal static class PrototypeTerrainWorld
+{
+    public static byte[] Create(WorldSize size, out World world, out MovementClass walker, int workers = 1, PathfindingOptions? options = null)
+    {
+        var builder = new WorldBuilder();
+        builder.DebugValidation(false);
+        var fields = builder.AddFields(size);
+        var terrain = fields.AddField<byte>("terrain");
+        walker = builder.AddPathfinding(fields, options).AddMovementClass(new MovementClassDefinition("walker", Passability.OfField(terrain, Scenarios.PrototypeTerrain.Walkable))
+        {
+            Vertical = Passability.OfField(terrain, Scenarios.PrototypeTerrain.Climbable),
+        }.DependsOn(terrain));
+        world = builder.Build().CreateWorld(new WorldOptions { WorkerThreads = workers });
+        var tiles = Scenarios.PrototypeTerrain.Generate(size);
+        Scenarios.PrototypeTerrain.Write(world, terrain, tiles);
+        return tiles;
+    }
+}

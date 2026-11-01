@@ -101,6 +101,33 @@ public sealed class CommandBuffer
         Count++;
     }
 
+    /// <summary>
+    /// Wire-form <see cref="Add{T}"/> (spec section 10.2): the Component's value as exactly
+    /// <see cref="ComponentDescriptor.Size"/> raw bytes, for tooling and the C ABI that know Components by
+    /// name only. Buffer Components are refused (their value owns storage).
+    /// </summary>
+    public unsafe void Add(EntityId entity, ComponentType type, ReadOnlySpan<byte> value)
+    {
+        _schema.ValidateType(type);
+        int size = _schema.Sizes[type.Id];
+        if (value.Length != size)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is {size} bytes; the value has {value.Length}.", nameof(value));
+        }
+
+        if (_schema.Components[type.Id].IsBuffer)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is a buffer Component; add it zeroed and fill it through World.GetBuffer.", nameof(type));
+        }
+
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
+        *p = (byte)Kind.Add;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        value.CopyTo(new Span<byte>(p + 13, size));
+        Count++;
+    }
+
     /// <summary>Adds the Component zero-initialised (a tag, or a value filled in later), or zeroes it when already present.</summary>
     public unsafe void Add(EntityId entity, ComponentType type)
     {
@@ -165,6 +192,48 @@ public sealed class CommandBuffer
         *p = (byte)Kind.Emit;
         Unsafe.WriteUnaligned(p + 1, queue.Id);
         Unsafe.WriteUnaligned(p + 5, value);
+        Count++;
+    }
+
+    // ---- Raw-byte recording (TASK-28): the C ABI records values it holds only as bytes. Same records as Add<T>/Emit<T>. ----
+
+    /// <summary>Records an Add of <paramref name="size"/> bytes at <paramref name="value"/>; the size must match the Component's.</summary>
+    internal unsafe void AddRaw(EntityId entity, ComponentType type, byte* value, int size)
+    {
+        _schema.ValidateType(type);
+        int expected = _schema.Sizes[type.Id];
+        if (size != expected || value == null)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is {expected} bytes; {size} bytes were given.", nameof(size));
+        }
+
+        if (_schema.Components[type.Id].IsBuffer || _schema.RelationOfComponent[type.Id] >= 0)
+        {
+            throw new ArgumentException($"Component '{_schema.Describe(type).Name}' is a buffer or Relation Component and cannot be added from raw bytes.", nameof(type));
+        }
+
+        byte* p = Reserve(1 + sizeof(ulong) + sizeof(int) + size);
+        *p = (byte)Kind.Add;
+        Unsafe.WriteUnaligned(p + 1, entity.Value);
+        Unsafe.WriteUnaligned(p + 9, type.Id);
+        new ReadOnlySpan<byte>(value, size).CopyTo(new Span<byte>(p + 13, size));
+        Count++;
+    }
+
+    /// <summary>Records an event of <paramref name="size"/> bytes for the event queue <paramref name="queue"/>.</summary>
+    internal unsafe void EmitRaw(ResourceType queue, byte* value, int size)
+    {
+        _schema.ValidateResource(queue);
+        var descriptor = _schema.Resources[queue.Id];
+        if (!descriptor.IsEventQueue || size != descriptor.Size || value == null)
+        {
+            throw new ArgumentException($"Resource '{descriptor.Name}' is not an event queue of {size} bytes.", nameof(queue));
+        }
+
+        byte* p = Reserve(1 + sizeof(int) + size);
+        *p = (byte)Kind.Emit;
+        Unsafe.WriteUnaligned(p + 1, queue.Id);
+        new ReadOnlySpan<byte>(value, size).CopyTo(new Span<byte>(p + 5, size));
         Count++;
     }
 

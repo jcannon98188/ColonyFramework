@@ -17,10 +17,23 @@ dotnet run -c Release --project samples/HelloColony -- --ticks 0 --no-save --cou
 dotnet run -c Release --project samples/HelloColony -- --trace trace.json --level Detailed
 ```
 
-Options: `--ticks N` (1000), `--colonists N` (100), `--workers N` (1; 0 = physical cores), `--save path`
-(colony.save) or `--no-save`, `--counters` (attach `MeterBridge`; prints the `dotnet-counters monitor`
-command), `--trace out.json` (Perfetto Chrome Trace Event JSON of every Tick; open at https://ui.perfetto.dev),
-`--level Standard|Detailed`, `--pace ms` (sleep between Ticks), `--sketch`.
+Options: `--ticks N` (1000; 0 = run until an inspection client sends `shutdown`, needs `--inspect`),
+`--colonists N` (100), `--workers N` (1; 0 = physical cores), `--save path` (colony.save) or `--no-save`,
+`--counters` (attach `MeterBridge`; prints the `dotnet-counters monitor` command), `--trace out.json` (Perfetto
+Chrome Trace Event JSON of every Tick; open at https://ui.perfetto.dev), `--level Standard|Detailed`, `--pace ms`
+(sleep between Ticks), `--replay out.replay` (record a replay log; enables `rewind`), `--sketch`.
+
+Inspection (spec section 10.2): `--inspect PORT` (0 = any free port) starts the loopback `InspectionServer` and
+prints `inspect: port N token T`; `--inspect-token T` fixes the token (random otherwise); `--allow-mutation`
+registers the debug Input Command and lets `colony-inspect mutate` through (the schema and World hash then
+differ from the plain sketch). The host pumps requests between Ticks and blocks on the server while paused.
+
+```
+dotnet run -c Release --project samples/HelloColony -- --ticks 0 --no-save --inspect 0 --allow-mutation --replay colony.replay
+dotnet run --project tools/Colony.Inspect -- status --port <N> --token <T>      # then schema, entities, field heat 0 0, pause, step 5, rewind 100, live, shutdown
+```
+
+Built with `-p:ColonyNoInspect=true` (COLONY_NO_INSPECT) the server does not exist and `--inspect` exits 2.
 
 Native AOT (the host is the AOT proof for generated code, Fields, Persistence and the Diagnostics sinks together):
 

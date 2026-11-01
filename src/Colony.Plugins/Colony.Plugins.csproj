@@ -2,24 +2,30 @@
 
   <!--
     Colony.Plugins: the Plugin loader (manifest, dependency order, Overridable Systems), the Definition
-    registry with its reference JSON source, and later the C ABI host (spec section 8). Depends on Core,
-    Fields (shared Fields registration) and Abstractions; enforced by tools/Colony.DependencyCheck. Nothing
-    depends on it: a Game runs with Core and Fields alone.
+    registry with its reference JSON source, and the C ABI host (spec section 8; Native/, TASK-28). Depends on
+    Core, Fields (shared Fields registration), Persistence (world_save and the save manifest through the C ABI)
+    and Abstractions; enforced by tools/Colony.DependencyCheck. Nothing depends on it but Colony.Native: a Game
+    runs with Core and Fields alone.
   -->
 
   <PropertyGroup>
-    <Description>Colony Framework plugins: Plugin manifest and loader, Definition registry and JSON Definition source.</Description>
+    <Description>Colony Framework plugins: Plugin manifest and loader, Definition registry, JSON Definition source and the C ABI host.</Description>
     <RootNamespace>Colony.Plugins</RootNamespace>
+    <!-- The C ABI host (Native/) works on raw pointers; unsafe stays internal (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Colony.Abstractions\Colony.Abstractions.csproj" />
     <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
     <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\Colony.Persistence\Colony.Persistence.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Colony.Plugins.Tests" />
+    <!-- Colony.Native.Tests checks the ABI definition against the entries and generates colony.h from it. -->
+    <InternalsVisibleTo Include="Colony.Native.Tests" />
   </ItemGroup>
 
 </Project>

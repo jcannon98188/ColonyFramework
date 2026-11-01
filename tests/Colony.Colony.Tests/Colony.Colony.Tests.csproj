@@ -11,6 +11,9 @@
     <ProjectReference Include="..\..\src\Colony.Colony\Colony.Colony.csproj" />
     <!-- Scenarios run through the determinism and allocation harnesses (spec section 10.3). -->
     <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <!-- Work index tests: Reachable filtering (the Game-side adapter lives in the test) and rebuild-on-load. -->
+    <ProjectReference Include="..\..\src\Colony.Pathfinding\Colony.Pathfinding.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
   </ItemGroup>
 
 </Project>

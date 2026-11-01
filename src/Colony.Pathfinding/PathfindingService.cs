@@ -1,5 +1,6 @@
-using Colony.Fields;
+﻿using Colony.Fields;
 using Colony.Hashing;
+using Colony.Numerics;
 
 namespace Colony.Pathfinding;
 
@@ -25,7 +26,11 @@ public sealed class PathfindingService : IWorldExtension
     private readonly MovementClassDescriptor[] _descriptors;
     private readonly RegionMap?[] _maps;
     private readonly Lock _buildLock = new();
+    private readonly Lock _searchLock = new();
+    private readonly PathSearch _search = new();
+    private readonly Func<int, ChunkResidency> _residency;
     private FieldSet? _fields;
+    private PathRequestQueue? _queue;
     private bool _inTick;
     private bool _disposed;
 
@@ -36,6 +41,7 @@ public sealed class PathfindingService : IWorldExtension
         _definitions = [.. definitions];
         _descriptors = [.. descriptors];
         _maps = new RegionMap?[_definitions.Length];
+        _residency = Residency;
     }
 
     public World World { get; }
@@ -100,6 +106,111 @@ public sealed class PathfindingService : IWorldExtension
         return !a.IsNone && a == map.RegionOf(to);
     }
 
+    /// <summary>
+    /// Finds a path now with two-level HPA* (spec section 9.1): the result's waypoints are the start, the chunk
+    /// transitions crossed and the goal, copied into <paramref name="waypoints"/> (truncated when it is short;
+    /// <see cref="PathQuery.WaypointCount"/> is the full count). Consecutive waypoints lie in one chunk or are
+    /// face-adjacent across a border; refine between them with the next-step query or the path-follow
+    /// helper. Serialised on one search scratch, so prefer the deferred request queue from Systems; allocation
+    /// free once warm. The cost is in tiles (one per face move) and within a few percent of optimal.
+    /// </summary>
+    public PathQuery FindPath(TilePos from, TilePos to, MovementClass movementClass, Span<TilePos> waypoints)
+    {
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            var status = _search.Run(map, from, to, _residency);
+            if (status == PathStatus.Found)
+            {
+                var found = _search.Waypoints;
+                found[..Math.Min(found.Length, waypoints.Length)].CopyTo(waypoints);
+            }
+
+            return new PathQuery(status, _search.Cost, _search.WaypointCount, _search.MissingChunk, _search.WorkUnits);
+        }
+    }
+
+    /// <summary>
+    /// The HPA* cost in tiles from <paramref name="from"/> to <paramref name="to"/> (within a few percent of
+    /// optimal), -1 when unreachable or when an Unloaded chunk is in the way. Allocation free; serialised with the
+    /// other searches.
+    /// </summary>
+    public int ApproximateCost(TilePos from, TilePos to, MovementClass movementClass)
+    {
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            return _search.Run(map, from, to, _residency) == PathStatus.Found ? _search.Cost : -1;
+        }
+    }
+
+    /// <summary>
+    /// The one face move that takes a unit at <paramref name="from"/> toward <paramref name="to"/> along the HPA*
+    /// path, refined by local A* inside the unit's chunk (spec section 9.1). False at the goal or when no path
+    /// exists. Allocation free; serialised with the other searches.
+    /// </summary>
+    public bool TryNextStep(TilePos from, TilePos to, MovementClass movementClass, out TilePos next)
+    {
+        next = from;
+        if (from == to)
+        {
+            return false;
+        }
+
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            if (_search.Run(map, from, to, _residency) != PathStatus.Found)
+            {
+                return false;
+            }
+
+            // Waypoint 0 is the start itself; the next one is in this chunk or face-adjacent across a border.
+            var waypoints = _search.Waypoints;
+            return waypoints.Length > 1 && LocalStep.Toward(map, from, waypoints[1], _search.LocalDistanceScratch, _search.LocalQueueScratch, out next);
+        }
+    }
+
+    /// <summary>
+    /// The path-follow helper (spec section 9.1): moves <paramref name="state"/> by <paramref name="distance"/> tiles
+    /// along <paramref name="waypoints"/> (a <see cref="FindPath"/> or request result), choosing each face move by
+    /// local A* inside the unit's chunk and keeping a fixed-point sub-tile offset. Safe from parallel chunk jobs
+    /// (reads only the class's passability; the state is the caller's) and allocation free. Games own movement:
+    /// write the resulting tile and offset back to the Entity's Components.
+    /// </summary>
+    public PathFollowStatus Follow(ref PathFollowState state, ReadOnlySpan<TilePos> waypoints, MovementClass movementClass, Fixed32 distance)
+        => PathFollower.Advance(Regions(movementClass), ref state, waypoints, distance);
+
+    /// <summary>The <see cref="PathRequest"/> event queue (emit requests on it; from host code through a command buffer).</summary>
+    public ResourceType RequestQueue => World.Schema.Resource(PathfindingBuilder.RequestQueueName);
+
+    /// <summary>The <see cref="PathResult"/> event queue, filled at the Begin Phase of each delivery Tick.</summary>
+    public ResourceType ResultQueue => World.Schema.Resource(PathfindingBuilder.ResultQueueName);
+
+    /// <summary>The waypoints of a result delivered this Tick (start, chunk transitions, goal); empty unless found.</summary>
+    public ReadOnlySpan<TilePos> Waypoints(in PathResult result) => Queue.Waypoints(in result);
+
+    /// <summary>The results emitted at the last delivery (the most recent Begin Phase), in canonical order; for hosts and tests, Systems read <see cref="ResultQueue"/>.</summary>
+    public ReadOnlySpan<PathResult> Delivered => Queue.Delivered;
+
+    /// <summary>Requests taken in and not yet delivered.</summary>
+    public int PendingRequestCount => Queue.Count;
+
+    public PathQueueCounters QueueCounters => Queue.Counters;
+
+    internal PathRequestQueue Queue => _queue ??= new PathRequestQueue(this);
+
+    internal Lock SearchLock => _searchLock;
+
+    internal PathSearch Search => _search;
+
+    internal Func<int, ChunkResidency> ResidencyFunc => _residency;
+
+    /// <summary>Residency of a chunk as the search sees it; tests override it until the streaming manager (TASK-25) reports Unloaded chunks.</summary>
+    internal Func<int, ChunkResidency>? ResidencyOverride { get; set; }
+
+    private ChunkResidency Residency(int ordinal) => ResidencyOverride is { } f ? f(ordinal) : Fields.ResidencyOf(ordinal);
+
     private FieldSet Fields => _fields ??= World.Fields();
 
     private RegionMap Build(int id)
@@ -150,15 +261,14 @@ public sealed class PathfindingService : IWorldExtension
 
     void IWorldExtension.EndTick(long tick) => _inTick = false;
 
-    /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash).</summary>
-    void IWorldExtension.Hash(ref Hash64State state)
-    {
-    }
+    /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash); the pending request queue is state and is hashed.</summary>
+    void IWorldExtension.Hash(ref Hash64State state) => Queue.Hash(ref state);
 
-    /// <summary>Region data is not saved (spec section 9.1); only the ids of the built classes, so loading rebuilds the same set.</summary>
+    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set) and, once used, the request queue are.</summary>
     void IWorldExtension.Save(ExtensionStateWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
+        Queue.Save(writer);
         Span<byte> built = stackalloc byte[(_maps.Length + 7) >> 3];
         built.Clear();
         for (int i = 0; i < _maps.Length; i++)
@@ -179,6 +289,11 @@ public sealed class PathfindingService : IWorldExtension
         lock (_buildLock)
         {
             Array.Clear(_maps);
+        }
+
+        if (reader.TryGetSection(PathRequestQueue.SectionName, out var requests))
+        {
+            Queue.Load(requests, reader.ExtensionName);
         }
 
         if (!reader.TryGetSection(BuiltSectionName, out var built))

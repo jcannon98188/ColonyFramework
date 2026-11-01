@@ -9,11 +9,23 @@
   -->
 
   <PropertyGroup>
-    <Description>Colony Framework diagnostics: logging drain, hash trail comparison and profiling sinks.</Description>
+    <Description>Colony Framework diagnostics: logging drain, hash trail comparison, profiling sinks and the inspection protocol.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <!-- Spec section 3: Diagnostics reads Fields (Field cells, spatial queries) and Persistence (replay-based rewind, save diff). -->
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+  <!--
+    COLONY_NO_INSPECT (spec section 10.2): building with -p:ColonyNoInspect=true (or COLONY_NO_INSPECT in
+    DefineConstants) compiles the inspection server out of this assembly entirely; the protocol codec, client,
+    colony-inspect commands that work offline, debug commands, hash-trail files and diffs stay.
+  -->
+  <ItemGroup Condition="'$(ColonyNoInspect)' == 'true'">
+    <Compile Remove="Inspection\Server\**" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,11 +1,11 @@
 ---
 id: TASK-28
 title: 'C ABI: Colony.Native, colony.h and conformance host'
-status: In Progress
+status: Done
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-10-31 20:49'
+updated_date: '2026-11-01 16:47'
 labels:
   - ready-for-agent
   - implementation
@@ -31,8 +31,20 @@ Spec section 8 and 10.3: the second of the two extension surfaces. A narrow vers
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A C host loads the Framework, registers a Native Plugin System with declared access, submits commands and Input Commands, reads chunk views and Definitions, and runs Ticks on both JIT and Native AOT
-- [ ] #2 Every entry in the function table is exercised by the conformance suite and the C ABI version is recorded in manifests and saves
-- [ ] #3 colony.h is generated from the ABI definition, checked in, and a check fails when the generated header differs from the committed one
-- [ ] #4 A Native Plugin System participates in the determinism harness and hashes identically to its C# equivalent
+- [x] #1 A C host loads the Framework, registers a Native Plugin System with declared access, submits commands and Input Commands, reads chunk views and Definitions, and runs Ticks on both JIT and Native AOT
+- [x] #2 Every entry in the function table is exercised by the conformance suite and the C ABI version is recorded in manifests and saves
+- [x] #3 colony.h is generated from the ABI definition, checked in, and a check fails when the generated header differs from the committed one
+- [x] #4 A Native Plugin System participates in the determinism harness and hashes identically to its C# equivalent
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+C ABI in Colony.Plugins/Native (AbiDefinition data -> 63-entry table, generated colony.h with drift test, NativeHandles, NativePlugin/NativeSystem); Colony.Native exports only colony_get_api. C conformance host passes on JIT and Native AOT with identical hashes; Native Plugin hashes equal its C# twin on 1/2/4 workers. CI publishes Colony.Native before test. Gaps: commands_emit from a Native System cannot verify declared emits; Worlds driven by Native Plugins stay rooted until world_destroy (test leak); non-fragmenting Components not exposed as chunk columns; Linux C compiler helper path untested.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Stable C ABI (colony.h, Colony.Native Native AOT library), Native Plugin support and C conformance host merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->

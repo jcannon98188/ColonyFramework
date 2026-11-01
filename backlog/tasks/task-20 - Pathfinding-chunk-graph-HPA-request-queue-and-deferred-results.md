@@ -1,11 +1,11 @@
 ---
 id: TASK-20
 title: 'Pathfinding: chunk-graph HPA*, request queue and deferred results'
-status: In Progress
+status: Done
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-11-01 16:09'
+updated_date: '2026-11-01 16:57'
 labels:
   - ready-for-agent
   - implementation
@@ -30,9 +30,21 @@ Spec section 9.1: unique-goal paths use two-level chunk-graph HPA* (approximate 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HPA* paths for unique goals are within a documented few percent of optimal on test maps and are bit-identical across thread counts
-- [ ] #2 Path requests submitted in Tick T are answered in Tick T+N in the Begin Phase in canonical order under a work-unit budget; budget exhaustion defers deterministically and deadline misses emit the specified event
-- [ ] #3 Approximate path cost and the next-step-toward-goal query are available and allocation-free
-- [ ] #4 The path-follow helper moves a Grid Entity along a result with fixed-point sub-tile offsets
-- [ ] #5 Toggle and budget-exhaustion scenarios are added to the determinism harness
+- [x] #1 HPA* paths for unique goals are within a documented few percent of optimal on test maps and are bit-identical across thread counts
+- [x] #2 Path requests submitted in Tick T are answered in Tick T+N in the Begin Phase in canonical order under a work-unit budget; budget exhaustion defers deterministically and deadline misses emit the specified event
+- [x] #3 Approximate path cost and the next-step-toward-goal query are available and allocation-free
+- [x] #4 The path-follow helper moves a Grid Entity along a result with fixed-point sub-tile offsets
+- [x] #5 Toggle and budget-exhaustion scenarios are added to the determinism harness
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+HPA* over chunk graph (paths mean 1.02x optimal vs BFS oracle, worst 1.17x), deferred request queue (budget 200k work units/Tick, ResultDelayTicks 2, priority-then-id order, DeadlineMissed), PathQuery cost/next-step, PathFollow helper. Pending queue hashed and saved. TASK-19 pathfinding-unreachable golden re-accepted (schema change: two Systems now registered; per-System RNG seeding). Follow-ups: one non-reproducible allocation flake (7976 B) in a full-solution run; ChunkGraph reserves ~18 KB per built chunk (~280 MB on 512x512x256 World) so TASK-21 should bound it; residency read via FieldSet.ResidencyOf, always Active until TASK-26 wires real residency.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Chunk-graph HPA*, deterministic request queue with deferred results, cost/next-step queries and path-follow helper merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->

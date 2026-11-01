@@ -34,6 +34,8 @@ public static class DependencyRules
         ["Colony.Pathfinding"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
         ["Colony.Colony"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
         ["Colony.ProcGen"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
+        // Diagnostics depends on Core, Fields and Persistence (it reads their counters and the replay log) and on nothing else.
+        ["Colony.Diagnostics"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
     };
 
     /// <summary>Nothing depends on Diagnostics, Testing or Plugins, so a Game can run without the Plugin machinery.</summary>
