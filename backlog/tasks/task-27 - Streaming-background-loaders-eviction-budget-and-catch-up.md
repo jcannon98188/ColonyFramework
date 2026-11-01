@@ -1,9 +1,11 @@
 ---
 id: TASK-27
 title: 'Streaming: background loaders, eviction budget and catch-up'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-11-01 17:04'
 labels:
   - ready-for-agent
   - implementation
