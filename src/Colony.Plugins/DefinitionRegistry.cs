@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Colony.Hashing;
@@ -64,6 +65,27 @@ public sealed class DefinitionRegistry
     }
 
     internal DefinitionRegistration For(PluginManifest manifest, int pluginIndex) => new(this, manifest, pluginIndex);
+
+    /// <summary>The registration index of the Definition type named <paramref name="typeName"/>, or -1; allocates nothing.</summary>
+    internal int IndexOfType(ReadOnlySpan<char> typeName)
+        => _typeByName.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(typeName, out int index) ? index : -1;
+
+    /// <summary>The table of the Definition type registered <paramref name="index"/>-th, typed or raw.</summary>
+    internal DefinitionTable TableAt(int index) => _types[index].BaseTable;
+
+    internal RawDefinitionTable AddRawType(string typeName, int size, int alignment, ImmutableArray<RawDefinitionField> fields, string pluginId)
+    {
+        ThrowIfFrozen();
+        if (_typeByName.ContainsKey(typeName))
+        {
+            throw new PluginException(pluginId, $"Plugin '{pluginId}' registers Definition type '{typeName}', which is already registered.");
+        }
+
+        var type = new RawDefinitionType(this, typeName, size, alignment, fields, pluginId);
+        _typeByName.Add(typeName, _types.Count);
+        _types.Add(type);
+        return type.Table;
+    }
 
     internal DefinitionTable<T> AddType<T>(string typeName, DefinitionLayout<T> layout, string pluginId)
         where T : unmanaged
@@ -180,9 +202,94 @@ public sealed class DefinitionRegistry
         /// <summary>The Plugin that registered the type.</summary>
         public string PluginId { get; }
 
+        public abstract DefinitionTable BaseTable { get; }
+
         public abstract void Apply(DefinitionDocument document, string origin, string pluginId);
 
         public abstract void Bake();
+    }
+
+    /// <summary>A Definition type registered by layout and a field list of offsets (a Native Plugin's type); values are bytes.</summary>
+    internal sealed class RawDefinitionType : DefinitionType
+    {
+        private readonly DefinitionRegistry _registry;
+        private readonly int _size;
+        private readonly ImmutableArray<RawDefinitionField> _fields;
+        private readonly List<string> _names = [];
+        private readonly List<byte[]> _values = [];
+        private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
+
+        public RawDefinitionType(DefinitionRegistry registry, string name, int size, int alignment, ImmutableArray<RawDefinitionField> fields, string pluginId)
+            : base(name, typeof(byte[]), size, alignment, pluginId)
+        {
+            _registry = registry;
+            _size = size;
+            _fields = fields;
+            Table = new RawDefinitionTable(registry, name, size);
+        }
+
+        public RawDefinitionTable Table { get; }
+
+        public override DefinitionTable BaseTable => Table;
+
+        public override void Apply(DefinitionDocument document, string origin, string pluginId)
+        {
+            if (!_byName.TryGetValue(document.Name, out int index))
+            {
+                ArgumentException.ThrowIfNullOrWhiteSpace(document.Name, nameof(document));
+                index = _names.Count;
+                _byName.Add(document.Name, index);
+                _names.Add(document.Name);
+                _values.Add(new byte[_size]);
+            }
+
+            var value = _values[index];
+            foreach (var field in document.Fields)
+            {
+                Set(value, field, $"{origin}: '{Name}/{document.Name}'", pluginId);
+            }
+        }
+
+        private void Set(byte[] value, DefinitionField field, string context, string pluginId)
+        {
+            foreach (var declared in _fields)
+            {
+                if (string.Equals(declared.Name, field.Name, StringComparison.Ordinal))
+                {
+                    declared.Write(value.AsSpan(declared.Offset), field.Value, _registry, context, pluginId);
+                    return;
+                }
+            }
+
+            throw new PluginException(pluginId, $"{context} sets field '{field.Name}', which the Definition type does not declare.");
+        }
+
+        public override void Bake()
+        {
+            var names = new StringId[_names.Count];
+            for (int i = 0; i < names.Length; i++)
+            {
+                names[i] = _registry.Strings.Intern(_names[i]);
+            }
+
+            var indexOfString = new int[_registry.Strings.Count + 1];
+            Array.Fill(indexOfString, -1);
+            for (int i = 0; i < names.Length; i++)
+            {
+                indexOfString[names[i].Value] = i;
+            }
+
+            var bytes = new byte[_values.Count * _size];
+            for (int i = 0; i < _values.Count; i++)
+            {
+                _values[i].CopyTo(bytes, i * _size);
+            }
+
+            Table.Bake(names, indexOfString, _registry.Blobs.Store<byte>(bytes));
+            _names.Clear();
+            _values.Clear();
+            _byName.Clear();
+        }
     }
 
     internal sealed class DefinitionType<T> : DefinitionType
@@ -203,6 +310,8 @@ public sealed class DefinitionRegistry
         }
 
         public DefinitionTable<T> Table { get; }
+
+        public override DefinitionTable BaseTable => Table;
 
         public void Add(string name, in T value, string pluginId)
         {

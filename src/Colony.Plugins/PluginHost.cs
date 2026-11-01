@@ -58,6 +58,18 @@ public sealed class PluginHost
     public WorldSchema Build(WorldBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
+        Register(builder);
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// <see cref="Build"/> without the final <see cref="WorldBuilder.Build"/>: registers every Plugin, its Systems
+    /// and the Definitions extension into <paramref name="builder"/>, for callers that build the schema themselves
+    /// (a determinism-harness <c>Scenario.Compose</c>). Nothing more can be registered through this host afterwards.
+    /// </summary>
+    public void Register(WorldBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
         if (_built)
         {
             throw new InvalidOperationException("The PluginHost has already built its schema.");
@@ -109,7 +121,6 @@ public sealed class PluginHost
         }
 
         builder.AddExtension(_definitions.Extension);
-        return builder.Build();
     }
 
     /// <summary>Stable topological order over the dependency graph: Kahn's algorithm, always taking the ready Plugin with the smallest id (ordinal).</summary>

@@ -218,6 +218,27 @@ public sealed class DefinitionRegistration
         return _registry.AddType(typeName, layout, _manifest.Id);
     }
 
+    /// <summary>Registers a Definition type by layout and field offsets (a Native Plugin's type); every field must lie inside the value.</summary>
+    internal RawDefinitionTable AddRawType(string typeName, int size, int alignment, System.Collections.Immutable.ImmutableArray<RawDefinitionField> fields)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(typeName);
+        if (size <= 0 || alignment <= 0 || (alignment & (alignment - 1)) != 0 || size % alignment != 0)
+        {
+            throw new ArgumentException($"Definition type '{typeName}': size {size} and alignment {alignment} are not a valid layout.", nameof(size));
+        }
+
+        foreach (var field in fields)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(field.Name, nameof(fields));
+            if (field.Offset < 0 || field.Offset + RawDefinitionField.SizeOf(field.Kind) > size)
+            {
+                throw new ArgumentException($"Definition type '{typeName}': field '{field.Name}' at offset {field.Offset} does not fit in {size} bytes.", nameof(fields));
+            }
+        }
+
+        return _registry.AddRawType(typeName, size, alignment, fields, _manifest.Id);
+    }
+
     /// <summary>Reads every document of <paramref name="source"/> now: new names are added, existing ones patched field by field.</summary>
     public DefinitionRegistration AddSource(IDefinitionSource source)
     {
