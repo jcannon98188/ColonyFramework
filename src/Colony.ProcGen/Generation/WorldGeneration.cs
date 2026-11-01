@@ -40,13 +40,17 @@ public sealed class GenerationVersionMismatchException : InvalidOperationExcepti
 /// Per-World generation state (spec section 9.3): the <see cref="ChunkProvider"/> seeded with the World seed, the
 /// pre-pass values cached in their generated Resources, and the generation version the World's save carries.
 /// Host side: <see cref="Apply"/> writes a generated chunk's cells into the Fields and creates its placed Entities.
+/// It is also the World's <see cref="IChunkSource"/> (<see cref="FieldSet.ChunkSource"/>): the residency manager
+/// (spec section 5.3) generates never-loaded chunks on demand through it and drops unloaded chunks it can regenerate.
 /// </summary>
-public sealed class WorldGeneration : IWorldExtension
+public sealed class WorldGeneration : IWorldExtension, IChunkSource
 {
     private const string VersionSection = "version";
 
     private readonly GenerationBuilder _definition;
     private readonly ResourceType[] _prePassResources;
+    private GeneratedChunk? _streamingChunk;
+    private bool _streamingChunkValid;
 
     internal WorldGeneration(World world, GenerationBuilder definition, GenerationPipeline pipeline, ResourceType[] prePassResources)
     {
@@ -56,6 +60,7 @@ public sealed class WorldGeneration : IWorldExtension
         _prePassResources = prePassResources;
         Provider = pipeline.CreateProvider(world.Seed);
         StorePrePasses();
+        world.Fields().ChunkSource ??= this;
     }
 
     public World World { get; }
@@ -117,12 +122,19 @@ public sealed class WorldGeneration : IWorldExtension
             fields.WriteChunkCells(field.Id, ordinal, chunk.CellBytes(field.Id));
         }
 
+        fields.Residency?.MarkGenerated(ordinal);
         if (chunk.PlacementCount == 0)
         {
             return;
         }
 
         var commands = World.CreateCommandBuffer();
+        Place(chunk, commands);
+        World.Playback(commands);
+    }
+
+    private void Place(GeneratedChunk chunk, CommandBuffer commands)
+    {
         var generated = _definition.GeneratedEntity;
         var tilePos = _definition.TilePos;
         foreach (ref readonly var placement in chunk.Placements)
@@ -134,8 +146,37 @@ public sealed class WorldGeneration : IWorldExtension
                 commands.Add(entity, type, placement.Position);
             }
         }
+    }
 
-        World.Playback(commands);
+    /// <summary>The chunk source seam of the residency manager: the pipeline's cells for every Field it writes (other Fields keep the buffer's initial values).</summary>
+    void IChunkSource.GenerateCells(ChunkCoord coord, ChunkCellBuffer cells)
+    {
+        ArgumentNullException.ThrowIfNull(cells);
+        var chunk = StreamingChunk(coord);
+        foreach (var field in Pipeline.Fields)
+        {
+            chunk.CellBytes(field.Id).CopyTo(cells.Cells(field.Id));
+        }
+    }
+
+    void IChunkSource.PlaceEntities(ChunkCoord coord, CommandBuffer commands)
+    {
+        ArgumentNullException.ThrowIfNull(commands);
+        Place(StreamingChunk(coord), commands);
+    }
+
+    /// <summary>One reusable chunk for streaming; regenerated only when the coordinate changes, so cells and placements of one load come from one generation.</summary>
+    private GeneratedChunk StreamingChunk(ChunkCoord coord)
+    {
+        _streamingChunk ??= Provider.CreateChunk();
+        if (!_streamingChunkValid || _streamingChunk.Coord != coord)
+        {
+            _streamingChunkValid = false;
+            Generate(coord, _streamingChunk);
+            _streamingChunkValid = true;
+        }
+
+        return _streamingChunk;
     }
 
     /// <summary>Generates and applies every chunk of the World in Morton order (a fresh World's initial generation).</summary>

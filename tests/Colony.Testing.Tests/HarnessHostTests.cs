@@ -72,5 +72,8 @@ public sealed class HarnessHostTests
 
         long? fields = PublishedHost.CompareWithJit(exe, new FieldScenario(), Options, out _, out _);
         Assert.True(fields is null, $"fields: AOT diverged from JIT at Tick {fields}");
+
+        long? streaming = PublishedHost.CompareWithJit(exe, new StreamingScenario(), Options, out _, out _);
+        Assert.True(streaming is null, $"streaming: AOT diverged from JIT at Tick {streaming}");
     }
 }

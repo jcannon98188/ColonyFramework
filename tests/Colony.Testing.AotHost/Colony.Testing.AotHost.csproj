@@ -28,6 +28,7 @@
     <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistHarnessScenario.cs" Link="Scenarios\ColonistHarnessScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\InputScenario.cs" Link="Scenarios\InputScenario.cs" />
+    <Compile Include="..\Colony.Testing.Tests\Scenarios\StreamingScenario.cs" Link="Scenarios\StreamingScenario.cs" />
   </ItemGroup>
 
 </Project>
