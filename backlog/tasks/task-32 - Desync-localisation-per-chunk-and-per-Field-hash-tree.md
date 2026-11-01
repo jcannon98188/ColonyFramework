@@ -1,9 +1,11 @@
 ---
 id: TASK-32
 title: 'Desync localisation: per-chunk and per-Field hash tree'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:28'
+updated_date: '2026-11-01 21:31'
 labels:
   - ready-for-agent
   - implementation
