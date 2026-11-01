@@ -46,6 +46,13 @@ internal sealed class FlowBuilder
             _affectedSlots = new int[count];
         }
 
+        // Seeds are the goals plus the outside faces of the affected set, which never exceeds the threshold: size once, not as the set grows.
+        int seedsNeeded = field.Goals.Length + (6 * FaceCells * Math.Min(rebuildThreshold, count));
+        if (_seeds.Length < seedsNeeded)
+        {
+            _seeds = new long[seedsNeeded];
+        }
+
         Array.Clear(_affected, 0, count);
         _affectedCount = 0;
         for (int slot = 0; slot < count; slot++)
