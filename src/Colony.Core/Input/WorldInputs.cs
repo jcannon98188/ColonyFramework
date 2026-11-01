@@ -299,6 +299,27 @@ public sealed class WorldInputs
     /// <summary>The random stream handlers draw from for the command (<paramref name="source"/>, <paramref name="sequence"/>).</summary>
     public RandomSource RandomFor(InputSource source, uint sequence) => RandomFor(_world.Random.Derive(RandomKey), source.Value, sequence);
 
+    /// <summary>
+    /// Copies every pending command (submitted, not yet in a canonical list) as (effective Tick, source,
+    /// sequence, Input Command id, payload), in (source, sequence) order: the order a fresh World can resubmit
+    /// them in. Used by join-in-progress packages (TASK-33); host side, between Ticks.
+    /// </summary>
+    internal (long Tick, uint Source, uint Sequence, int Type, byte[] Payload)[] CopyPending()
+    {
+        lock (_lock)
+        {
+            var copy = new (long Tick, uint Source, uint Sequence, int Type, byte[] Payload)[_pendingCount];
+            for (int i = 0; i < _pendingCount; i++)
+            {
+                ref var e = ref _pending[i];
+                copy[i] = (e.Tick, e.Source, e.Sequence, e.Type, _pendingBytes.AsSpan(e.Offset, e.Length).ToArray());
+            }
+
+            Array.Sort(copy, static (a, b) => a.Source != b.Source ? a.Source.CompareTo(b.Source) : a.Sequence.CompareTo(b.Sequence));
+            return copy;
+        }
+    }
+
     internal struct Entry
     {
         public long Tick;
