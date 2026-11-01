@@ -8,7 +8,7 @@ namespace Colony.Plugins;
 /// schema's <see cref="WorldBuilder"/> (every Core registration is available through <see cref="Builder"/>, and
 /// the common ones are forwarded here), adds the Plugin-aware parts (Overridable Systems, replacement, counters
 /// tagged with the Plugin id, Definitions) and closes when Register returns: any later call throws.
-/// Input Commands register through <see cref="Builder"/> once Colony.Persistence exposes them.
+/// Input Commands and their permissions (TASK-35) register here too.
 /// </summary>
 public sealed class PluginRegistration
 {
