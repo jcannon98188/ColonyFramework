@@ -22,12 +22,23 @@ public sealed record PathfindingOptions
     /// </summary>
     public double FullRebuildFraction { get; init; } = 0.5;
 
+    /// <summary>
+    /// Work units (abstract nodes plus local cells expanded) the request queue may spend per Tick. A request is
+    /// started only while the budget has room, so at least one runs per Tick; the rest wait for the next Tick.
+    /// </summary>
+    public long WorkBudgetPerTick { get; init; } = 200_000;
+
+    /// <summary>Ticks between a request's submission Tick T and its delivery at the Begin Phase of T + N; at least 1.</summary>
+    public int ResultDelayTicks { get; init; } = 2;
+
     internal void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxMovementClasses, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxMovementClasses, MovementClassCeiling);
         ArgumentOutOfRangeException.ThrowIfLessThan(FullRebuildFraction, 0.0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(FullRebuildFraction, 1.0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(WorkBudgetPerTick, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(ResultDelayTicks, 1);
     }
 }
 
@@ -43,6 +54,18 @@ public sealed class PathfindingBuilder : WorldExtensionDefinition
 
     /// <summary>Name of the Late-Phase System that applies the Tick's Field changes to every built class (spec section 4.3); order Late Systems that write Fields Before it.</summary>
     public const string SystemName = "pathfinding.regions";
+
+    /// <summary>Name of the <see cref="PathRequest"/> event queue.</summary>
+    public const string RequestQueueName = "pathfinding.requests";
+
+    /// <summary>Name of the <see cref="PathResult"/> event queue.</summary>
+    public const string ResultQueueName = "pathfinding.results";
+
+    /// <summary>Name of the End-Phase System that takes the Tick's requests into the queue.</summary>
+    public const string IntakeSystemName = "pathfinding.intake";
+
+    /// <summary>Name of the Begin-Phase System that runs budgeted searches and emits the results due this Tick.</summary>
+    public const string DeliverSystemName = "pathfinding.deliver";
 
     private readonly FieldsBuilder _fields;
     private readonly List<MovementClassDefinition> _definitions = [];
@@ -64,6 +87,12 @@ public sealed class PathfindingBuilder : WorldExtensionDefinition
     public override ulong LayoutHash => _layoutHash;
 
     public int MovementClassCount => _definitions.Count;
+
+    /// <summary>The <see cref="PathRequest"/> queue; declare it in <see cref="SystemDefinition.WritesResources"/> to emit requests.</summary>
+    public ResourceType RequestQueue { get; internal set; }
+
+    /// <summary>The <see cref="PathResult"/> queue; declare it in <see cref="SystemDefinition.ReadsResources"/> to read results.</summary>
+    public ResourceType ResultQueue { get; internal set; }
 
     /// <summary>
     /// Registers a movement class; ids are registration order. The per-World limit
@@ -140,6 +169,27 @@ public sealed class PathfindingBuilder : WorldExtensionDefinition
         Phase = Phase.Late,
         Begin = static (in SystemContext context) => context.World.Pathfinding().SyncAll(parallel: true),
     };
+
+    internal static SystemDefinition DefineIntake(ResourceType requests) => new()
+    {
+        Name = IntakeSystemName,
+        Phase = Phase.End,
+        ReadsResources = ResourceMask.Of(requests),
+        Begin = (in SystemContext context) => context.World.Pathfinding().Queue.Intake(context.Events<PathRequest>(requests), context.Tick),
+    };
+
+    internal static SystemDefinition DefineDeliver(ResourceType results) => new()
+    {
+        Name = DeliverSystemName,
+        Phase = Phase.Begin,
+        WritesResources = ResourceMask.Of(results),
+        Begin = (in SystemContext context) =>
+        {
+            var queue = context.World.Pathfinding().Queue;
+            queue.Compute();
+            queue.Deliver(in context, results, context.Tick);
+        },
+    };
 }
 
 /// <summary>Registration entry point of the pathfinding service on the Core builder.</summary>
@@ -157,7 +207,13 @@ public static class PathfindingRegistration
         options.Validate();
         var pathfinding = new PathfindingBuilder(fields, options);
         builder.AddExtension(pathfinding);
+        builder.AddEvent<PathRequest>(PathfindingBuilder.RequestQueueName);
+        builder.AddEvent<PathResult>(PathfindingBuilder.ResultQueueName);
+        pathfinding.RequestQueue = builder.Resource(PathfindingBuilder.RequestQueueName);
+        pathfinding.ResultQueue = builder.Resource(PathfindingBuilder.ResultQueueName);
         builder.AddSystem(PathfindingBuilder.DefineSystem());
+        builder.AddSystem(PathfindingBuilder.DefineIntake(pathfinding.RequestQueue));
+        builder.AddSystem(PathfindingBuilder.DefineDeliver(pathfinding.ResultQueue));
         return pathfinding;
     }
 

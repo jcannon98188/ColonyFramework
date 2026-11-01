@@ -44,6 +44,7 @@ public sealed class RegionMap
     private readonly int[] _neighbours;
     private readonly ulong[]?[] _inWorld;
     private readonly ChunkJob _job;
+    private ChunkGraph? _graph;
 
     private int[] _dirty = new int[64];
     private int _dirtyCount;
@@ -148,6 +149,31 @@ public sealed class RegionMap
 
     /// <summary>Local components of a chunk (nodes of the chunk graph); for diagnostics and tests.</summary>
     public int ComponentCount(int ordinal) => _chunks[ordinal].Count;
+
+    /// <summary>The HPA* chunk graph of this class (TASK-20), built lazily per chunk from the labels.</summary>
+    internal ChunkGraph Graph => _graph ??= new ChunkGraph(this);
+
+    internal FieldSet Fields => _fields;
+
+    internal int ChunkCount => _chunks.Length;
+
+    /// <summary>The face neighbour of a chunk (direction 0..5 = -x, +x, -y, +y, -z, +z), -1 outside the World.</summary>
+    internal int NeighbourOf(int ordinal, int direction) => _neighbours[(ordinal * 6) + direction];
+
+    /// <summary>Bumps every time the chunk's local labels are rebuilt; consumers rebuild derived data when it moves.</summary>
+    internal int LabelVersionOf(int ordinal) => _chunks[ordinal].Version;
+
+    /// <summary>Local component label per cell (0 = impassable); null while the chunk has no passable tile.</summary>
+    internal ushort[]? LabelsOf(int ordinal) => _chunks[ordinal].Count == 0 ? null : _chunks[ordinal].Labels;
+
+    internal ulong[] PassableOf(int ordinal) => _chunks[ordinal].Passable;
+
+    /// <summary>Vertical bits (climb from the cell to z + 1 allowed); the passable bits when the class has no vertical rule.</summary>
+    internal ulong[] UpOf(int ordinal) => _chunks[ordinal].Up ?? _chunks[ordinal].Passable;
+
+    /// <summary>Whether the class can stand on the tile (inside the World and passable).</summary>
+    internal bool IsPassable(TilePos tile)
+        => _fields.Size.Contains(tile) && Bit(_chunks[_fields.OrdinalOf(tile.Chunk)].Passable, tile.CellIndex);
 
     private int TryOrdinal(int x, int y, int z)
     {
@@ -533,6 +559,7 @@ public sealed class RegionMap
         }
 
         chunk.PendingChanged = false;
+        chunk.Version++;
         var passable = chunk.Passable;
         bool any = false;
         for (int w = 0; w < Words; w++)
@@ -705,6 +732,7 @@ public sealed class RegionMap
         public ulong[]? Up;
         public ulong[]? NextUp;
         public bool PendingChanged;
+        public int Version;
         public ushort[]? Labels;
         public int Count;
         public ushort[] MinCell = [];
