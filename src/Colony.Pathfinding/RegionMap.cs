@@ -24,8 +24,10 @@ public readonly record struct RegionCounters(
 /// <remarks>
 /// Upkeep from a set of changed chunks: re-evaluate the passability rule; chunks whose passable and vertical
 /// bits did not change are dropped. The rest are relabelled locally (parallel, chunk keyed), edges are rebuilt
-/// for them and their face neighbours, and only the regions that touched them are relabelled by a search over
-/// the chunk graph (merges and splits alike; untouched regions keep their ids). When at least
+/// for them and their face neighbours. Region ids live in a union-find of slots (TASK-39): a merge links the
+/// slots met through the changed chunks without any search, and a split runs one breadth-first search from every
+/// node touching the changed chunks at once, stopping as soon as at most one side can still grow, so the cost
+/// follows the smaller sides, not the colony (untouched regions keep their ids). When at least
 /// <see cref="PathfindingOptions.FullRebuildFraction"/> of the chunks changed, the whole graph is relabelled
 /// instead (the chunk-set rebuild fallback). Lookups are two array reads: constant time, no allocation.
 /// Reads are safe from any thread while no upkeep runs; upkeep runs only at sync points on the Tick thread.
@@ -44,6 +46,7 @@ public sealed class RegionMap
     private readonly int[] _neighbours;
     private readonly ulong[]?[] _inWorld;
     private readonly ChunkJob _job;
+    private readonly ChunkGraphPool _pool;
     private ChunkGraph? _graph;
 
     private int[] _dirty = new int[64];
@@ -80,9 +83,10 @@ public sealed class RegionMap
     private long _relabelled;
     private long _visited;
 
-    internal RegionMap(World world, FieldSet fields, MovementClassDefinition definition, MovementClass movementClass, PathfindingOptions options)
+    internal RegionMap(World world, FieldSet fields, MovementClassDefinition definition, MovementClass movementClass, PathfindingOptions options, ChunkGraphPool pool)
     {
         _world = world;
+        _pool = pool;
         _fields = fields;
         _definition = definition;
         _options = options;
@@ -163,8 +167,8 @@ public sealed class RegionMap
     /// <summary>Local components of a chunk (nodes of the chunk graph); for diagnostics and tests.</summary>
     public int ComponentCount(int ordinal) => _chunks[ordinal].Count;
 
-    /// <summary>The HPA* chunk graph of this class (TASK-20), built lazily per chunk from the labels.</summary>
-    internal ChunkGraph Graph => _graph ??= new ChunkGraph(this);
+    /// <summary>The HPA* chunk graph of this class (TASK-20), built lazily per chunk from the labels into the service's shared pool.</summary>
+    internal ChunkGraph Graph => _graph ??= new ChunkGraph(this, _pool);
 
     internal FieldSet Fields => _fields;
 
