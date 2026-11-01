@@ -1,9 +1,11 @@
 ---
 id: TASK-21
 title: 'Pathfinding: bounded flow Fields and layered repair'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-11-01 16:57'
 labels:
   - ready-for-agent
   - implementation
