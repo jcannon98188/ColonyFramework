@@ -7,8 +7,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
-    <!-- The replay-equivalence and lockstep scenarios (TASK-15) play replay logs and exchange input frames. -->
-    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <!--
+      Only Colony.Testing, as a Game's test project would reference it: Colony.Persistence (replay logs, input
+      frames for the TASK-15 scenarios and the TASK-31 lockstep harness) comes in transitively.
+    -->
     <!-- The colonist scenario (TASK-7's acceptance oracle) stays in Core.Tests; ColonistHarnessScenario wraps it. -->
     <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
   </ItemGroup>
