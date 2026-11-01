@@ -40,4 +40,46 @@ public sealed class InputScenarioTests
         Assert.Equal(0, world.Inputs.PendingCount);
         Assert.Equal(30, world.CurrentTick);
     }
+
+    [Fact]
+    public void Restricted_sources_hash_identically_on_1_2_4_and_N_threads_differ_from_the_open_run_and_match_the_golden_hashes()
+    {
+        var open = DeterminismHarness.Run(new InputScenario(), Options);
+        var restricted = DeterminismHarness.Run(new InputScenario { Restricted = true }, Options);
+        var concurrent = DeterminismHarness.Run(new InputScenario { Restricted = true, Concurrent = true }, Options);
+
+        Assert.True(restricted.Passed, restricted.Describe());
+        Assert.True(concurrent.Passed, concurrent.Describe());
+        Assert.Null(restricted.FirstDivergenceFrom(concurrent));
+        Assert.NotEqual(open.Hashes.ToArray(), restricted.Hashes.ToArray());
+        var golden = TestGolden.Store.Compare(restricted);
+        Assert.True(golden.Passed, golden.Message);
+    }
+
+    [Fact]
+    public void A_restricted_run_denies_the_spectator_and_non_host_dismissals_at_the_tick_boundary()
+    {
+        var scenario = new InputScenario { Restricted = true };
+        using var world = DeterminismHarness.CreateWorld(scenario, DeterminismHarness.BuildSchema(scenario, null), workers: 2, listener: null);
+        var dismiss = world.Schema.InputCommand<InputScenario.Dismiss>();
+        int denied = 0;
+        for (int i = 0; i < 30; i++)
+        {
+            scenario.Advance(world);
+            var list = world.Inputs.Current;
+            for (int e = 0; e < list.Count; e++)
+            {
+                var record = list[e];
+                bool expectDenied = record.Source.Value == (uint)(scenario.Sources - 1) || (record.Command == dismiss && record.Source != InputScenario.Host);
+                Assert.Equal(expectDenied, list.IsDenied(e));
+                denied += expectDenied ? 1 : 0;
+            }
+
+        }
+
+        Assert.True(denied > 30, "the spectator submits every Tick");
+        // Every denial is a CommandRejected the Begin-Phase System counts, on top of the handlers' own rejections.
+        var stock = world.Resource<InputScenario.Stock>(world.Schema.Resource<InputScenario.Stock>());
+        Assert.True(stock.Rejections >= denied, $"{stock.Rejections} rejections counted for {denied} denials");
+    }
 }

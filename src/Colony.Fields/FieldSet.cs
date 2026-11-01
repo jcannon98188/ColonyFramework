@@ -404,26 +404,53 @@ public sealed class FieldSet : IWorldExtension
     {
         for (int f = 0; f < _storage.Length; f++)
         {
-            var storage = _storage[f];
-            for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
+            for (int ordinal = 0; ordinal < _storage[f].ChunkCount; ordinal++)
             {
-                if (_residency[ordinal] == ChunkResidency.Unloaded)
-                {
-                    if (_stored[f][ordinal] is { } payload)
-                    {
-                        HashStored(f, payload, ref state);
-                        continue;
-                    }
-
-                    if (Residency is { } manager && manager.TryHashRegenerated(f, ordinal, ref state))
-                    {
-                        continue;
-                    }
-                }
-
-                storage.HashChunk(ordinal, ref state);
+                AppendChunk(f, ordinal, ref state);
             }
         }
+    }
+
+    /// <summary>
+    /// One item per Field (in id order) with one leaf per chunk (Morton ordinal, chunk coordinate), each leaf the
+    /// digest of exactly the cells <see cref="IWorldExtension.Hash"/> appends for that chunk (spec section 10.2).
+    /// </summary>
+    void IWorldExtension.HashTree(HashTreeBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        for (int f = 0; f < _storage.Length; f++)
+        {
+            builder.BeginItem(_fields[f].Name, HashTreeLeafKind.FieldChunk);
+            for (int ordinal = 0; ordinal < _storage[f].ChunkCount; ordinal++)
+            {
+                var state = new Hash64State(WorldHashTree.NodeSeed);
+                AppendChunk(f, ordinal, ref state);
+                var coord = _layout.CoordOf(ordinal);
+                builder.AddLeaf(ordinal, coord.X, coord.Y, coord.Z, state.Finish());
+            }
+
+            builder.EndItem();
+        }
+    }
+
+    /// <summary>The cells of one Field chunk as the World hash sees them, whatever the chunk's residency or storage form.</summary>
+    private void AppendChunk(int f, int ordinal, ref Hash64State state)
+    {
+        if (_residency[ordinal] == ChunkResidency.Unloaded)
+        {
+            if (_stored[f][ordinal] is { } payload)
+            {
+                HashStored(f, payload, ref state);
+                return;
+            }
+
+            if (Residency is { } manager && manager.TryHashRegenerated(f, ordinal, ref state))
+            {
+                return;
+            }
+        }
+
+        _storage[f].HashChunk(ordinal, ref state);
     }
 
     /// <summary>

@@ -1089,7 +1089,7 @@ internal static unsafe class AbiEntries
                 return ColonyAbi.Invalid("context is null.");
             }
 
-            return Out(outCount, World(context->World).Inputs.CurrentCount);
+            return Out(outCount, World(context->World).Inputs.HandlerCount); // denied commands (TASK-35) are not shown to handlers
         }
         catch (Exception e)
         {
@@ -1108,8 +1108,9 @@ internal static unsafe class AbiEntries
             }
 
             var inputs = World(context->World).Inputs;
-            ref readonly var entry = ref inputs.RecordAt(index);
-            var payload = inputs.PayloadAt(index);
+            int canonical = inputs.HandlerIndex(index);
+            ref readonly var entry = ref inputs.RecordAt(canonical);
+            var payload = inputs.PayloadAt(canonical);
             var random = inputs.RandomFor(new InputSource(entry.Source), entry.Sequence);
             *outInput = new ColonyInput
             {
@@ -1139,7 +1140,7 @@ internal static unsafe class AbiEntries
             }
 
             var w = World(context->World);
-            ref readonly var entry = ref w.Inputs.RecordAt(index);
+            ref readonly var entry = ref w.Inputs.RecordAt(w.Inputs.HandlerIndex(index));
             var rejected = new CommandRejected(new InputSource(entry.Source), entry.Sequence, new InputCommandType(entry.Type), reason);
             Commands(context->Commands).Emit(w.Schema.CommandRejections, in rejected);
             return ColonyAbi.Ok;

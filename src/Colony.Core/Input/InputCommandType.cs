@@ -47,7 +47,14 @@ public readonly record struct InputSource(uint Value)
 /// is readable from the Begin Phase through the End Phase of the same Tick. <see cref="Reason"/> is a code the Game defines.
 /// The rejected command stays in the canonical list and in any replay log.
 /// </summary>
-public readonly record struct CommandRejected(InputSource Source, uint Sequence, InputCommandType Command, int Reason);
+public readonly record struct CommandRejected(InputSource Source, uint Sequence, InputCommandType Command, int Reason)
+{
+    /// <summary>
+    /// Reason of a rejection by the schema's <see cref="InputPermissions"/> (TASK-35): emitted by the Framework at the
+    /// Tick boundary, before any handler runs. Reserved; Games use other codes.
+    /// </summary>
+    public const int PermissionDenied = int.MinValue;
+}
 
 /// <summary>One entry of the canonical input list of a Tick: who, in what order, which command. The payload is read through <see cref="CanonicalInputs"/>.</summary>
 public readonly record struct InputRecord(long Tick, InputSource Source, uint Sequence, InputCommandType Command);

@@ -55,6 +55,20 @@ public interface IWorldExtension : IDisposable
     public void Hash(ref Hash64State state);
 
     /// <summary>
+    /// Adds this extension's state to the hierarchical World hash (<see cref="World.HashTree"/>, spec section
+    /// 10.2) as items, and chunk leaves where the state is chunked, under a group the World already opened with
+    /// the extension's name. Must cover exactly the bytes <see cref="Hash"/> covers, split the same way on every
+    /// peer. The default adds one leafless item <c>state</c> holding the digest of <see cref="Hash"/>.
+    /// </summary>
+    public void HashTree(HashTreeBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        var state = new Hash64State(WorldHashTree.NodeSeed);
+        Hash(ref state);
+        builder.AddItem("state", state.Finish());
+    }
+
+    /// <summary>
     /// Writes this extension's saved state as named sections (spec section 7.1): exactly the state
     /// <see cref="Hash"/> covers, in a layout the extension owns (Field chunks write one section per chunk).
     /// Derived state (a spatial index, caches) writes nothing and rebuilds in <see cref="Load"/>. Called at

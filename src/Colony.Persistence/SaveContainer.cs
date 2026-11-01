@@ -35,6 +35,9 @@ internal static class SaveContainer
     /// <summary>Header flag: the container is a replay log (spec section 7.2), not a World save.</summary>
     public const uint ReplayFlag = 1;
 
+    /// <summary>Header flag: the container is a join-in-progress package (spec section 7.4).</summary>
+    public const uint JoinFlag = 2;
+
     /// <summary>Lays out the sections into one container image.</summary>
     public static byte[] Encode(IReadOnlyList<ContainerSection> sections, SaveOptions options, uint flags = 0)
     {

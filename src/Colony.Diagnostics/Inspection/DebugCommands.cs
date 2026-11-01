@@ -47,11 +47,18 @@ public static class DebugCommands
     /// <summary>The Input source debug commands are submitted from; Games must not use it for players.</summary>
     public static InputSource Source { get; } = new(0xFFFF_DB60);
 
-    /// <summary>Registers the debug Input Command and its handler System. Call once, while composing the schema.</summary>
+    /// <summary>
+    /// Registers the debug Input Command and its handler System. Call once, while composing the schema. Through the
+    /// Input permission table (TASK-35) the command is denied to every source but <see cref="Source"/>, so a client
+    /// submitting it is rejected at the Tick boundary like any other denied command; a Game may grant it to another
+    /// source with <see cref="WorldBuilder.GrantInput"/>.
+    /// </summary>
     public static InputCommandType AddDebugCommands(this WorldBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
         var type = builder.AddInputCommand<DebugCommand>(InputCommandName);
+        builder.SetInputAccess(type, InputAccess.Deny);
+        builder.GrantInput(Source, type);
         builder.AddSystem(new SystemDefinition
         {
             Name = SystemName,

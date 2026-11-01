@@ -41,6 +41,17 @@ public sealed class ReplayPlayer
             _typeMap[i] = type.Id;
         }
 
+        // Permissions decide which recorded commands reach handlers, so a different table would diverge (TASK-35).
+        var permissions = SavedInputPermissions.Of(world.Schema);
+        var differences = log.InputPermissions.Differences(permissions);
+        if (!differences.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "The replay was recorded with different Input permissions than the schema declares. Recorded: "
+                + string.Join("; ", log.InputPermissions.Describe()) + ". Schema: " + string.Join("; ", permissions.Describe())
+                + ". Differences (here = recording): " + string.Join("; ", differences) + ".");
+        }
+
         Verify();
     }
 
