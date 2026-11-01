@@ -102,7 +102,15 @@ public sealed partial class World : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ThrowIfDisposed();
         _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
-        _runner.RunParallel(count, job);
+        _engineDepth++;
+        try
+        {
+            _runner.RunParallel(count, job);
+        }
+        finally
+        {
+            _engineDepth--;
+        }
     }
 
     /// <summary>Per-Tick records, logs, counters and the hash trail of this World (spec section 10.1). Reading allocates nothing.</summary>
@@ -178,6 +186,7 @@ public sealed partial class World : IDisposable
 
         _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
         Diagnostics.BeforeTick(CurrentTick);
+        _engineDepth++;
         try
         {
             _runner.RunTick(CurrentTick);
@@ -186,6 +195,10 @@ public sealed partial class World : IDisposable
         {
             Fault = e.Fault;
             throw;
+        }
+        finally
+        {
+            _engineDepth--;
         }
 
         CurrentTick++;
@@ -333,10 +346,32 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// A ref to the Entity's Component. Valid until the next structural change (the next playback);
-    /// throws when the Entity is dead or lacks the Component.
+    /// A writable ref to the Entity's Component. Valid until the next structural change (the next playback);
+    /// throws when the Entity is dead or lacks the Component. Called by the host (outside a Tick and outside
+    /// <see cref="RunParallel"/>) it counts as a write: the Component's column in the Entity's chunk is
+    /// change-stamped, so change-filtered Systems (spatial index, work index) see it on their next run. Inside
+    /// a Tick only a System's declared <see cref="SystemDefinition.Writes"/> stamp. Use
+    /// <see cref="GetReadOnly{T}"/> to read without stamping.
     /// </summary>
     public ref T Get<T>(EntityId id, ComponentType type) where T : unmanaged
+    {
+        ValidateGet<T>(id, type);
+        if (_engineDepth == 0)
+        {
+            StampHostWrite(id.Index, type.Id);
+        }
+
+        return ref GetUnchecked<T>(id.Index, type.Id);
+    }
+
+    /// <summary>A read-only ref to the Entity's Component; never change-stamps. Same validity and errors as <see cref="Get{T}"/>.</summary>
+    public ref readonly T GetReadOnly<T>(EntityId id, ComponentType type) where T : unmanaged
+    {
+        ValidateGet<T>(id, type);
+        return ref GetUnchecked<T>(id.Index, type.Id);
+    }
+
+    private void ValidateGet<T>(EntityId id, ComponentType type) where T : unmanaged
     {
         Schema.ValidateType(type);
         if (Unsafe.SizeOf<T>() != Schema.Sizes[type.Id])
@@ -348,8 +383,40 @@ public sealed partial class World : IDisposable
         {
             throw new InvalidOperationException($"{id} is not alive.");
         }
+    }
 
-        return ref GetUnchecked<T>(id.Index, type.Id);
+    /// <summary>
+    /// Nesting depth of engine-driven execution (<see cref="Tick"/>, <see cref="RunParallel"/>). Zero means the
+    /// caller is the host between Ticks: World API writes are then change-stamped (spec section 4.3).
+    /// </summary>
+    private int _engineDepth;
+
+    /// <summary>True while the World runs a Tick or a <see cref="RunParallel"/> batch.</summary>
+    internal bool InEngine => _engineDepth != 0;
+
+    /// <summary>
+    /// Stamps one Component column of the chunk holding Entity slot <paramref name="index"/> as written by the
+    /// host. Like a sync point, a host write is its own change epoch above the last wave, so a change-filtered
+    /// System that ran in that wave still sees it. Non-fragmenting Components have no column version.
+    /// </summary>
+    private void StampHostWrite(int index, int componentId)
+    {
+        if (Schema.NonFragmentingSlots[componentId] >= 0)
+        {
+            return;
+        }
+
+        StampHostColumn(_archetypes[_entities.ArchetypeOf(index)], _entities.ChunkOf(index), componentId);
+    }
+
+    internal void StampHostColumn(Archetype archetype, int chunk, int componentId)
+    {
+        if (ChangeCounter == _waveCounter)
+        {
+            ChangeCounter++;
+        }
+
+        archetype.MarkColumnWritten(chunk, componentId, ChangeCounter);
     }
 
     /// <summary>
@@ -435,7 +502,7 @@ public sealed partial class World : IDisposable
     /// disabled on every row is skipped, unless <paramref name="ignoreEnableBits"/>.
     /// </summary>
     public ChunkQuery Query(ComponentMask all, ComponentMask none = default, bool ignoreEnableBits = false)
-        => new(_archetypes, _archetypeCount, all, none, DebugValidation, ignoreEnableBits);
+        => new(_archetypes, _archetypeCount, all, none, DebugValidation, ignoreEnableBits, this);
 
     public ChunkQuery Query(params ReadOnlySpan<ComponentType> all) => Query(ComponentMask.Of(all));
 

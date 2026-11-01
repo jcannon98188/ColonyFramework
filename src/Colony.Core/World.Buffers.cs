@@ -25,6 +25,11 @@ public sealed partial class World
         }
 
         ThrowIfMissing(id, type);
+        if (_engineDepth == 0)
+        {
+            StampHostWrite(id.Index, type.Id);
+        }
+
         byte* component = ComponentPointer(id.Index, type.Id);
         return new BufferAccessor<TElement>(component, descriptor.InlineOffset, descriptor.InlineCapacity, _bufferHeap);
     }
