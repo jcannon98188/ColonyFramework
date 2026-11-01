@@ -18,12 +18,24 @@ internal static unsafe class WorldLoader
         public int MaxStepSize { get; init; }
     }
 
+    /// <summary>Per saved persistent Resource: the schema's descriptor and the chain that gets the saved bytes there (null = bulk copy; a dropped Resource has no plan).</summary>
+    private sealed class ResourcePlan
+    {
+        public required SavedResource Saved { get; init; }
+
+        public required ResourceDescriptor Current { get; init; }
+
+        public ResourceMigration[]? Chain { get; init; }
+
+        public int MaxStepSize { get; init; }
+    }
+
     public static World Load(SaveContainer.Reader reader, WorldSchema schema, LoadOptions options)
     {
         var manifest = reader.Manifest;
         CheckPlugins(manifest, schema, options);
         var plans = PlanComponents(manifest, schema, options);
-        PlanResources(manifest, schema, options.DropUnknownComponents);
+        var resourcePlans = PlanResources(manifest, schema, options);
         PlanExtensions(manifest, schema);
 
         var entities = reader.Section(SaveContainer.EntitiesSection);
@@ -56,7 +68,7 @@ internal static unsafe class WorldLoader
             world.RestoreEntityIndex(highWater, generations, freedEpochs, freeSlots);
             LoadArchetypes(reader, world, manifest, plans);
             LoadNonFragmenting(reader, world, manifest, plans);
-            LoadResources(reader, world, manifest);
+            LoadResources(reader, world, manifest, resourcePlans);
             LoadTables(reader, world);
             // Change versions are rebuildable (spec section 7.1): every chunk counts as changed once, before the
             // saved change counter is restored so the counter itself continues from the save.
@@ -152,10 +164,13 @@ internal static unsafe class WorldLoader
         return plans;
     }
 
-    private static void PlanResources(SaveManifest manifest, WorldSchema schema, bool dropUnknown)
+    /// <summary>One plan per saved Resource (null for transient ones, and for unknown ones in drop mode); layout changes resolve to a migration chain or fail naming the Resource and both layouts.</summary>
+    private static ResourcePlan?[] PlanResources(SaveManifest manifest, WorldSchema schema, LoadOptions options)
     {
-        foreach (var saved in manifest.Resources)
+        var plans = new ResourcePlan?[manifest.Resources.Length];
+        for (int i = 0; i < plans.Length; i++)
         {
+            var saved = manifest.Resources[i];
             if (!saved.IsPersistent)
             {
                 continue;
@@ -163,7 +178,7 @@ internal static unsafe class WorldLoader
 
             if (!schema.TryGetResource(saved.Name, out var type))
             {
-                if (dropUnknown)
+                if (options.DropUnknownComponents)
                 {
                     continue;
                 }
@@ -172,11 +187,37 @@ internal static unsafe class WorldLoader
             }
 
             var current = schema.DescribeResource(type);
-            if (current.LayoutHash != saved.LayoutHash || current.Kind != saved.Kind)
+            if (current.Kind != saved.Kind)
             {
-                throw new MigrationException($"Resource '{saved.Name}' changed layout (saved 0x{saved.LayoutHash:X16}, schema 0x{current.LayoutHash:X16}); Resource migrations are not supported.");
+                throw new MigrationException($"Resource '{saved.Name}' was saved as a {saved.Kind} but is registered as a {current.Kind}; a Resource's kind cannot be migrated.");
             }
+
+            if (!current.IsPersistent)
+            {
+                // The schema made it transient: the saved bytes are stepped over, nothing to migrate.
+                continue;
+            }
+
+            ResourceMigration[]? chain = null;
+            int maxStep = 0;
+            if (saved.LayoutHash != current.LayoutHash)
+            {
+                chain = options.Migrations.ResolveResource(saved.Name, saved.LayoutHash, saved.Size, current.LayoutHash, current.Size);
+                maxStep = Math.Max(saved.Size, current.Size);
+                foreach (var step in chain)
+                {
+                    maxStep = Math.Max(maxStep, Math.Max(step.FromSize, step.ToSize));
+                }
+            }
+            else if (saved.Size != current.Size)
+            {
+                throw new SaveFormatException($"Resource '{saved.Name}' has layout 0x{saved.LayoutHash:X16} in both the save and the schema but different sizes ({saved.Size} vs {current.Size}).");
+            }
+
+            plans[i] = new ResourcePlan { Saved = saved, Current = current, Chain = chain, MaxStepSize = maxStep };
         }
+
+        return plans;
     }
 
     private static void PlanExtensions(SaveManifest manifest, WorldSchema schema)
@@ -506,46 +547,89 @@ internal static unsafe class WorldLoader
         r.ExpectEnd();
     }
 
-    private static void LoadResources(SaveContainer.Reader reader, World world, SaveManifest manifest)
+    private static void LoadResources(SaveContainer.Reader reader, World world, SaveManifest manifest, ResourcePlan?[] plans)
     {
-        var schema = world.Schema;
         var resources = world.ResourceStore;
         var r = new ByteReader(reader.Section(SaveContainer.ResourcesSection), SaveContainer.ResourcesSection);
-        foreach (var saved in manifest.Resources)
+        byte[]? migrationScratch = null;
+        for (int i = 0; i < plans.Length; i++)
         {
+            var saved = manifest.Resources[i];
             if (!saved.IsPersistent)
             {
                 continue;
             }
 
-            // An unknown Resource only gets here in drop mode (PlanResources threw otherwise): its bytes are stepped over.
-            bool keep = schema.TryGetResource(saved.Name, out var type) && schema.DescribeResource(type).IsPersistent;
+            // No plan: unknown in drop mode, or transient in the schema (PlanResources threw otherwise). The bytes are stepped over.
+            var plan = plans[i];
+            if (plan is { Chain: not null } && (migrationScratch is null || migrationScratch.Length < plan.MaxStepSize * 2))
+            {
+                migrationScratch = new byte[plan.MaxStepSize * 2];
+            }
+
             if (saved.Kind == ResourceKind.Value)
             {
                 var bytes = r.ReadBytes(saved.Size);
-                if (keep)
+                if (plan is null)
                 {
-                    bytes.CopyTo(new Span<byte>(resources.Pointer(type.Id), saved.Size));
+                    continue;
+                }
+
+                var destination = new Span<byte>(resources.Pointer(plan.Current.Type.Id), plan.Current.Size);
+                if (plan.Chain is null)
+                {
+                    bytes.CopyTo(destination);
+                }
+                else
+                {
+                    MigrateResource(plan, bytes, destination, migrationScratch!);
                 }
             }
             else
             {
                 int count = r.ReadCount(saved.Size);
-                for (int i = 0; i < count; i++)
+                byte[]? record = plan is null ? null : new byte[plan.Current.Size];
+                for (int n = 0; n < count; n++)
                 {
-                    var record = r.ReadBytes(saved.Size);
-                    if (keep)
+                    var bytes = r.ReadBytes(saved.Size);
+                    if (plan is null)
                     {
-                        fixed (byte* source = record)
-                        {
-                            resources.Append(type.Id, source);
-                        }
+                        continue;
+                    }
+
+                    if (plan.Chain is null)
+                    {
+                        bytes.CopyTo(record);
+                    }
+                    else
+                    {
+                        MigrateResource(plan, bytes, record, migrationScratch!);
+                    }
+
+                    fixed (byte* source = record)
+                    {
+                        resources.Append(plan.Current.Type.Id, source);
                     }
                 }
             }
         }
 
         r.ExpectEnd();
+    }
+
+    private static void MigrateResource(ResourcePlan plan, ReadOnlySpan<byte> saved, Span<byte> destination, byte[] scratch)
+    {
+        var chain = plan.Chain!;
+        int half = scratch.Length / 2;
+        ReadOnlySpan<byte> source = saved;
+        for (int i = 0; i < chain.Length; i++)
+        {
+            var step = chain[i];
+            Span<byte> target = i == chain.Length - 1 ? destination : scratch.AsSpan((i & 1) * half, step.ToSize);
+            target.Clear();
+            step.Migrate(source, target);
+            source = target;
+        }
     }
 
     private static void LoadTables(SaveContainer.Reader reader, World world)

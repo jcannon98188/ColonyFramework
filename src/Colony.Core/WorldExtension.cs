@@ -24,6 +24,14 @@ public abstract class WorldExtensionDefinition
     /// </summary>
     public virtual string? Version => null;
 
+    /// <summary>
+    /// The version of the section format <see cref="IWorldExtension.Save"/> writes (spec section 7.1). Recorded in
+    /// the save manifest and compared on load: an older save is brought forward through registered extension
+    /// migrations (Colony.Persistence), a newer one is refused. Not part of the schema hash. Bump it whenever the
+    /// bytes or the set of sections change shape; 1 (the default) is the format the extension first shipped with.
+    /// </summary>
+    public virtual int FormatVersion => 1;
+
     /// <summary>Closes registration; called once from <see cref="WorldBuilder.Build"/> before <see cref="LayoutHash"/> is read.</summary>
     public virtual void Freeze()
     {
