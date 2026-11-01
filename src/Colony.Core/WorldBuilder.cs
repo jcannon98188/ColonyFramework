@@ -60,7 +60,7 @@ public sealed class WorldBuilder
         return null;
     }
 
-    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
+    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin(string, string, bool)"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
     public string? CurrentPluginId => _currentPlugin >= 0 ? _plugins[_currentPlugin].Id : null;
 
     public WorldBuilder()
@@ -115,8 +115,16 @@ public sealed class WorldBuilder
     /// <see cref="WorldSchema.IsDeterministic"/>. Scopes do not nest; ids are unique. Colony.Plugins calls this
     /// around each Plugin's <c>Register</c>; Core keeps only the provenance.
     /// </summary>
-    public WorldBuilder BeginPlugin(string id, string version, bool deterministic)
+    public WorldBuilder BeginPlugin(string id, string version, bool deterministic) => BeginPlugin(id, version, deterministic, abiVersion: 0);
+
+    /// <summary>
+    /// Opens a Plugin scope like <see cref="BeginPlugin(string, string, bool)"/> and records the C ABI version a
+    /// Native Plugin was built against (<paramref name="abiVersion"/>; 0 for a C# Plugin) in
+    /// <see cref="PluginDescriptor.AbiVersion"/>, so manifests and saves carry it (spec section 8).
+    /// </summary>
+    public WorldBuilder BeginPlugin(string id, string version, bool deterministic, int abiVersion)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(abiVersion);
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(version);
         ThrowIfBuilt();
@@ -131,11 +139,11 @@ public sealed class WorldBuilder
         }
 
         _currentPlugin = _plugins.Count;
-        _plugins.Add(new PluginDescriptor(_currentPlugin, id, version, deterministic));
+        _plugins.Add(new PluginDescriptor(_currentPlugin, id, version, deterministic, abiVersion));
         return this;
     }
 
-    /// <summary>Closes the scope opened by <see cref="BeginPlugin"/>.</summary>
+    /// <summary>Closes the scope opened by <see cref="BeginPlugin(string, string, bool, int)"/>.</summary>
     public WorldBuilder EndPlugin()
     {
         ThrowIfBuilt();
@@ -531,27 +539,32 @@ public sealed class WorldBuilder
     public InputCommandType AddInputCommand<T>(string name) where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (_inputByClrType.ContainsKey(typeof(T)))
+        {
+            throw new ArgumentException($"The type {typeof(T).Name} is already registered as an Input Command.", nameof(T));
+        }
+
+        int size = Unsafe.SizeOf<T>();
+        var type = AddInputCommandCore(name, size, Unsafe.SizeOf<AlignmentProbe<T>>() - size);
+        _inputByClrType.Add(typeof(T), type.Id);
+        return type;
+    }
+
+    private InputCommandType AddInputCommandCore(string name, int size, int alignment)
+    {
         ThrowIfBuilt();
         if (_inputByName.ContainsKey(name))
         {
             throw new ArgumentException($"An Input Command named '{name}' is already registered.", nameof(name));
         }
 
-        if (_inputByClrType.ContainsKey(typeof(T)))
-        {
-            throw new ArgumentException($"The type {typeof(T).Name} is already registered as an Input Command.", nameof(T));
-        }
-
         _commandRejections ??= AddResourceCore<CommandRejected>(CommandRejectedQueueName, ResourceKind.EventQueue, persistent: false);
-        int size = Unsafe.SizeOf<T>();
-        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
         ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), InputCommandLayoutHashSeed);
         hash = Hashing.Hash64.Combine(hash, (ulong)size);
         hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
         var type = new InputCommandType(_inputCommands.Count);
         _inputCommands.Add(new InputCommandDescriptor(type, name, size, alignment, hash));
         _inputByName.Add(name, type.Id);
-        _inputByClrType.Add(typeof(T), type.Id);
         return type;
     }
 
@@ -583,16 +596,66 @@ public sealed class WorldBuilder
 
     private ResourceType AddResourceCore<T>(string name, ResourceKind kind, bool persistent) where T : unmanaged
     {
+        if (_resourceByClrType.ContainsKey(typeof(T)))
+        {
+            throw new ArgumentException($"The type {typeof(T).Name} is already registered as a Resource.", nameof(T));
+        }
+
+        int size = Unsafe.SizeOf<T>();
+        var type = AddResourceCore(name, size, Unsafe.SizeOf<AlignmentProbe<T>>() - size, kind, persistent);
+        _resourceByClrType.Add(typeof(T), type.Id);
+        return type;
+    }
+
+    // ---- Layout-only registration (TASK-28): the C ABI registers by size and alignment, with no CLR type. ----
+    // Layout hashes are computed exactly as for a CLR type of the same name, size and alignment, so a Native
+    // Plugin's Component and a C# struct registered with AddComponent<T>(name) are the same Component.
+
+    /// <summary>Registers a Component by name, size and alignment alone (no CLR type binding, no field list).</summary>
+    internal ComponentType AddComponentLayout(string name, int size, int alignment, ComponentOptions flags)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ValidateLayout(name, size, alignment);
+        if ((flags & (ComponentOptions.Relation | ComponentOptions.Buffer)) != 0)
+        {
+            throw new ArgumentException($"Component '{name}': the Relation and Buffer flags cannot be registered by layout.", nameof(flags));
+        }
+
+        var fields = System.Collections.Immutable.ImmutableArray<ComponentField>.Empty;
+        return new ComponentType(AddComponentCore(name, size, alignment, ComponentLayout.ComputeHash(name, size, alignment, fields), flags, fields, 0, 0));
+    }
+
+    /// <summary>Registers a value Resource or event queue by name, size and alignment alone.</summary>
+    internal ResourceType AddResourceLayout(string name, int size, int alignment, ResourceKind kind, bool persistent)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ValidateLayout(name, size, alignment);
+        return AddResourceCore(name, size, alignment, kind, persistent);
+    }
+
+    /// <summary>Registers an Input Command by name, size and alignment alone.</summary>
+    internal InputCommandType AddInputCommandLayout(string name, int size, int alignment)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ValidateLayout(name, size, alignment);
+        return AddInputCommandCore(name, size, alignment);
+    }
+
+    private static void ValidateLayout(string name, int size, int alignment)
+    {
+        if (size <= 0 || alignment <= 0 || alignment > 64 || (alignment & (alignment - 1)) != 0 || size % alignment != 0)
+        {
+            throw new ArgumentException($"'{name}': size {size} and alignment {alignment} are not a valid layout (alignment a power of two up to 64, size a positive multiple of it).", nameof(size));
+        }
+    }
+
+    private ResourceType AddResourceCore(string name, int size, int alignment, ResourceKind kind, bool persistent)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ThrowIfBuilt();
         if (_resourceByName.ContainsKey(name))
         {
             throw new ArgumentException($"A Resource named '{name}' is already registered.", nameof(name));
-        }
-
-        if (_resourceByClrType.ContainsKey(typeof(T)))
-        {
-            throw new ArgumentException($"The type {typeof(T).Name} is already registered as a Resource.", nameof(T));
         }
 
         int id = _resources.Count;
@@ -601,8 +664,6 @@ public sealed class WorldBuilder
             throw new InvalidOperationException($"A schema may register at most {ResourceMask.Capacity} Resources.");
         }
 
-        int size = Unsafe.SizeOf<T>();
-        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
         ulong hash = Hashing.Hash64.Compute(System.Runtime.InteropServices.MemoryMarshal.AsBytes(name.AsSpan()), ResourceLayoutHashSeed);
         hash = Hashing.Hash64.Combine(hash, (ulong)size);
         hash = Hashing.Hash64.Combine(hash, (ulong)alignment);
@@ -610,7 +671,6 @@ public sealed class WorldBuilder
         var type = new ResourceType(id);
         _resources.Add(new ResourceDescriptor(type, name, size, alignment, hash, kind, persistent));
         _resourceByName.Add(name, id);
-        _resourceByClrType.Add(typeof(T), id);
         _resourceOwners.Add(_currentPlugin);
         return type;
     }

@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Native: the Native AOT shared library that exposes the C ABI (spec section 8; TASK-28). The host, the
+    function table and the header generator live in Colony.Plugins (Native/); this project only exports
+    colony_get_api over that table and carries the checked-in generated header colony.h (the Colony.Native tests
+    fail when it drifts from the ABI definition).
+    Publish:  dotnet publish src/Colony.Native -c Release -r win-x64   (or linux-x64)
+    Output:   artifacts/publish/Colony.Native/release_<rid>/Colony.Native.dll (.so) and colony.h beside it
+    A managed host that loads C code in-process does not need this library: Colony.Plugins.Native.ColonyAbi.Table is the same table.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework C ABI: Native AOT shared library exporting colony_get_api, with the generated colony.h.</Description>
+    <RootNamespace>Colony.Native</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+    <!-- A shared library has no entry point; the SDK still wants an OutputType for NativeLib. -->
+    <OutputType>Library</OutputType>
+    <IsPackable>true</IsPackable>
+    <!-- The NativeLib publish copies no XML doc file into the RID output; the public surface is colony.h, not managed docs. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Plugins\Colony.Plugins.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The header travels with the library: in the package and next to the published binary. -->
+    <None Include="colony.h" Pack="true" PackagePath="build\native\include\" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

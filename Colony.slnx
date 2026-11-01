@@ -10,6 +10,7 @@
     <Project Path="src/Colony.Diagnostics/Colony.Diagnostics.csproj" />
     <Project Path="src/Colony.Fields/Colony.Fields.csproj" />
     <Project Path="src/Colony.Generators/Colony.Generators.csproj" />
+    <Project Path="src/Colony.Native/Colony.Native.csproj" />
     <Project Path="src/Colony.Pathfinding/Colony.Pathfinding.csproj" />
     <Project Path="src/Colony.Persistence/Colony.Persistence.csproj" />
     <Project Path="src/Colony.Plugins/Colony.Plugins.csproj" />
@@ -23,6 +24,7 @@
     <Project Path="tests/Colony.Fields.Tests/Colony.Fields.Tests.csproj" />
     <Project Path="tests/Colony.Generated.Tests/Colony.Generated.Tests.csproj" />
     <Project Path="tests/Colony.Generators.Tests/Colony.Generators.Tests.csproj" />
+    <Project Path="tests/Colony.Native.Tests/Colony.Native.Tests.csproj" />
     <Project Path="tests/Colony.Pathfinding.Tests/Colony.Pathfinding.Tests.csproj" />
     <Project Path="tests/Colony.Persistence.Tests/Colony.Persistence.Tests.csproj" />
     <Project Path="tests/Colony.Plugins.Tests/Colony.Plugins.Tests.csproj" />

@@ -6,7 +6,7 @@ public static class ColonyApi
     /// <summary>The C# API version a Plugin compiles against (<see cref="PluginManifest.RequiredApiVersion"/>). No compatibility promise during 0.x.</summary>
     public const int Version = 1;
 
-    /// <summary>The C ABI version (spec section 8.2); the host is a later ticket.</summary>
+    /// <summary>The C ABI version (spec section 8): the <c>COLONY_ABI_VERSION</c> of <c>colony.h</c>, hosted by Colony.Plugins and exported by Colony.Native.</summary>
     public const int AbiVersion = 1;
 }
 
@@ -26,6 +26,12 @@ public sealed record PluginManifest
 
     /// <summary>The <see cref="ColonyApi.Version"/> the Plugin needs; a newer requirement than the host fails at World build.</summary>
     public int RequiredApiVersion { get; init; } = ColonyApi.Version;
+
+    /// <summary>
+    /// The <see cref="ColonyApi.AbiVersion"/> a Native Plugin was built against (its <c>colony_plugin_desc.abi_version</c>),
+    /// or 0 for a C# Plugin. Recorded in the schema and in saves; a newer version than the host fails at World build.
+    /// </summary>
+    public int AbiVersion { get; init; }
 
     /// <summary>Ids of Plugins that must register before this one; they may be replaced or patched by it.</summary>
     public IReadOnlyList<string> Dependencies { get; init; } = [];
