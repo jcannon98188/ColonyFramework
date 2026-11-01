@@ -6,16 +6,24 @@ namespace Colony.Fields;
 /// <summary>
 /// A World's Fields (spec section 5.1): the chunk grid, every Field's storage, per-chunk per-Field change
 /// versions and the change feed. Created once per World by <see cref="FieldsBuilder"/>; fetch it with
-/// <see cref="WorldFieldsExtensions.Fields"/>. Fields are CPU-authoritative in v1 and all chunks are
-/// resident (the "never unload" policy); residency transitions arrive with the streaming tickets.
+/// <see cref="WorldFieldsExtensions.Fields"/>. Fields are CPU-authoritative in v1. Every chunk is Active until a
+/// <see cref="ChunkResidencyManager"/> (spec section 5.3) moves it: an Unloaded chunk's cells leave the storage and
+/// live on as exactly their save section (<see cref="UnloadCells"/>), or as nothing at all when the chunk can be
+/// regenerated unchanged from (seed, coordinate).
 /// </summary>
 public sealed class FieldSet : IWorldExtension
 {
+    /// <summary>Name of the residency section (one byte per chunk); written only when some chunk is not Active, so saves without streaming are unchanged.</summary>
+    internal const string ResidencySection = "residency";
+
     private readonly ChunkLayout _layout;
     private readonly FieldDescriptor[] _fields;
     private readonly Type[] _cellTypes;
     private readonly FieldStorage[] _storage;
+    private readonly byte[][] _initial;
     private readonly uint[][] _versions;
+    private readonly ChunkResidency[] _residency;
+    private readonly byte[]?[][] _stored;
     private bool _disposed;
 
     internal FieldSet(World world, ChunkLayout layout, List<FieldDescriptor> fields, List<Type> cellTypes, List<byte[]> initialValues)
@@ -24,12 +32,16 @@ public sealed class FieldSet : IWorldExtension
         _layout = layout;
         _fields = [.. fields];
         _cellTypes = [.. cellTypes];
+        _initial = [.. initialValues];
         _storage = new FieldStorage[_fields.Length];
         _versions = new uint[_fields.Length][];
+        _stored = new byte[]?[_fields.Length][];
+        _residency = new ChunkResidency[layout.ChunkCount];
         for (int i = 0; i < _fields.Length; i++)
         {
             _storage[i] = new CpuFieldStorage(_fields[i].CellSize, layout.ChunkCount, initialValues[i]);
             _versions[i] = new uint[layout.ChunkCount];
+            _stored[i] = new byte[]?[layout.ChunkCount];
         }
     }
 
@@ -76,11 +88,114 @@ public sealed class FieldSet : IWorldExtension
         return _layout.OrdinalOf(ChunkCoord.OfTile(x, y, z));
     }
 
-    /// <summary>Residency of a chunk (spec section 5.3). Every chunk is Active in v1; the seam exists for the streaming tickets.</summary>
-    public ChunkResidency ResidencyOf(int ordinal)
+    /// <summary>Residency of a chunk (spec section 5.3): Active unless a <see cref="ChunkResidencyManager"/> moved it.</summary>
+    public ChunkResidency ResidencyOf(int ordinal) => _residency[ordinal];
+
+    /// <summary>True when an Unloaded chunk's cells are kept as their save section (false: resident, or regenerable unchanged).</summary>
+    public bool HasStoredCells(int ordinal) => _fields.Length > 0 && _stored[0][ordinal] is not null;
+
+    /// <summary>The residency manager of this World, when the schema registered one (<see cref="ResidencyRegistration.AddResidency"/>).</summary>
+    public ChunkResidencyManager? Residency { get; internal set; }
+
+    internal void SetResidency(int ordinal, ChunkResidency state) => _residency[ordinal] = state;
+
+    /// <summary>
+    /// Takes an Unloaded chunk's cells out of the storage (spec section 5.3): with <paramref name="store"/> each
+    /// Field's chunk is kept as exactly its save section payload; without, nothing is kept (the manager will
+    /// regenerate it). The storage goes back to the initial uniform value and frees the dense block. The caller
+    /// marks the chunk Unloaded afterwards.
+    /// </summary>
+    internal void UnloadCells(int ordinal, bool store)
     {
-        _ = _layout.CoordOf(ordinal);
-        return ChunkResidency.Active;
+        for (int f = 0; f < _storage.Length; f++)
+        {
+            _stored[f][ordinal] = store ? EncodeSection(_storage[f], ordinal) : null;
+            _storage[f].Release(ordinal, _initial[f]);
+        }
+    }
+
+    /// <summary>Puts stored cells back (the chunk must already be resident); false when nothing was stored for the chunk.</summary>
+    internal bool ReloadStoredCells(int ordinal)
+    {
+        if (!HasStoredCells(ordinal))
+        {
+            return false;
+        }
+
+        for (int f = 0; f < _storage.Length; f++)
+        {
+            DecodeSection(f, ordinal, _stored[f][ordinal]!, SectionName(f, ordinal));
+            _stored[f][ordinal] = null;
+            MarkWritten(f, ordinal);
+        }
+
+        return true;
+    }
+
+    /// <summary>The save-section encoding of one chunk: a kind byte (0 uniform, 1 dense) then the uniform value or the cells in storage order.</summary>
+    private static byte[] EncodeSection(FieldStorage storage, int ordinal)
+    {
+        if (storage.IsUniform(ordinal))
+        {
+            var payload = new byte[1 + storage.CellSize];
+            storage.UniformValue(ordinal).CopyTo(payload.AsSpan(1));
+            return payload;
+        }
+
+        var cells = storage.ReadCells(ordinal);
+        var dense = new byte[1 + cells.Length];
+        dense[0] = 1;
+        cells.CopyTo(dense.AsSpan(1));
+        return dense;
+    }
+
+    private void DecodeSection(int f, int ordinal, ReadOnlySpan<byte> payload, string name)
+    {
+        var storage = _storage[f];
+        int chunkBytes = storage.CellSize * FieldChunk.CellCount;
+        if (payload.Length == 1 + storage.CellSize && payload[0] == 0)
+        {
+            storage.Fill(ordinal, payload[1..]);
+        }
+        else if (payload.Length == 1 + chunkBytes && payload[0] == 1)
+        {
+            payload[1..].CopyTo(storage.WriteCells(ordinal));
+        }
+        else
+        {
+            throw new InvalidDataException($"Field '{_fields[f].Name}' chunk {ordinal}: section '{name}' holds {payload.Length} bytes, not a uniform value ({1 + storage.CellSize}) or a dense chunk ({1 + chunkBytes}).");
+        }
+    }
+
+    private byte[]? _expandScratch;
+
+    /// <summary>Hashes a stored section exactly as the dense chunk with the same cells would hash.</summary>
+    private void HashStored(int f, ReadOnlySpan<byte> payload, ref Hash64State state)
+    {
+        int chunkBytes = _storage[f].CellSize * FieldChunk.CellCount;
+        if (payload[0] == 1)
+        {
+            state.Append(payload[1..]);
+            return;
+        }
+
+        if (_expandScratch is null || _expandScratch.Length < chunkBytes)
+        {
+            _expandScratch = new byte[chunkBytes];
+        }
+
+        var cells = _expandScratch.AsSpan(0, chunkBytes);
+        var value = payload[1..];
+        value.CopyTo(cells);
+        int filled = value.Length;
+        while (filled < cells.Length)
+        {
+            int copy = Math.Min(filled, cells.Length - filled);
+            cells[..copy].CopyTo(cells[filled..]);
+            filled += copy;
+        }
+
+        state.Append(cells);
     }
 
     public FieldDescriptor Describe<T>(Field<T> field)
@@ -191,7 +306,17 @@ public sealed class FieldSet : IWorldExtension
         where T : unmanaged
         => _versions[Validate(field)][ordinal];
 
-    internal void MarkWritten(int fieldId, int ordinal) => _versions[fieldId][ordinal] = CurrentVersion;
+    internal void MarkWritten(int fieldId, int ordinal)
+    {
+        if (_residency[ordinal] == ChunkResidency.Unloaded)
+        {
+            throw new InvalidOperationException($"Chunk {_layout.CoordOf(ordinal)} is Unloaded; its cells are not resident. Writes reach only Active and Hibernating chunks (spec section 5.3).");
+        }
+
+        _versions[fieldId][ordinal] = CurrentVersion;
+    }
+
+    internal byte[] InitialValueOf(int fieldId) => _initial[fieldId];
 
     internal uint[] VersionsOf(int fieldId) => _versions[fieldId];
 
@@ -257,7 +382,11 @@ public sealed class FieldSet : IWorldExtension
         }
     }
 
-    /// <summary>Every Field in id order, every chunk in Morton order, cells in storage order (spec section 6). Versions are excluded.</summary>
+    /// <summary>
+    /// Every Field in id order, every chunk in Morton order, cells in storage order (spec section 6). Versions and
+    /// residency are excluded (the manager hashes residency). An Unloaded chunk hashes from its stored section, or
+    /// from a regeneration when it was dropped unchanged, so the hash equals the never-unloaded World's.
+    /// </summary>
     void IWorldExtension.Hash(ref Hash64State state)
     {
         for (int f = 0; f < _storage.Length; f++)
@@ -265,6 +394,20 @@ public sealed class FieldSet : IWorldExtension
             var storage = _storage[f];
             for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
             {
+                if (_residency[ordinal] == ChunkResidency.Unloaded)
+                {
+                    if (_stored[f][ordinal] is { } payload)
+                    {
+                        HashStored(f, payload, ref state);
+                        continue;
+                    }
+
+                    if (Residency is { } manager && manager.TryHashRegenerated(f, ordinal, ref state))
+                    {
+                        continue;
+                    }
+                }
+
                 storage.HashChunk(ordinal, ref state);
             }
         }
@@ -272,36 +415,44 @@ public sealed class FieldSet : IWorldExtension
 
     /// <summary>
     /// One section per Field chunk (spec section 7.1), named <c>&lt;field&gt;/&lt;ordinal&gt;</c>: a kind byte (0 uniform,
-    /// 1 dense) then the uniform value or the cells in storage order. Versions and the change feed are not saved.
+    /// 1 dense) then the uniform value or the cells in storage order. An Unloaded chunk writes its stored section
+    /// as is, or no section when it is regenerable unchanged (never-generated chunks are not stored, spec section
+    /// 5.3). Residency goes in <see cref="ResidencySection"/> when any chunk is not Active. Versions and the change
+    /// feed are not saved.
     /// </summary>
     void IWorldExtension.Save(ExtensionStateWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        byte[]? buffer = null;
+        bool anyNotActive = false;
+        var residency = new byte[_layout.ChunkCount];
+        for (int ordinal = 0; ordinal < residency.Length; ordinal++)
+        {
+            residency[ordinal] = (byte)_residency[ordinal];
+            anyNotActive |= _residency[ordinal] != ChunkResidency.Active;
+        }
+
+        if (anyNotActive)
+        {
+            writer.WriteSection(ResidencySection, residency);
+        }
+
         for (int f = 0; f < _storage.Length; f++)
         {
             var storage = _storage[f];
-            int chunkBytes = storage.CellSize * FieldChunk.CellCount;
-            if (buffer is null || buffer.Length < chunkBytes + 1)
-            {
-                buffer = new byte[chunkBytes + 1];
-            }
-
             for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
             {
                 string name = SectionName(f, ordinal);
-                if (storage.IsUniform(ordinal))
+                if (_residency[ordinal] == ChunkResidency.Unloaded)
                 {
-                    buffer[0] = 0;
-                    storage.UniformValue(ordinal).CopyTo(buffer.AsSpan(1));
-                    writer.WriteSection(name, buffer.AsSpan(0, 1 + storage.CellSize));
+                    if (_stored[f][ordinal] is { } payload)
+                    {
+                        writer.WriteSection(name, payload);
+                    }
+
+                    continue;
                 }
-                else
-                {
-                    buffer[0] = 1;
-                    storage.ReadCells(ordinal).CopyTo(buffer.AsSpan(1));
-                    writer.WriteSection(name, buffer.AsSpan(0, 1 + chunkBytes));
-                }
+
+                writer.WriteSection(name, EncodeSection(storage, ordinal));
             }
         }
     }
@@ -309,28 +460,54 @@ public sealed class FieldSet : IWorldExtension
     void IWorldExtension.Load(ExtensionStateReader reader)
     {
         ArgumentNullException.ThrowIfNull(reader);
+        if (reader.TryGetSection(ResidencySection, out var states))
+        {
+            if (states.Length != _layout.ChunkCount)
+            {
+                throw new InvalidDataException($"Section '{ResidencySection}' holds {states.Length} chunk states, not {_layout.ChunkCount}.");
+            }
+
+            for (int ordinal = 0; ordinal < states.Length; ordinal++)
+            {
+                if (states[ordinal] > (byte)ChunkResidency.Unloaded)
+                {
+                    throw new InvalidDataException($"Section '{ResidencySection}' chunk {ordinal} has residency {states[ordinal]}.");
+                }
+
+                _residency[ordinal] = (ChunkResidency)states[ordinal];
+            }
+        }
+        else
+        {
+            Array.Fill(_residency, ChunkResidency.Active);
+        }
+
         for (int f = 0; f < _storage.Length; f++)
         {
             var storage = _storage[f];
-            int chunkBytes = storage.CellSize * FieldChunk.CellCount;
             for (int ordinal = 0; ordinal < storage.ChunkCount; ordinal++)
             {
                 string name = SectionName(f, ordinal);
-                var payload = reader.Section(name);
-                if (payload.Length == 1 + storage.CellSize && payload[0] == 0)
+                _versions[f][ordinal] = 0;
+                _stored[f][ordinal] = null;
+                if (!reader.TryGetSection(name, out var payload))
                 {
-                    storage.Fill(ordinal, payload[1..]);
-                }
-                else if (payload.Length == 1 + chunkBytes && payload[0] == 1)
-                {
-                    payload[1..].CopyTo(storage.WriteCells(ordinal));
-                }
-                else
-                {
-                    throw new InvalidDataException($"Field '{_fields[f].Name}' chunk {ordinal}: section '{name}' holds {payload.Length} bytes, not a uniform value ({1 + storage.CellSize}) or a dense chunk ({1 + chunkBytes}).");
+                    if (_residency[ordinal] == ChunkResidency.Unloaded)
+                    {
+                        continue;
+                    }
+
+                    throw new InvalidDataException($"The save has no section '{name}' for extension '{reader.ExtensionName}'.");
                 }
 
-                _versions[f][ordinal] = 0;
+                if (_residency[ordinal] == ChunkResidency.Unloaded)
+                {
+                    // Exactly its save section (spec section 5.3): kept as bytes, never materialised until reloaded.
+                    _stored[f][ordinal] = payload.ToArray();
+                    continue;
+                }
+
+                DecodeSection(f, ordinal, payload, name);
             }
         }
     }
@@ -357,7 +534,7 @@ public sealed class FieldSet : IWorldExtension
     }
 }
 
-/// <summary>Residency state of a chunk (spec section 5.3). Only <see cref="Active"/> occurs until the streaming tickets land.</summary>
+/// <summary>Residency state of a chunk (spec section 5.3); transitions happen only in the Streaming Phase (<see cref="ChunkResidencyManager"/>).</summary>
 public enum ChunkResidency
 {
     /// <summary>Resident and simulated.</summary>

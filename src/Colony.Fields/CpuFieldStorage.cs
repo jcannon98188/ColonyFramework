@@ -81,6 +81,18 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
         _isUniform[ordinal] = true;
     }
 
+    public override void Release(int ordinal, ReadOnlySpan<byte> value)
+    {
+        Fill(ordinal, value);
+        byte* cells = _dense[ordinal];
+        if (cells is not null)
+        {
+            NativeMemory.AlignedFree(cells);
+            _dense[ordinal] = null;
+            _allocated -= (long)_chunkBytes;
+        }
+    }
+
     public override bool CellsEqual(int ordinal, ReadOnlySpan<byte> cells)
     {
         if (cells.Length != (int)_chunkBytes)
