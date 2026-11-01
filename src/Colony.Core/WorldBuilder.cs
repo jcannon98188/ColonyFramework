@@ -33,6 +33,11 @@ public sealed class WorldBuilder
         ArgumentNullException.ThrowIfNull(extension);
         ThrowIfBuilt();
         ArgumentException.ThrowIfNullOrWhiteSpace(extension.Name, nameof(extension));
+        if (WorldHashTree.IsReservedGroup(extension.Name))
+        {
+            throw new ArgumentException($"'{extension.Name}' is a hash tree group name Core reserves ({string.Join(", ", WorldHashTree.ReservedGroups)}); an extension's name is its hash tree group.", nameof(extension));
+        }
+
         if (_extensions.Exists(e => string.Equals(e.Name, extension.Name, StringComparison.Ordinal)))
         {
             throw new ArgumentException($"An extension named '{extension.Name}' is already registered.", nameof(extension));

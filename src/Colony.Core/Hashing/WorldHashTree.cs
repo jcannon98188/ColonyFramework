@@ -170,6 +170,13 @@ public sealed class WorldHashTree
     /// <summary>The item under <see cref="ComponentsGroup"/> holding the Entity column of every chunk.</summary>
     public const string EntitiesItem = "(entities)";
 
+    private static readonly string[] ReservedGroupNames = [TickGroup, ComponentsGroup, ResourcesGroup, TablesGroup, RandomGroup];
+
+    /// <summary>The group names Core writes itself; a <see cref="WorldExtensionDefinition.Name"/> (which becomes the extension's group) may not be one of them.</summary>
+    public static ReadOnlySpan<string> ReservedGroups => ReservedGroupNames;
+
+    public static bool IsReservedGroup(string name) => Array.IndexOf(ReservedGroupNames, name) >= 0;
+
     public WorldHashTree(long tick, ulong schemaHash, ulong worldHash, IReadOnlyList<HashTreeNode> groups)
     {
         ArgumentNullException.ThrowIfNull(groups);
