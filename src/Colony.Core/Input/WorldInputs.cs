@@ -33,6 +33,8 @@ public sealed class WorldInputs
     private byte[] _currentBytes = new byte[256];
     private long _currentTick = -1;
     private long _nextTick;
+    private int[] _handlerIndex = new int[16];
+    private int _handlerCount;
 
     internal WorldInputs(World world)
     {
@@ -209,9 +211,54 @@ public sealed class WorldInputs
                 bytes += e.Length;
             }
 
+            ApplyPermissions(list);
             _currentTick = tick;
             _nextTick = tick + 1;
         }
+    }
+
+    /// <summary>
+    /// The permission check of TASK-35, at the canonical ordering step: each denied entry is flagged (it stays in
+    /// the list, so replay logs and lockstep frames still carry it), left out of the handler view, and reported
+    /// as <see cref="CommandRejected"/> with <see cref="CommandRejected.PermissionDenied"/> in canonical order.
+    /// The events go straight onto the rejection queue, so they are readable from the first Phase of this Tick.
+    /// </summary>
+    private unsafe void ApplyPermissions(Span<Entry> list)
+    {
+        var permissions = _schema.InputPermissions;
+        if (_handlerIndex.Length < list.Length)
+        {
+            Array.Resize(ref _handlerIndex, Math.Max(_handlerIndex.Length * 2, list.Length));
+        }
+
+        _handlerCount = 0;
+        for (int i = 0; i < list.Length; i++)
+        {
+            ref var e = ref list[i];
+            e.Denied = permissions.Resolve(e.Source, e.Type) == InputAccess.Deny;
+            if (!e.Denied)
+            {
+                _handlerIndex[_handlerCount++] = i;
+                continue;
+            }
+
+            var rejected = new CommandRejected(new InputSource(e.Source), e.Sequence, new InputCommandType(e.Type), CommandRejected.PermissionDenied);
+            _world.AppendEvent(_schema.CommandRejections.Id, (byte*)&rejected);
+        }
+    }
+
+    /// <summary>Entries handlers see this Tick (the canonical list minus denied ones).</summary>
+    internal int HandlerCount => _handlerCount;
+
+    /// <summary>The canonical index of the <paramref name="index"/>-th entry handlers see.</summary>
+    internal int HandlerIndex(int index)
+    {
+        if ((uint)index >= (uint)_handlerCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), index, "The handler view of the input list has no such entry.");
+        }
+
+        return _handlerIndex[index];
     }
 
     internal long CurrentTick => _currentTick;
@@ -260,6 +307,9 @@ public sealed class WorldInputs
         public int Type;
         public int Offset;
         public int Length;
+
+        /// <summary>Set at the Tick boundary when the source lacks permission for the command (TASK-35).</summary>
+        public bool Denied;
 
         public Entry(long tick, uint source, uint sequence, int type, int offset, int length)
         {
@@ -316,6 +366,9 @@ public readonly ref struct CanonicalInputs
             return new InputRecord(e.Tick, new InputSource(e.Source), e.Sequence, new InputCommandType(e.Type));
         }
     }
+
+    /// <summary>True when entry <paramref name="index"/> was rejected for lack of permission (TASK-35): handlers did not see it.</summary>
+    public bool IsDenied(int index) => _inputs.RecordAt(index).Denied;
 
     /// <summary>The command bytes of entry <paramref name="index"/> (exactly the registered size).</summary>
     public ReadOnlySpan<byte> Payload(int index) => _inputs.PayloadAt(index);

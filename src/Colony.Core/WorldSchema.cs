@@ -39,8 +39,10 @@ public sealed class WorldSchema
         Dictionary<Type, int> inputByClrType,
         Dictionary<string, int> inputByName,
         ResourceType? commandRejections,
-        List<Colony.Diagnostics.InspectorDescriptor> inspectors)
+        List<Colony.Diagnostics.InspectorDescriptor> inspectors,
+        InputPermissions inputPermissions)
     {
+        InputPermissions = inputPermissions;
         _inspectors = [.. inspectors];
         _inputCommands = [.. inputCommands];
         _inputByClrType = inputByClrType;
@@ -102,6 +104,12 @@ public sealed class WorldSchema
             hash = Hashing.Hash64.Combine(hash, input.LayoutHash);
         }
 
+        // Input permissions (TASK-35) follow, only when they restrict anything, so unrestricted schemas hash as before.
+        if (!inputPermissions.IsUnrestricted)
+        {
+            hash = Hashing.Hash64.Combine(hash, inputPermissions.Hash);
+        }
+
         Sizes = sizes;
         ResourceSizes = resourceSizes;
         NonFragmentingSlots = slots;
@@ -125,6 +133,9 @@ public sealed class WorldSchema
     public ulong SchemaHash { get; }
 
     public bool DebugValidation { get; }
+
+    /// <summary>Which source may issue which Input Command (TASK-35); unrestricted unless the builder or a Plugin declared permissions.</summary>
+    public InputPermissions InputPermissions { get; }
 
     /// <summary>Component sizes by id.</summary>
     internal int[] Sizes { get; }
