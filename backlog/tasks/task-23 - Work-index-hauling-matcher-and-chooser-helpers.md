@@ -1,9 +1,11 @@
 ---
 id: TASK-23
 title: 'Work index, hauling matcher and chooser helpers'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-11-01 16:09'
 labels:
   - ready-for-agent
   - implementation
