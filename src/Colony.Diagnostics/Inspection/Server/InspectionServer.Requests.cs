@@ -41,6 +41,7 @@ public sealed partial class InspectionServer
         "mutate" => Mutate(request),
         "snapshot" => Snapshot(),
         "diff" => Diff(request),
+        "hashtree" => HashTree(request),
         "shutdown" => Shutdown(),
         _ => throw new InspectionException("unknown-op", $"Unknown op '{op}'."),
     };
@@ -573,6 +574,12 @@ public sealed partial class InspectionServer
     private void EndRewind()
     {
         _player = null;
+        if (_rewound is not null && ReferenceEquals(_treeWorld, _rewound))
+        {
+            _tree = null;
+            _treeWorld = null;
+        }
+
         _rewound?.Dispose();
         _rewound = null;
     }
@@ -653,6 +660,46 @@ public sealed partial class InspectionServer
         using var other = WorldPersistence.Load(image, World.Schema, new LoadOptions { VerifyWorldHash = false, WorldOptions = new WorldOptions { WorkerThreads = 1 } });
         var report = WorldDiff.Compare(InspectedWorld, other, (int)Optional(request, "limit", 64));
         return report.ToValue();
+    }
+
+    private WorldHashTree? _tree;
+    private World? _treeWorld;
+
+    /// <summary>
+    /// The hierarchical World hash (TASK-32): the root level (groups' names and hashes), one group's items with
+    /// <c>group</c>, one item's packed leaves with <c>group</c> and <c>item</c>, or the whole tree with <c>full</c>.
+    /// A client walking two hosts asks level by level and only for branches whose hashes differ. The tree is reused
+    /// by later requests while the World hash is unchanged (one World hash per request instead of one tree build).
+    /// </summary>
+    private InspectValue HashTree(InspectValue request)
+    {
+        var world = InspectedWorld;
+        if (_tree is null || !ReferenceEquals(_treeWorld, world) || _tree.WorldHash != world.Hash())
+        {
+            _tree = world.HashTree();
+            _treeWorld = world;
+        }
+
+        if (request["full"].Kind == InspectValueKind.Boolean && request["full"].AsBoolean)
+        {
+            return HashTreeFile.ToValue(_tree);
+        }
+
+        if (request["group"].IsNull)
+        {
+            return HashTreeFile.RootValue(_tree);
+        }
+
+        string groupName = request["group"].AsText;
+        var group = _tree.Group(groupName) ?? throw new InspectionException("not-found", $"No hash tree group '{groupName}'.");
+        if (request["item"].IsNull)
+        {
+            return HashTreeFile.GroupValue(group, withItems: false);
+        }
+
+        string itemName = request["item"].AsText;
+        var item = group.Child(itemName) ?? throw new InspectionException("not-found", $"No item '{itemName}' in hash tree group '{groupName}'.");
+        return HashTreeFile.ItemValue(item);
     }
 
     private InspectValue Shutdown()
