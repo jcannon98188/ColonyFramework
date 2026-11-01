@@ -25,7 +25,8 @@ public sealed class StreamingScenario : Scenario
         public int Heading;
     }
 
-    public override string Name => "streaming";
+    /// <summary><c>streaming</c>, or <c>streaming-delayed</c> / <c>streaming-budget</c> for the TASK-27 variants (their own golden files).</summary>
+    public override string Name => LoadDelayTicks > 0 ? "streaming-delayed" : ResidentChunkBudget > 0 ? "streaming-budget" : "streaming";
 
     public override ulong Seed { get; init; } = DefaultSeed;
 
@@ -34,6 +35,21 @@ public sealed class StreamingScenario : Scenario
 
     /// <summary>Force a resident chunk out and back in after every this many Ticks; 0 disables the round trips.</summary>
     public int RoundTripEvery { get; init; } = 4;
+
+    /// <summary>TASK-27 AC #1/#5: loads apply this many Ticks after their request (0 = synchronous, the TASK-26 golden).</summary>
+    public int LoadDelayTicks { get; init; }
+
+    /// <summary>Hibernating ring width; the delayed variant uses 2 so the moving focus finds its next ring resident.</summary>
+    public int RingWidth { get; init; } = 1;
+
+    /// <summary>TASK-27 AC #2: resident-chunk budget (0 = none).</summary>
+    public int ResidentChunkBudget { get; init; }
+
+    /// <summary>Milliseconds the chunk source sleeps per generated chunk: a slow loader whose stalls must not change the hashes.</summary>
+    public int SourceDelayMs { get; init; }
+
+    /// <summary>The streaming totals of the last World this scenario populated (the stall count of a slow run).</summary>
+    public StreamingCounters LastCounters { get; private set; }
 
     public override int InitialEntityCapacity => 2048;
 
@@ -46,7 +62,14 @@ public sealed class StreamingScenario : Scenario
         var fields = builder.AddFields(Size);
         var height = fields.AddField<int>("height");
         fields.AddField<byte>("soil");
-        builder.AddResidency(fields, tilePos, new ResidencyOptions { InitialResidency = ChunkResidency.Unloaded, MaxFocusPoints = 4 });
+        builder.AddResidency(fields, tilePos, new ResidencyOptions
+        {
+            InitialResidency = ChunkResidency.Unloaded,
+            MaxFocusPoints = 4,
+            LoadDelayTicks = LoadDelayTicks,
+            RingWidth = RingWidth,
+            ResidentChunkBudget = ResidentChunkBudget,
+        });
 
         builder
             .AddSystem(Stencil.DoubleBuffered("Erode", height, Diffuse, boundary: 0))
@@ -79,7 +102,7 @@ public sealed class StreamingScenario : Scenario
     public override void Populate(World world)
     {
         ArgumentNullException.ThrowIfNull(world);
-        world.Fields().ChunkSource = new ChunkSource(world, Seed);
+        world.Fields().ChunkSource = new ChunkSource(world, Seed, SourceDelayMs);
         var tilePos = world.Schema.Component<TilePos>();
         var creature = world.Schema.Component<Creature>();
         var pinned = world.Schema.Component<Pinned>();
@@ -95,7 +118,7 @@ public sealed class StreamingScenario : Scenario
     public override void OnLoaded(World world)
     {
         ArgumentNullException.ThrowIfNull(world);
-        world.Fields().ChunkSource = new ChunkSource(world, Seed);
+        world.Fields().ChunkSource = new ChunkSource(world, Seed, SourceDelayMs);
     }
 
     public override void Advance(World world)
@@ -108,6 +131,7 @@ public sealed class StreamingScenario : Scenario
         }
 
         world.Tick();
+        LastCounters = world.Residency().Streaming;
         if (RoundTripEvery > 0 && tick % RoundTripEvery == RoundTripEvery - 1)
         {
             RoundTrip(world, tick);
@@ -204,21 +228,23 @@ public sealed class StreamingScenario : Scenario
         }
     }
 
-    /// <summary>A pure function of (seed, chunk coordinate): a bumpy height map, a per-chunk soil value and three creatures per chunk.</summary>
+    /// <summary>A pure function of (seed, chunk coordinate): a bumpy height map, a per-chunk soil value and three creatures per chunk. Thread-safe (no shared scratch), as delayed loads require.</summary>
     private sealed class ChunkSource : IChunkSource
     {
         private const ulong Key = 0x4348_554E_4B53_5243UL; // "CHUNKSRC"
         private const int CreaturesPerChunk = 3;
 
         private readonly ulong _seed;
+        private readonly int _delayMs;
         private readonly Field<int> _height;
         private readonly Field<byte> _soil;
         private readonly ComponentType _tilePos;
         private readonly ComponentType _creature;
 
-        public ChunkSource(World world, ulong seed)
+        public ChunkSource(World world, ulong seed, int delayMs)
         {
             _seed = seed;
+            _delayMs = delayMs;
             var fields = world.Fields();
             _height = fields.Field<int>("height");
             _soil = fields.Field<byte>("soil");
@@ -228,6 +254,11 @@ public sealed class StreamingScenario : Scenario
 
         public void GenerateCells(ChunkCoord coord, ChunkCellBuffer cells)
         {
+            if (_delayMs > 0)
+            {
+                Thread.Sleep(_delayMs); // a slow loader: its stalls are counted, the state is the same
+            }
+
             var random = Stream(coord);
             var height = cells.Cells(_height);
             for (int i = 0; i < height.Length; i++)
