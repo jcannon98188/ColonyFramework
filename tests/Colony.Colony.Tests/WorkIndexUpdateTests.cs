@@ -70,6 +70,28 @@ public sealed class WorkIndexUpdateTests
     }
 
     [Fact]
+    public void Host_writes_through_World_Get_between_Ticks_update_the_index_at_the_next_Late_update()
+    {
+        using var fixture = new WorkTestWorld(new WorldSize(64, 64, 1));
+        var world = fixture.World;
+        var origin = new TilePos(0, 0, 0);
+        var ids = fixture.SpawnItems([(new TilePos(1, 0, 0), WorkTestWorld.Haul), (new TilePos(2, 0, 0), WorkTestWorld.Haul)]);
+        world.Tick();
+
+        // Taken by the host: no command buffer, no System.
+        ref var item = ref world.Get<WorkItem>(ids[0], fixture.Index.WorkItem);
+        item = item.WithAvailable(false);
+        world.Tick();
+        Assert.Equal([ids[1]], fixture.Nearest(origin, 10, 4, WorkTestWorld.Haul).Select(h => h.Entity).ToArray());
+
+        // Moved by the host.
+        world.Get<TilePos>(ids[1], fixture.TilePos) = new TilePos(40, 40, 0);
+        world.Tick();
+        Assert.Empty(fixture.Nearest(origin, 10, 4, WorkTestWorld.Haul));
+        Assert.Equal([ids[1]], fixture.Nearest(new TilePos(40, 40, 0), 0, 4, WorkTestWorld.Haul).Select(h => h.Entity).ToArray());
+    }
+
+    [Fact]
     public void A_moved_item_is_found_at_its_new_tile_and_a_retyped_item_under_its_new_type()
     {
         using var fixture = new WorkTestWorld(new WorldSize(64, 64, 1));
