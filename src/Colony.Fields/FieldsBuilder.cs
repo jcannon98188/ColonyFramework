@@ -89,6 +89,23 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
         return new Field<T>(id);
     }
 
+    /// <summary>The Fields registered so far, in id order (for packages that plan over Fields by name, such as the generation pipeline).</summary>
+    public IReadOnlyList<FieldDescriptor> Descriptors => _fields;
+
+    /// <summary>The descriptor of a registered Field by name, or false when none is registered under it.</summary>
+    public bool TryDescribe(string name, out FieldDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (_byName.TryGetValue(name, out int id))
+        {
+            descriptor = _fields[id];
+            return true;
+        }
+
+        descriptor = default;
+        return false;
+    }
+
     public override void Freeze()
     {
         if (_frozen)
