@@ -25,6 +25,8 @@ public sealed class PathfindingService : IWorldExtension
     private readonly MovementClassDescriptor[] _descriptors;
     private readonly RegionMap?[] _maps;
     private readonly Lock _buildLock = new();
+    private readonly Lock _searchLock = new();
+    private readonly PathSearch _search = new();
     private FieldSet? _fields;
     private bool _inTick;
     private bool _disposed;
@@ -99,6 +101,35 @@ public sealed class PathfindingService : IWorldExtension
         var a = map.RegionOf(from);
         return !a.IsNone && a == map.RegionOf(to);
     }
+
+    /// <summary>
+    /// Finds a path now with two-level HPA* (spec section 9.1): the result's waypoints are the start, the chunk
+    /// transitions crossed and the goal, copied into <paramref name="waypoints"/> (truncated when it is short;
+    /// <see cref="PathQuery.WaypointCount"/> is the full count). Consecutive waypoints lie in one chunk or are
+    /// face-adjacent across a border; refine between them with the next-step query or the path-follow
+    /// helper. Serialised on one search scratch, so prefer the deferred request queue from Systems; allocation
+    /// free once warm. The cost is in tiles (one per face move) and within a few percent of optimal.
+    /// </summary>
+    public PathQuery FindPath(TilePos from, TilePos to, MovementClass movementClass, Span<TilePos> waypoints)
+    {
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            var status = _search.Run(map, from, to, Residency);
+            if (status == PathStatus.Found)
+            {
+                var found = _search.Waypoints;
+                found[..Math.Min(found.Length, waypoints.Length)].CopyTo(waypoints);
+            }
+
+            return new PathQuery(status, _search.Cost, _search.WaypointCount, _search.MissingChunk, _search.WorkUnits);
+        }
+    }
+
+    /// <summary>Residency of a chunk as the search sees it; tests override it until the streaming manager (TASK-25) reports Unloaded chunks.</summary>
+    internal Func<int, ChunkResidency>? ResidencyOverride { get; set; }
+
+    private ChunkResidency Residency(int ordinal) => ResidencyOverride is { } f ? f(ordinal) : Fields.ResidencyOf(ordinal);
 
     private FieldSet Fields => _fields ??= World.Fields();
 
