@@ -1,9 +1,11 @@
 ---
 id: TASK-31
 title: Lockstep test network with fault injection
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:28'
+updated_date: '2026-11-01 21:31'
 labels:
   - ready-for-agent
   - implementation
