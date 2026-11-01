@@ -1,9 +1,11 @@
 ---
 id: TASK-34
 title: Lockstep session state machine (transport-free)
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:30'
+updated_date: '2026-11-01 21:58'
 labels:
   - ready-for-agent
   - implementation

@@ -29,11 +29,15 @@ public static class InspectCli
           mutate create COMPONENT... | destroy ID | add ID COMPONENT HEX | remove ID COMPONENT
           snapshot OUT.save                 save the inspected World to a file
           diff SAVE                         the inspected World against a save, Entity by Entity
+          hashtree [OUT.tree]               the hierarchical World hash (root level), or save the whole tree
+          desync --port2 N --token2 T       localise a desync between this host and a second one, level by level
+          desync A.tree                     localise a desync between a saved tree and this host
           raw JSON                          send one request map as JSON
           shutdown                          ask the host to stop
         offline commands:
           diff A.save B.save                compare two save manifests
           desync A.trail B.trail            first diverging Tick, Phase and System of two hash trails
+          desync A.tree B.tree              diverging chunks, Fields and Components of two hash trees
         """;
 
     private static KeyValuePair<string, InspectValue> P(string key, InspectValue value) => new(key, value);
@@ -82,7 +86,7 @@ public static class InspectCli
             switch (command)
             {
                 case "desync":
-                    return Desync(rest, output, json);
+                    return Desync(rest, named, output, json);
                 case "diff" when rest.Count == 2:
                     return OfflineDiff(rest, output, json);
             }
@@ -94,6 +98,12 @@ public static class InspectCli
             {
                 File.WriteAllBytes(rest[0], result["save"].AsBytes.ToArray());
                 result = InspectValue.Map(P("tick", result["tick"]), P("path", Path.GetFullPath(rest[0])), P("bytes", result["save"].AsBytes.Length));
+            }
+            else if (command == "hashtree" && rest.Count > 0)
+            {
+                byte[] bytes = HashTreeFile.From(HashTreeFile.FromValue(result)).Encode();
+                File.WriteAllBytes(rest[0], bytes);
+                result = InspectValue.Map(P("tick", result["tick"]), P("hash", result["hash"]), P("path", Path.GetFullPath(rest[0])), P("bytes", bytes.Length));
             }
 
             Print(output, result, json);
@@ -251,6 +261,13 @@ public static class InspectCli
             case "snapshot":
                 Need(1, "OUT.save");
                 break;
+            case "hashtree":
+                if (args.Count > 0)
+                {
+                    entries.Add(P("full", true));
+                }
+
+                break;
             case "diff":
                 Need(1, "SAVE (or two saves for an offline diff)");
                 entries.Add(P("save", InspectValue.From(File.ReadAllBytes(args[0]))));
@@ -271,14 +288,97 @@ public static class InspectCli
         return InspectValue.Map(entries);
     }
 
-    private static int Desync(List<string> args, TextWriter output, bool json)
+    /// <summary>
+    /// Three shapes: two files (two hash trails, or two hash trees), one tree file against a live host
+    /// (<c>--port/--token</c>), or two live hosts (<c>--port/--token</c> and <c>--port2/--token2</c>) walked level by level.
+    /// </summary>
+    private static int Desync(List<string> args, Dictionary<string, string> named, TextWriter output, bool json)
     {
-        if (args.Count != 2)
+        const string usage = "usage: colony-inspect desync A.trail B.trail | desync A.tree B.tree | desync A.tree --port N --token T | desync --port N --token T --port2 N --token2 T";
+        if (args.Count == 2)
         {
-            throw new UsageException("usage: colony-inspect desync A.trail B.trail");
+            byte[] left = File.ReadAllBytes(args[0]);
+            byte[] right = File.ReadAllBytes(args[1]);
+            if (HashTreeFile.IsTree(left) || HashTreeFile.IsTree(right))
+            {
+                return PrintTreeComparison(WorldHashTree.Compare(HashTreeFile.Decode(left).Tree, HashTreeFile.Decode(right).Tree), output, json);
+            }
+
+            return PrintTrailComparison(HashTrailFile.Compare(HashTrailFile.Decode(left), HashTrailFile.Decode(right)), output, json);
         }
 
-        var comparison = HashTrailFile.Compare(HashTrailFile.ReadFile(args[0]), HashTrailFile.ReadFile(args[1]));
+        if (args.Count == 1)
+        {
+            var tree = HashTreeFile.ReadFile(args[0]).Tree;
+            using var client = Connect(named);
+            return PrintTreeComparison(HashTreeFile.CompareLive(tree, client), output, json);
+        }
+
+        if (args.Count == 0 && named.TryGetValue("port2", out string? port2))
+        {
+            var second = new Dictionary<string, string>(StringComparer.Ordinal) { ["port"] = port2 };
+            if (named.TryGetValue("token2", out string? token2))
+            {
+                second["token"] = token2;
+            }
+            else if (named.TryGetValue("token", out string? token))
+            {
+                second["token"] = token;
+            }
+
+            using var left = Connect(named);
+            using var right = Connect(second);
+            return PrintTreeComparison(HashTreeFile.CompareLive(left, right), output, json);
+        }
+
+        throw new UsageException(usage);
+    }
+
+    private static int PrintTreeComparison(HashTreeComparison comparison, TextWriter output, bool json)
+    {
+        if (json)
+        {
+            var differences = new List<InspectValue>(comparison.Differences.Count);
+            foreach (var d in comparison.Differences)
+            {
+                var leaf = d.Left ?? d.Right;
+                differences.Add(InspectValue.Map(
+                    P("group", d.Group),
+                    P("item", d.Item),
+                    P("kind", d.LeafKind.ToString()),
+                    P("leaf", leaf is { } l ? InspectValue.Map(P("ordinal", l.Ordinal), P("x", l.X), P("y", l.Y), P("z", l.Z)) : InspectValue.Null),
+                    P("leftHash", d.Left is { } lh ? InspectValue.From(lh.Hash) : InspectValue.Null),
+                    P("rightHash", d.Right is { } rh ? InspectValue.From(rh.Hash) : InspectValue.Null),
+                    P("onlyIn", d.OnlyIn),
+                    P("description", d.Describe())));
+            }
+
+            Print(output, InspectValue.Map(
+                P("diverged", !comparison.Identical),
+                P("leftTick", comparison.LeftTick),
+                P("rightTick", comparison.RightTick),
+                P("truncated", comparison.Truncated),
+                P("differences", InspectValue.List(differences)),
+                P("description", comparison.Describe())), json: true);
+        }
+        else if (comparison.Identical)
+        {
+            output.WriteLine(comparison.Describe());
+        }
+        else
+        {
+            output.WriteLine(string.Create(CultureInfo.InvariantCulture, $"diverged: Tick {comparison.LeftTick} vs {comparison.RightTick}, {comparison.Differences.Count}{(comparison.Truncated ? "+" : "")} place(s):"));
+            foreach (var d in comparison.Differences)
+            {
+                output.WriteLine("  " + d.Describe());
+            }
+        }
+
+        return comparison.Identical ? 0 : 1;
+    }
+
+    private static int PrintTrailComparison(HashTrailComparison comparison, TextWriter output, bool json)
+    {
         if (json)
         {
             var d = comparison.Divergence;

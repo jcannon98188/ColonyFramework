@@ -4,6 +4,7 @@ title: 'Hand-forward fixes: access checks, AOT scenario coverage, Linux verifica
 status: To Do
 assignee: []
 created_date: '2026-11-01 21:36'
+updated_date: '2026-11-01 22:17'
 labels:
   - ready-for-agent
   - implementation
@@ -26,3 +27,9 @@ Collected gaps from closed tickets that should be fixed or verified before relea
 - [ ] #5 Source generator emits resource-access and enable-bit attributes; AllocationHarness feeds the diagnostics allocation check; zero-allocation gates stop flaking in the parallel run
 - [ ] #6 Spec 11.1 sketch compiles or the docs list its exact deviations
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added from TASK-37 report: Colony.Testing.Tests lacks TieredCompilation=false/TieredPGO=false (as Core.Tests has), so AllocationHarnessTests.Allocations_during_warm_up_do_not_count flakes about 2 in 5 full runs; also TASK-35: AllocationTests 100k loop, StandardLevelOverheadTests, Pathfinding FlowFieldScenario/PathQuery allocation tests flake under load; TASK-35: inputs-restricted missing from the AOT host; TASK-33: ReplayPlayer ordering fix and PeerIdentity.CurrentFrameworkVersion tracking VersionPrefix.
+<!-- SECTION:NOTES:END -->

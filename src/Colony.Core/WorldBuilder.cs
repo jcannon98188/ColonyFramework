@@ -591,6 +591,50 @@ public sealed class WorldBuilder
         return new InputCommandType(id);
     }
 
+    private readonly InputPermissionsBuilder _inputPermissions = new();
+
+    /// <summary>
+    /// Sets what applies to a (source, command) no rule covers (TASK-35; Allow when never called). Deny turns the
+    /// table into an allow list: only <see cref="GrantInput"/>ed pairs and Allow source/command defaults pass.
+    /// Each key may be declared once (by the Game or one Plugin); a contradicting declaration throws.
+    /// </summary>
+    public WorldBuilder DefaultInputAccess(InputAccess access)
+    {
+        ThrowIfBuilt();
+        _inputPermissions.SetDefault(access, PermissionOwner());
+        return this;
+    }
+
+    /// <summary>Sets the default access of every command from <paramref name="source"/> (a spectator: Deny). A pair rule overrides it; between the source and the command default, Deny wins.</summary>
+    public WorldBuilder SetInputAccess(InputSource source, InputAccess access)
+        => DeclareInputPermission(new InputPermissionRule(InputPermissionScope.Source, source, default, access));
+
+    /// <summary>Sets the default access of <paramref name="command"/> from every source (a debug command: Deny). A pair rule overrides it; between the source and the command default, Deny wins.</summary>
+    public WorldBuilder SetInputAccess(InputCommandType command, InputAccess access)
+        => DeclareInputPermission(new InputPermissionRule(InputPermissionScope.Command, default, command, access));
+
+    /// <summary>Allows <paramref name="source"/> to issue <paramref name="command"/> whatever the defaults say.</summary>
+    public WorldBuilder GrantInput(InputSource source, InputCommandType command)
+        => DeclareInputPermission(new InputPermissionRule(InputPermissionScope.Pair, source, command, InputAccess.Allow));
+
+    /// <summary>Denies <paramref name="source"/> the command <paramref name="command"/> whatever the defaults say: it is rejected with <see cref="CommandRejected.PermissionDenied"/> at the Tick boundary.</summary>
+    public WorldBuilder DenyInput(InputSource source, InputCommandType command)
+        => DeclareInputPermission(new InputPermissionRule(InputPermissionScope.Pair, source, command, InputAccess.Deny));
+
+    private WorldBuilder DeclareInputPermission(InputPermissionRule rule)
+    {
+        ThrowIfBuilt();
+        if (rule.Scope != InputPermissionScope.Source && (uint)rule.Command.Id >= (uint)_inputCommands.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rule), rule.Command.Id, "No such Input Command is registered in this builder; register it with AddInputCommand first.");
+        }
+
+        _inputPermissions.Declare(rule, PermissionOwner(), id => _inputCommands[id].Name);
+        return this;
+    }
+
+    private string PermissionOwner() => CurrentPluginId is { } plugin ? $"Plugin '{plugin}'" : "the Game";
+
     /// <summary>The built-in <see cref="CommandRejected"/> queue; exists once an Input Command is registered. Declare it in <see cref="SystemDefinition.ReadsResources"/> to read rejections.</summary>
     public ResourceType CommandRejections => _commandRejections ?? throw new InvalidOperationException("No Input Command is registered; the CommandRejected queue is created by the first AddInputCommand.");
 
@@ -703,7 +747,7 @@ public sealed class WorldBuilder
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections, _inspectors)
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections, _inspectors, _inputPermissions.Build(_inputCommands))
         {
             Plugins = [.. _plugins],
             SystemOverrides = [.. _systemOverrides],

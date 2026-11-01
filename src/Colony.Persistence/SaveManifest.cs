@@ -6,8 +6,12 @@ public readonly record struct SavedComponent(string Name, int Size, int Alignmen
 
 public readonly record struct SavedResource(string Name, int Size, ulong LayoutHash, ResourceKind Kind, bool IsPersistent);
 
-/// <summary>A saved extension: its name, layout hash (compared on load) and optional content version (<see cref="WorldExtensionDefinition.Version"/>, recorded only).</summary>
-public readonly record struct SavedExtension(string Name, ulong LayoutHash, string? Version = null);
+/// <summary>
+/// A saved extension: its name, layout hash (compared on load), optional content version
+/// (<see cref="WorldExtensionDefinition.Version"/>, recorded only) and the format version of its sections
+/// (<see cref="WorldExtensionDefinition.FormatVersion"/>; an older save is migrated forward, a newer one refused).
+/// </summary>
+public readonly record struct SavedExtension(string Name, ulong LayoutHash, string? Version = null, int FormatVersion = 1);
 
 public readonly record struct SavedRelation(string Name, RelationOptions Options);
 
@@ -46,7 +50,8 @@ public sealed class SaveManifest
         ImmutableArray<SavedResource> resources,
         ImmutableArray<SavedExtension> extensions,
         ImmutableArray<SavedRelation> relations,
-        ImmutableArray<SavedPlugin> plugins)
+        ImmutableArray<SavedPlugin> plugins,
+        SavedInputPermissions? inputPermissions = null)
     {
         ContainerVersion = containerVersion;
         SchemaHash = schemaHash;
@@ -58,6 +63,7 @@ public sealed class SaveManifest
         Extensions = extensions;
         Relations = relations;
         Plugins = plugins;
+        InputPermissions = inputPermissions ?? SavedInputPermissions.Unrestricted;
     }
 
     public int ContainerVersion { get; }
@@ -81,6 +87,9 @@ public sealed class SaveManifest
 
     /// <summary>The Plugin set the World ran with, in load order; empty for a World built without Plugins.</summary>
     public ImmutableArray<SavedPlugin> Plugins { get; }
+
+    /// <summary>The Input Command permission table the World ran with (TASK-35); <see cref="SavedInputPermissions.Unrestricted"/> when none was declared.</summary>
+    public SavedInputPermissions InputPermissions { get; }
 
     /// <summary>False when any Plugin declared itself non-deterministic: the World's hash and replay carry no guarantee (<see cref="World.IsDeterministic"/>).</summary>
     public bool IsDeterministic
@@ -117,7 +126,7 @@ public sealed class SaveManifest
         var extensions = ImmutableArray.CreateBuilder<SavedExtension>(schema.Extensions.Length);
         foreach (var e in schema.Extensions)
         {
-            extensions.Add(new SavedExtension(e.Name, e.LayoutHash, e.Version));
+            extensions.Add(new SavedExtension(e.Name, e.LayoutHash, e.Version, e.FormatVersion));
         }
 
         var relations = ImmutableArray.CreateBuilder<SavedRelation>(schema.RelationCount);
@@ -136,7 +145,8 @@ public sealed class SaveManifest
             resources.MoveToImmutable(),
             extensions.MoveToImmutable(),
             relations.MoveToImmutable(),
-            CapturePlugins(schema));
+            CapturePlugins(schema),
+            SavedInputPermissions.Of(schema));
     }
 
     private static ImmutableArray<SavedPlugin> CapturePlugins(WorldSchema schema)
@@ -258,7 +268,18 @@ public sealed class SaveManifest
             versioned += e.Version is null ? 0 : 1;
         }
 
-        if (versioned > 0)
+        // Extension format versions (TASK-37) trail everything and are written only when some extension is past
+        // its first format, so every earlier save (and golden) encodes exactly as before.
+        int formatted = 0;
+        foreach (var e in Extensions)
+        {
+            formatted += e.FormatVersion == 1 ? 0 : 1;
+        }
+
+        // The Input permission table (TASK-35) follows the version block, so a restricted save always writes that
+        // block (possibly with count 0); unrestricted saves encode exactly as before. The format block follows the
+        // permissions, so writing it forces both earlier blocks (a count of 0 and an unrestricted table).
+        if (versioned > 0 || !InputPermissions.IsUnrestricted || formatted > 0)
         {
             w.WriteInt32(versioned);
             for (int i = 0; i < Extensions.Length; i++)
@@ -267,6 +288,24 @@ public sealed class SaveManifest
                 {
                     w.WriteInt32(i);
                     w.WriteString(version);
+                }
+            }
+        }
+
+        if (!InputPermissions.IsUnrestricted || formatted > 0)
+        {
+            InputPermissions.Write(w);
+        }
+
+        if (formatted > 0)
+        {
+            w.WriteInt32(formatted);
+            for (int i = 0; i < Extensions.Length; i++)
+            {
+                if (Extensions[i].FormatVersion != 1)
+                {
+                    w.WriteInt32(i);
+                    w.WriteInt32(Extensions[i].FormatVersion);
                 }
             }
         }
@@ -353,8 +392,30 @@ public sealed class SaveManifest
             }
         }
 
+        var permissions = r.Remaining > 0 ? SavedInputPermissions.Read(ref r) : SavedInputPermissions.Unrestricted;
+        if (r.Remaining > 0)
+        {
+            int formatted = r.ReadCount(8);
+            for (int i = 0; i < formatted; i++)
+            {
+                int index = r.ReadInt32();
+                int formatVersion = r.ReadInt32();
+                if ((uint)index >= (uint)extensions.Count)
+                {
+                    throw new SaveFormatException($"The manifest names extension #{index} for a format version, but has {extensions.Count} extensions.");
+                }
+
+                if (formatVersion < 1)
+                {
+                    throw new SaveFormatException($"The manifest gives extension '{extensions[index].Name}' format version {formatVersion}.");
+                }
+
+                extensions[index] = extensions[index] with { FormatVersion = formatVersion };
+            }
+        }
+
         r.ExpectEnd();
-        return new SaveManifest(containerVersion, schemaHash, tick, worldHash, seed, components.MoveToImmutable(), resources.MoveToImmutable(), extensions.MoveToImmutable(), relations.MoveToImmutable(), plugins.MoveToImmutable());
+        return new SaveManifest(containerVersion, schemaHash, tick, worldHash, seed, components.MoveToImmutable(), resources.MoveToImmutable(), extensions.MoveToImmutable(), relations.MoveToImmutable(), plugins.MoveToImmutable(), permissions);
     }
 
     private static ImmutableArray<string> ReadNames(ref ByteReader r)

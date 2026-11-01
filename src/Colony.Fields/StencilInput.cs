@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -13,23 +14,46 @@ public delegate void StencilKernel<T>(in StencilInput<T> input, Span<T> output)
 /// boundary value. In double-buffered mode every read sees the previous state; in in-place ordered mode the
 /// centre chunk aliases the output and lower-coloured neighbours are already updated.
 /// </summary>
+/// <remarks>
+/// Performance (TASK-38): the constructor gathers the one-cell halo around the chunk (18x18x18 cells, boundary
+/// values baked in) into a per-thread scratch block, so a <see cref="Read"/> within <c>[-1, 17)</c> is one
+/// indexed load; in in-place mode the centre chunk is read live from the output instead, so a kernel still sees
+/// its own earlier cells updated. Reads further out go through the 27-chunk pointer table as before. Edge chunks
+/// that stick out past the World bound take the pointer-table path for every read in in-place mode (their
+/// centre cells past the bound must read as the boundary, not as the live output).
+/// </remarks>
 public readonly ref struct StencilInput<T>
     where T : unmanaged
 {
     private const int Side = 3;
     private const int Cells = Side * Side * Side;
 
+    /// <summary>Halo edge: the chunk plus one cell on each side.</summary>
+    private const int HaloSide = FieldChunk.Size + 2;
+    private const int HaloArea = HaloSide * HaloSide;
+    private const int HaloCells = HaloSide * HaloSide * HaloSide;
+
     private readonly Pointers _pointers;
     private readonly Values _uniform;
+    private readonly unsafe T* _halo;
+    private readonly unsafe T* _centre;
     private readonly WorldSize _size;
+    private readonly int _originX;
+    private readonly int _originY;
+    private readonly int _originZ;
     private readonly bool _checkBounds;
 
-    internal unsafe StencilInput(ChunkLayout layout, FieldStorage storage, ChunkCoord chunk, T boundary)
+    internal unsafe StencilInput(ChunkLayout layout, FieldStorage storage, ChunkCoord chunk, T boundary, bool aliasCentre)
     {
         Chunk = chunk;
         Boundary = boundary;
         _size = layout.Size;
         var origin = chunk.Origin;
+        _originX = origin.X;
+        _originY = origin.Y;
+        _originZ = origin.Z;
+        // Only a chunk that sticks out past the World bound needs per-read bounds checks; the common interior
+        // chunk pays nothing. The 26 neighbours' presence is encoded in the pointer table.
         _checkBounds = origin.X + FieldChunk.Size > _size.X || origin.Y + FieldChunk.Size > _size.Y || origin.Z + FieldChunk.Size > _size.Z;
         for (int dz = -1; dz <= 1; dz++)
         {
@@ -57,6 +81,26 @@ public readonly ref struct StencilInput<T>
                 }
             }
         }
+
+        if (aliasCentre && _checkBounds)
+        {
+            // In-place on an edge chunk: live centre reads must still turn into the boundary past the World bound,
+            // which only the slow path does. Rare (at most the last chunk along each axis).
+            _halo = null;
+            _centre = null;
+            return;
+        }
+
+        _centre = aliasCentre ? (T*)_pointers[CentreSlot] : null;
+        _halo = (T*)StencilScratch.Rent((nuint)HaloCells * (nuint)sizeof(T));
+        if (_checkBounds)
+        {
+            FillHaloChecked();
+        }
+        else
+        {
+            FillHalo();
+        }
     }
 
     private const nint Outside = -1;
@@ -68,22 +112,44 @@ public readonly ref struct StencilInput<T>
     /// <summary>Value returned for reads outside the World.</summary>
     public T Boundary { get; }
 
-    /// <summary>The cell at local coordinates relative to the centre chunk's origin, each in <c>[-16, 32)</c>.</summary>
+    /// <summary>
+    /// The cell at local coordinates relative to the centre chunk's origin, each in <c>[-16, 32)</c>.
+    /// Kernels call this 7 to 27 times per cell, so it is forced inline: a live centre load (in-place mode), a
+    /// halo load for the one-cell ring, else the 27-chunk pointer table.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public unsafe T Read(int x, int y, int z)
     {
-        if (_checkBounds)
+        if (_centre is not null && ((x | y | z) & ~FieldChunk.Mask) == 0)
         {
-            var origin = Chunk.Origin;
-            if (!_size.Contains(origin.X + x, origin.Y + y, origin.Z + z))
-            {
-                return Boundary;
-            }
+            return _centre[FieldChunk.CellIndex(x, y, z)];
         }
 
-        int nx = (x + FieldChunk.Size) >> FieldChunk.Shift;
-        int ny = (y + FieldChunk.Size) >> FieldChunk.Shift;
-        int nz = (z + FieldChunk.Size) >> FieldChunk.Shift;
-        int slot = nx + (Side * ny) + (Side * Side * nz);
+        if (_halo is not null && (uint)(x + 1) < HaloSide && (uint)(y + 1) < HaloSide && (uint)(z + 1) < HaloSide)
+        {
+            return _halo[(x + 1) + (HaloSide * (y + 1)) + (HaloArea * (z + 1))];
+        }
+
+        return ReadFar(x, y, z);
+    }
+
+    /// <summary>The pointer-table read: any neighbourhood coordinate, World bounds honoured for edge chunks.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private unsafe T ReadFar(int x, int y, int z)
+    {
+        if (_checkBounds && !_size.Contains(_originX + x, _originY + y, _originZ + z))
+        {
+            return Boundary;
+        }
+
+        int slot = ((x + FieldChunk.Size) >> FieldChunk.Shift)
+                 + (Side * ((y + FieldChunk.Size) >> FieldChunk.Shift))
+                 + (Side * Side * ((z + FieldChunk.Size) >> FieldChunk.Shift));
+        if ((uint)slot >= Cells)
+        {
+            ThrowOutOfNeighbourhood(x, y, z);
+        }
+
         nint pointer = _pointers[slot];
         if (pointer <= Uniform)
         {
@@ -92,6 +158,70 @@ public readonly ref struct StencilInput<T>
 
         return ((T*)pointer)[FieldChunk.CellIndex(x & FieldChunk.Mask, y & FieldChunk.Mask, z & FieldChunk.Mask)];
     }
+
+    /// <summary>Gathers the 18x18x18 halo of an interior chunk: 324 rows of (one cell, sixteen contiguous cells, one cell).</summary>
+    private unsafe void FillHalo()
+    {
+        T* halo = _halo;
+        for (int hz = 0; hz < HaloSide; hz++)
+        {
+            int gz = hz - 1;
+            int nz = (gz + FieldChunk.Size) >> FieldChunk.Shift;
+            int lz = gz & FieldChunk.Mask;
+            for (int hy = 0; hy < HaloSide; hy++)
+            {
+                int gy = hy - 1;
+                int ny = (gy + FieldChunk.Size) >> FieldChunk.Shift;
+                int ly = gy & FieldChunk.Mask;
+                T* row = halo + (HaloSide * hy) + (HaloArea * hz);
+                int rowBase = (Side * ny) + (Side * Side * nz);
+                row[0] = CellOf(rowBase, FieldChunk.CellIndex(FieldChunk.Mask, ly, lz));
+                CopyRun(rowBase + 1, FieldChunk.CellIndex(0, ly, lz), row + 1);
+                row[HaloSide - 1] = CellOf(rowBase + 2, FieldChunk.CellIndex(0, ly, lz));
+            }
+        }
+    }
+
+    /// <summary>Gathers the halo of a chunk that sticks out past the World bound, one cell at a time through the checked path.</summary>
+    private unsafe void FillHaloChecked()
+    {
+        T* halo = _halo;
+        for (int z = -1; z <= FieldChunk.Size; z++)
+        {
+            for (int y = -1; y <= FieldChunk.Size; y++)
+            {
+                for (int x = -1; x <= FieldChunk.Size; x++)
+                {
+                    halo[(x + 1) + (HaloSide * (y + 1)) + (HaloArea * (z + 1))] = ReadFar(x, y, z);
+                }
+            }
+        }
+    }
+
+    private unsafe T CellOf(int slot, int cellIndex)
+    {
+        nint pointer = _pointers[slot];
+        return pointer <= Uniform ? _uniform[slot] : ((T*)pointer)[cellIndex];
+    }
+
+    /// <summary>Copies one 16-cell x row of the chunk in <paramref name="slot"/> (or repeats its uniform value) to <paramref name="destination"/>.</summary>
+    private unsafe void CopyRun(int slot, int cellIndex, T* destination)
+    {
+        nint pointer = _pointers[slot];
+        if (pointer <= Uniform)
+        {
+            new Span<T>(destination, FieldChunk.Size).Fill(_uniform[slot]);
+        }
+        else
+        {
+            new ReadOnlySpan<T>((T*)pointer + cellIndex, FieldChunk.Size).CopyTo(new Span<T>(destination, FieldChunk.Size));
+        }
+    }
+
+    [DoesNotReturn]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowOutOfNeighbourhood(int x, int y, int z)
+        => throw new ArgumentOutOfRangeException(nameof(x), $"Stencil read ({x}, {y}, {z}) lies outside the 3x3x3 chunk neighbourhood; local coordinates must be in [-{FieldChunk.Size}, {2 * FieldChunk.Size}).");
 
     /// <summary>The centre chunk's cells in storage order, or empty when it is uniform (then every cell is <see cref="CentreUniformValue"/>).</summary>
     public unsafe ReadOnlySpan<T> Centre
@@ -119,5 +249,38 @@ public readonly ref struct StencilInput<T>
     private struct Values
     {
         private T _element0;
+    }
+}
+
+/// <summary>
+/// Per-thread native scratch for stencil halos (TASK-38). A job gathers its halo here before running the kernel;
+/// the block is thread-local only as scratch (results never depend on which worker ran the job), is reused by
+/// every job the thread runs afterwards, grows only when a wider cell type shows up, and lives as long as the
+/// thread, so steady-state Ticks allocate nothing.
+/// </summary>
+internal static unsafe class StencilScratch
+{
+    private const int Alignment = 64;
+
+    [ThreadStatic]
+    private static void* _block;
+
+    [ThreadStatic]
+    private static nuint _blockBytes;
+
+    public static void* Rent(nuint bytes)
+    {
+        if (_blockBytes < bytes)
+        {
+            if (_block is not null)
+            {
+                NativeMemory.AlignedFree(_block);
+            }
+
+            _block = NativeMemory.AlignedAlloc(bytes, Alignment);
+            _blockBytes = bytes;
+        }
+
+        return _block;
     }
 }

@@ -24,6 +24,14 @@ public abstract class WorldExtensionDefinition
     /// </summary>
     public virtual string? Version => null;
 
+    /// <summary>
+    /// The version of the section format <see cref="IWorldExtension.Save"/> writes (spec section 7.1). Recorded in
+    /// the save manifest and compared on load: an older save is brought forward through registered extension
+    /// migrations (Colony.Persistence), a newer one is refused. Not part of the schema hash. Bump it whenever the
+    /// bytes or the set of sections change shape; 1 (the default) is the format the extension first shipped with.
+    /// </summary>
+    public virtual int FormatVersion => 1;
+
     /// <summary>Closes registration; called once from <see cref="WorldBuilder.Build"/> before <see cref="LayoutHash"/> is read.</summary>
     public virtual void Freeze()
     {
@@ -53,6 +61,20 @@ public interface IWorldExtension : IDisposable
     /// bytes, nothing derived or cached. Called after the Entity storage and before the RNG state.
     /// </summary>
     public void Hash(ref Hash64State state);
+
+    /// <summary>
+    /// Adds this extension's state to the hierarchical World hash (<see cref="World.HashTree"/>, spec section
+    /// 10.2) as items, and chunk leaves where the state is chunked, under a group the World already opened with
+    /// the extension's name. Must cover exactly the bytes <see cref="Hash"/> covers, split the same way on every
+    /// peer. The default adds one leafless item <c>state</c> holding the digest of <see cref="Hash"/>.
+    /// </summary>
+    public void HashTree(HashTreeBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        var state = new Hash64State(WorldHashTree.NodeSeed);
+        Hash(ref state);
+        builder.AddItem("state", state.Finish());
+    }
 
     /// <summary>
     /// Writes this extension's saved state as named sections (spec section 7.1): exactly the state
