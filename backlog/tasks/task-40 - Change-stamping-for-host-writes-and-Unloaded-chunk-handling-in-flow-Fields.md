@@ -1,10 +1,11 @@
 ---
 id: TASK-40
 title: Change-stamping for host writes and Unloaded-chunk handling in flow Fields
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
-updated_date: '2026-11-01 21:41'
+updated_date: '2026-11-01 22:13'
 labels:
   - ready-for-agent
   - implementation
