@@ -1,9 +1,11 @@
 ---
 id: TASK-41
 title: Reachability adapter between Colony and Pathfinding
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
+updated_date: '2026-11-01 22:17'
 labels:
   - ready-for-agent
   - implementation
