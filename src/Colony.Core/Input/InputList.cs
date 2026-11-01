@@ -111,7 +111,8 @@ public readonly ref struct InputList<T> where T : unmanaged
             int count = _inputs.CurrentCount;
             while (++_index < count)
             {
-                if (_inputs.RecordAt(_index).Type == _typeId)
+                ref readonly var record = ref _inputs.RecordAt(_index);
+                if (record.Type == _typeId && !record.Denied)
                 {
                     return true;
                 }

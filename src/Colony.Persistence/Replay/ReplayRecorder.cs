@@ -33,7 +33,7 @@ public sealed class ReplayRecorder
         }
         else
         {
-            _data = new ReplayData { Seed = world.Seed, SchemaHash = world.Schema.SchemaHash, StartTick = tick, EndTick = tick, TickRate = options.TickRate };
+            _data = new ReplayData { Seed = world.Seed, SchemaHash = world.Schema.SchemaHash, StartTick = tick, EndTick = tick, TickRate = options.TickRate, InputPermissions = SavedInputPermissions.Of(world.Schema) };
             foreach (ref readonly var input in world.Schema.InputCommands)
             {
                 _data.Inputs.Add(new SavedInputCommand(input.Name, input.Size, input.LayoutHash));
