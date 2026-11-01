@@ -1,9 +1,11 @@
 ---
 id: TASK-38
 title: Fields stencil performance pass
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
+updated_date: '2026-11-01 21:41'
 labels:
   - ready-for-agent
   - implementation
