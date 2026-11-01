@@ -59,8 +59,8 @@ public sealed class HashTreeDesyncTests
         Assert.True(same.Identical);
 
         // Negative control: perturb one Field cell in chunk (1, 0, 0) of b between Ticks.
-        var temperature = b.Schema.Extension<FieldsBuilder>().Field<short>("temperature");
-        b.World.Fields().Accessor(temperature)[20, 3, 0] = 99;
+        var fields = b.World.Fields();
+        fields.Accessor(fields.Field<short>("temperature"))[20, 3, 0] = 99;
 
         var comparison = HashTreeFile.CompareLive(clientA, clientB);
 
