@@ -1,10 +1,8 @@
 using System.Globalization;
 using Colony.Diagnostics;
+using Colony.Diagnostics.Inspection;
 using Colony.Fields;
 using Colony.Persistence;
-#if !COLONY_NO_INSPECT
-using Colony.Diagnostics.Inspection;
-#endif
 
 namespace Colony.Samples.Hello;
 

@@ -28,6 +28,7 @@ public sealed partial class InspectionServer : IDisposable
     private TcpListener? _listener;
     private Thread? _acceptThread;
     private volatile bool _disposed;
+    private int _inFlight;
 
     public InspectionServer(World world, InspectionServerOptions? options = null)
     {
@@ -133,6 +134,11 @@ public sealed partial class InspectionServer : IDisposable
 
         _disposed = true;
         _listener?.Stop();
+
+        // Fail what was never pumped, then let connection threads finish writing answered requests (the
+        // 'shutdown' reply above all: a host disposes right after the Pump that answered it) before closing.
+        FailQueued();
+        SpinWait.SpinUntil(() => Volatile.Read(ref _inFlight) == 0, TimeSpan.FromSeconds(2));
         lock (_connectionsLock)
         {
             foreach (var connection in _connections)
@@ -143,15 +149,20 @@ public sealed partial class InspectionServer : IDisposable
             _connections.Clear();
         }
 
+        FailQueued();
+        EndRewind();
+        _acceptThread?.Join(TimeSpan.FromSeconds(2));
+        _signal.Dispose();
+    }
+
+    /// <summary>Answers every queued request with <c>closed</c>; only called once the server is disposed.</summary>
+    private void FailQueued()
+    {
         while (_queue.TryDequeue(out var pending))
         {
             pending.Response = Failure(pending.Request, "closed", "The inspection server shut down.");
             pending.Done.Set();
         }
-
-        EndRewind();
-        _acceptThread?.Join(TimeSpan.FromSeconds(2));
-        _signal.Dispose();
     }
 
     private void AcceptLoop()
@@ -204,10 +215,24 @@ public sealed partial class InspectionServer : IDisposable
                 }
 
                 var pending = new PendingRequest(session, request);
-                _queue.Enqueue(pending);
-                _signal.Release();
-                pending.Done.Wait();
-                InspectCodec.WriteFrame(stream, pending.Response!);
+                Interlocked.Increment(ref _inFlight);
+                try
+                {
+                    _queue.Enqueue(pending);
+                    _signal.Release();
+                    if (_disposed)
+                    {
+                        FailQueued();
+                    }
+
+                    pending.Done.Wait();
+                    InspectCodec.WriteFrame(stream, pending.Response!);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _inFlight);
+                }
+
                 if (!session.Authenticated)
                 {
                     return;
