@@ -14,7 +14,7 @@ public readonly record struct NetworkCounters(long Sent, long Delivered, long Dr
 /// Latency, jitter, reordering, drops and duplicates follow the <see cref="NetworkProfile"/>; each decision is
 /// drawn from a counter-based stream keyed by the seed and the packet's send index, so the same sends in the
 /// same order with the same seed always produce the same deliveries. Single-threaded: drive it from one thread.
-/// Use it to test a Game's own lockstep code without opening a socket; <c>LockstepHarness</c> is the
+/// Use it to test a Game's own lockstep code without opening a socket; <see cref="LockstepHarness"/> is the
 /// reference user.
 /// </summary>
 public sealed class TestNetwork
