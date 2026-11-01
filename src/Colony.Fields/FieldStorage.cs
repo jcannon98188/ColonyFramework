@@ -43,6 +43,12 @@ public abstract class FieldStorage : IDisposable
     /// <summary>Makes the chunk uniform with <paramref name="value"/>. Dense storage already allocated is kept for reuse.</summary>
     public abstract void Fill(int ordinal, ReadOnlySpan<byte> value);
 
+    /// <summary>
+    /// Makes the chunk uniform with <paramref name="value"/> and gives its dense storage back (streaming unload,
+    /// spec section 5.3): unlike <see cref="Fill"/>, <see cref="CellBytesAllocated"/> drops. The default keeps the block.
+    /// </summary>
+    public virtual void Release(int ordinal, ReadOnlySpan<byte> value) => Fill(ordinal, value);
+
     /// <summary>True when the chunk's cells (uniform or dense) equal <paramref name="cells"/>, a full chunk in storage order.</summary>
     public abstract bool CellsEqual(int ordinal, ReadOnlySpan<byte> cells);
 

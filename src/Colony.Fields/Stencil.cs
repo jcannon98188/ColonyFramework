@@ -164,6 +164,12 @@ internal sealed class StencilRunner<T>
 
         private void ExecuteInPlace(int ordinal)
         {
+            // Only Active chunks compute (spec section 5.3); a Hibernating neighbour is read as a fixed boundary.
+            if (Fields.ResidencyOf(ordinal) != ChunkResidency.Active)
+            {
+                return;
+            }
+
             // Materialise first so the input's centre aliases the output.
             var output = _front.WriteCells(ordinal);
             Fields.MarkWritten(_fieldId, ordinal);
@@ -173,6 +179,12 @@ internal sealed class StencilRunner<T>
 
         private void Compute(int ordinal)
         {
+            if (Fields.ResidencyOf(ordinal) != ChunkResidency.Active)
+            {
+                _changed[ordinal] = 0;
+                return;
+            }
+
             var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary);
             var output = _back!.WriteCells(ordinal);
             _kernel(in input, MemoryMarshal.Cast<byte, T>(output));
