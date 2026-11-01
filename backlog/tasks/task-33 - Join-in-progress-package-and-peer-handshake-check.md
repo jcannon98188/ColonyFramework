@@ -1,9 +1,11 @@
 ---
 id: TASK-33
 title: Join-in-progress package and peer handshake check
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:28'
+updated_date: '2026-11-01 21:31'
 labels:
   - ready-for-agent
   - implementation
