@@ -29,6 +29,11 @@ internal sealed class PathSearch
     private long _seq;
     private TilePos[] _waypoints = new TilePos[64];
 
+    /// <summary>Scratch for a local step after a run (reuses the start-chunk distance buffer).</summary>
+    public Span<int> LocalDistanceScratch => _startDist;
+
+    public Span<ushort> LocalQueueScratch => _queue;
+
     /// <summary>The waypoints of the last <see cref="PathStatus.Found"/> run.</summary>
     public ReadOnlySpan<TilePos> Waypoints => _waypoints.AsSpan(0, WaypointCount);
 

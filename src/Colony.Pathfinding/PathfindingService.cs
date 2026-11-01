@@ -1,4 +1,4 @@
-using Colony.Fields;
+﻿using Colony.Fields;
 using Colony.Hashing;
 
 namespace Colony.Pathfinding;
@@ -27,6 +27,7 @@ public sealed class PathfindingService : IWorldExtension
     private readonly Lock _buildLock = new();
     private readonly Lock _searchLock = new();
     private readonly PathSearch _search = new();
+    private readonly Func<int, ChunkResidency> _residency;
     private FieldSet? _fields;
     private bool _inTick;
     private bool _disposed;
@@ -38,6 +39,7 @@ public sealed class PathfindingService : IWorldExtension
         _definitions = [.. definitions];
         _descriptors = [.. descriptors];
         _maps = new RegionMap?[_definitions.Length];
+        _residency = Residency;
     }
 
     public World World { get; }
@@ -115,7 +117,7 @@ public sealed class PathfindingService : IWorldExtension
         var map = Regions(movementClass);
         lock (_searchLock)
         {
-            var status = _search.Run(map, from, to, Residency);
+            var status = _search.Run(map, from, to, _residency);
             if (status == PathStatus.Found)
             {
                 var found = _search.Waypoints;
@@ -123,6 +125,47 @@ public sealed class PathfindingService : IWorldExtension
             }
 
             return new PathQuery(status, _search.Cost, _search.WaypointCount, _search.MissingChunk, _search.WorkUnits);
+        }
+    }
+
+    /// <summary>
+    /// The HPA* cost in tiles from <paramref name="from"/> to <paramref name="to"/> (within a few percent of
+    /// optimal), -1 when unreachable or when an Unloaded chunk is in the way. Allocation free; serialised with the
+    /// other searches.
+    /// </summary>
+    public int ApproximateCost(TilePos from, TilePos to, MovementClass movementClass)
+    {
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            return _search.Run(map, from, to, _residency) == PathStatus.Found ? _search.Cost : -1;
+        }
+    }
+
+    /// <summary>
+    /// The one face move that takes a unit at <paramref name="from"/> toward <paramref name="to"/> along the HPA*
+    /// path, refined by local A* inside the unit's chunk (spec section 9.1). False at the goal or when no path
+    /// exists. Allocation free; serialised with the other searches.
+    /// </summary>
+    public bool TryNextStep(TilePos from, TilePos to, MovementClass movementClass, out TilePos next)
+    {
+        next = from;
+        if (from == to)
+        {
+            return false;
+        }
+
+        var map = Regions(movementClass);
+        lock (_searchLock)
+        {
+            if (_search.Run(map, from, to, _residency) != PathStatus.Found)
+            {
+                return false;
+            }
+
+            // Waypoint 0 is the start itself; the next one is in this chunk or face-adjacent across a border.
+            var waypoints = _search.Waypoints;
+            return waypoints.Length > 1 && LocalStep.Toward(map, from, waypoints[1], _search.LocalDistanceScratch, _search.LocalQueueScratch, out next);
         }
     }
 
