@@ -58,6 +58,9 @@ internal sealed class PathRequestQueue
 
     public PathQueueCounters Counters => new(_submitted, _computed, _deliveredCount, _deferred, _missed, _workUnits);
 
+    /// <summary>Work units the searches of the last <see cref="Compute"/> spent.</summary>
+    public long WorkUnitsThisTick { get; private set; }
+
     /// <summary>The results emitted at the last delivery, in emission order.</summary>
     public ReadOnlySpan<PathResult> Delivered => _results.AsSpan(0, _resultCount);
 
@@ -101,6 +104,7 @@ internal sealed class PathRequestQueue
     {
         long budget = _service.Options.WorkBudgetPerTick;
         long used = 0;
+        WorkUnitsThisTick = 0;
         lock (_service.SearchLock)
         {
             var search = _service.Search;
@@ -126,6 +130,7 @@ internal sealed class PathRequestQueue
                 p.WorkUnits = search.WorkUnits;
                 used += search.WorkUnits;
                 _workUnits += search.WorkUnits;
+                WorkUnitsThisTick += search.WorkUnits;
                 _computed++;
                 if (p.Status == PathStatus.Found)
                 {
