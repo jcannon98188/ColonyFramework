@@ -18,6 +18,11 @@ internal sealed class PathSearch
     private readonly int[] _startDist = new int[FieldChunk.CellCount];
     private readonly int[] _goalDist = new int[FieldChunk.CellCount];
     private readonly ushort[] _queue = new ushort[FieldChunk.CellCount];
+    private readonly int[] _localDist = new int[2 * FieldChunk.CellCount];
+    private readonly ushort[] _localQueue = new ushort[2 * FieldChunk.CellCount];
+    private readonly int[] _localParent = new int[2 * FieldChunk.CellCount];
+    private int[] _localCross = new int[16];
+    private int _localCrossCount;
     private OpenEntry[] _open = new OpenEntry[1024];
     private int _openCount;
     private int _stamp;
@@ -63,10 +68,31 @@ internal sealed class PathSearch
         WorkUnits += ChunkGraph.Distances(map.PassableOf(goalOrdinal), map.UpOf(goalOrdinal), toCell, _goalDist, _queue);
 
         int best = Infinity;
-        long bestNode = -1; // -1: direct in-chunk path
-        if (startOrdinal == goalOrdinal && _startDist[toCell] >= 0)
+        long bestNode = -1; // -1: direct local path
+        _localCrossCount = 0;
+        if (startOrdinal == goalOrdinal)
         {
-            best = _startDist[toCell];
+            if (_startDist[toCell] >= 0)
+            {
+                best = _startDist[toCell];
+            }
+        }
+        else
+        {
+            // Near the unit the exact answer is cheap: a local search over the start and goal chunks when they touch.
+            for (int d = 0; d < 6; d++)
+            {
+                if (map.NeighbourOf(startOrdinal, d) == goalOrdinal)
+                {
+                    int local = LocalDistance(map, startOrdinal, goalOrdinal, d, fromCell, toCell);
+                    if (local >= 0)
+                    {
+                        best = local;
+                    }
+
+                    break;
+                }
+            }
         }
 
         _stamp++;
@@ -147,8 +173,134 @@ internal sealed class PathSearch
         }
 
         Cost = best;
-        BuildWaypoints(graph, from, to, bestNode);
+        if (bestNode < 0 && _localCrossCount > 0)
+        {
+            // The local two-chunk path won: start, each crossing pair in walking order, goal.
+            int needed = _localCrossCount + 2;
+            if (_waypoints.Length < needed)
+            {
+                Array.Resize(ref _waypoints, Math.Max(needed, _waypoints.Length * 2));
+            }
+
+            _waypoints[0] = from;
+            for (int i = 0; i < _localCrossCount; i++)
+            {
+                int index = _localCross[_localCrossCount - 1 - i];
+                bool inA = index < FieldChunk.CellCount;
+                _waypoints[1 + i] = graph.TileOf(inA ? startOrdinal : goalOrdinal, inA ? index : index - FieldChunk.CellCount);
+            }
+
+            _waypoints[needed - 1] = to;
+            WaypointCount = Dedupe(needed);
+        }
+        else
+        {
+            BuildWaypoints(graph, from, to, bestNode);
+        }
+
         return PathStatus.Found;
+    }
+
+    /// <summary>Exact breadth-first distance over two face-adjacent chunks (cells 0..4095 in <paramref name="a"/>, 4096.. in <paramref name="b"/>), -1 when not connected inside them.</summary>
+    private int LocalDistance(RegionMap map, int a, int b, int direction, int fromCell, int toCell)
+    {
+        var dist = _localDist;
+        var queue = _localQueue;
+        var parent = _localParent;
+        Array.Fill(dist, -1);
+        int head = 0;
+        int tail = 0;
+        int goal = FieldChunk.CellCount + toCell;
+        dist[fromCell] = 0;
+        parent[fromCell] = -1;
+        queue[tail++] = (ushort)fromCell;
+        var passableA = map.PassableOf(a);
+        var passableB = map.PassableOf(b);
+        var upA = map.UpOf(a);
+        var upB = map.UpOf(b);
+        while (head < tail)
+        {
+            int index = queue[head++];
+            WorkUnits++;
+            if (index == goal)
+            {
+                // Every face crossing of the path (goal to start order) becomes a pair of waypoints.
+                _localCrossCount = 0;
+                for (int i = index; parent[i] >= 0; i = parent[i])
+                {
+                    if ((i >= FieldChunk.CellCount) != (parent[i] >= FieldChunk.CellCount))
+                    {
+                        if (_localCrossCount + 2 > _localCross.Length)
+                        {
+                            Array.Resize(ref _localCross, _localCross.Length * 2);
+                        }
+
+                        _localCross[_localCrossCount++] = i;
+                        _localCross[_localCrossCount++] = parent[i];
+                    }
+                }
+
+                return dist[index];
+            }
+
+            bool inA = index < FieldChunk.CellCount;
+            int c = inA ? index : index - FieldChunk.CellCount;
+            int offset = inA ? 0 : FieldChunk.CellCount;
+            var passable = inA ? passableA : passableB;
+            var up = inA ? upA : upB;
+            int next = dist[index] + 1;
+            int x = c & FieldChunk.Mask;
+            int y = (c >> FieldChunk.Shift) & FieldChunk.Mask;
+            int z = c >> (2 * FieldChunk.Shift);
+
+            Step(x > 0, c - 1, 0);
+            Step(x < FieldChunk.Mask, c + 1, 1);
+            Step(y > 0, c - FieldChunk.Size, 2);
+            Step(y < FieldChunk.Mask, c + FieldChunk.Size, 3);
+            Step(z > 0 && ChunkGraph.Bit(up, c - (FieldChunk.Size * FieldChunk.Size)), c - (FieldChunk.Size * FieldChunk.Size), 4);
+            Step(z < FieldChunk.Mask && ChunkGraph.Bit(up, c), c + (FieldChunk.Size * FieldChunk.Size), 5);
+
+            void Step(bool inside, int neighbour, int face)
+            {
+                if (inside)
+                {
+                    int j = offset + neighbour;
+                    if (dist[j] < 0 && ChunkGraph.Bit(passable, neighbour))
+                    {
+                        dist[j] = next;
+                        parent[j] = index;
+                        queue[tail++] = (ushort)j;
+                    }
+
+                    return;
+                }
+
+                // Leaving the chunk: only across the shared face, into the other chunk.
+                int shared = inA ? direction : direction ^ 1;
+                if (face != shared)
+                {
+                    return;
+                }
+
+                int mirror = ChunkGraph.MirrorCell(c, face);
+                var otherPassable = inA ? passableB : passableA;
+                bool climb = face switch
+                {
+                    5 => ChunkGraph.Bit(up, c),
+                    4 => ChunkGraph.Bit(inA ? upB : upA, mirror),
+                    _ => true,
+                };
+                int k = (inA ? FieldChunk.CellCount : 0) + mirror;
+                if (climb && dist[k] < 0 && ChunkGraph.Bit(otherPassable, mirror))
+                {
+                    dist[k] = next;
+                    parent[k] = index;
+                    queue[tail++] = (ushort)k;
+                }
+            }
+        }
+
+        return -1;
     }
 
     private bool IsUnloaded(Func<int, ChunkResidency> residency, FieldSet fields, int ordinal)
@@ -207,10 +359,14 @@ internal sealed class PathSearch
         }
 
         _waypoints[chain + 1] = to;
+        WaypointCount = Dedupe(needed);
+    }
 
-        // Drop repeated tiles (the start or goal may itself be a transition).
+    /// <summary>Drops repeated consecutive tiles (the start or goal may itself be a transition); returns the count kept.</summary>
+    private int Dedupe(int count)
+    {
         int w = 1;
-        for (int i = 1; i < needed; i++)
+        for (int i = 1; i < count; i++)
         {
             if (_waypoints[i] != _waypoints[w - 1])
             {
@@ -218,7 +374,7 @@ internal sealed class PathSearch
             }
         }
 
-        WaypointCount = w;
+        return w;
     }
 
     private static long ParentOf(ChunkGraph graph, long key) => graph.Ensure(OrdinalOf(key)).Parent[NodeOf(key)];

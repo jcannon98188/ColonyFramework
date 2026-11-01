@@ -9,9 +9,11 @@ namespace Colony.Pathfinding;
 /// </summary>
 /// <remarks>
 /// Entrances: on each shared face, the boundary tile pairs that are passable on both sides (and climbable for
-/// vertical faces) are grouped by (local component here, local component there) into face-connected patches.
+/// vertical faces) are grouped by (local component here, local component there) into face-connected patches;
+/// on a horizontal face a patch stays within one z level (a level change is not a free move).
 /// A patch gets one transition at the tile nearest its bounding-box centre and, when it spans more than
-/// <see cref="MaxEntranceSpan"/> tiles in either face axis, one more nearest each bounding-box corner. Both
+/// <see cref="MaxEntranceSpan"/> tiles in either face axis, one nearest every point of a <see cref="TransitionStride"/>
+/// grid over its bounding box (ends included). Both
 /// chunks compute a face from the lower-coordinate side, so the two ends of a transition always agree.
 /// Chunk data is rebuilt lazily when the region labels of the chunk or a face neighbour moved (lazy repair
 /// on read); nothing here is hashed or saved. Reads and repairs happen only under the service's search lock.
@@ -19,6 +21,7 @@ namespace Colony.Pathfinding;
 internal sealed class ChunkGraph
 {
     public const int MaxEntranceSpan = 6;
+    public const int TransitionStride = 4;
     private const int FaceCells = FieldChunk.Size * FieldChunk.Size;
 
     private readonly RegionMap _map;
@@ -312,12 +315,13 @@ internal sealed class ChunkGraph
                     Flood(g + FieldChunk.Size, key, patches, ref top);
                 }
 
-                if (b > 0)
+                // On a horizontal face b is z: levels are not free moves, so patches never span them.
+                if (direction == 5 && b > 0)
                 {
                     Flood(g - 1, key, patches, ref top);
                 }
 
-                if (b < FieldChunk.Mask)
+                if (direction == 5 && b < FieldChunk.Mask)
                 {
                     Flood(g + 1, key, patches, ref top);
                 }
@@ -326,10 +330,27 @@ internal sealed class ChunkGraph
             Choose(patches, (minA + maxA) >> 1, (minB + maxB) >> 1);
             if (maxA - minA + 1 > MaxEntranceSpan || maxB - minB + 1 > MaxEntranceSpan)
             {
-                Choose(patches, minA, minB);
-                Choose(patches, minA, maxB);
-                Choose(patches, maxA, minB);
-                Choose(patches, maxA, maxB);
+                // A wide entrance gets a transition near every point of a stride grid over its bounding box, ends included.
+                for (int a = minA; ; a += TransitionStride)
+                {
+                    for (int b = minB; ; b += TransitionStride)
+                    {
+                        Choose(patches, a, b);
+                        if (b >= maxB)
+                        {
+                            break;
+                        }
+
+                        b = Math.Min(b, maxB - TransitionStride);
+                    }
+
+                    if (a >= maxA)
+                    {
+                        break;
+                    }
+
+                    a = Math.Min(a, maxA - TransitionStride);
+                }
             }
         }
 
