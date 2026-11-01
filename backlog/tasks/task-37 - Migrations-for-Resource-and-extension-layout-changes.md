@@ -1,9 +1,11 @@
 ---
 id: TASK-37
 title: Migrations for Resource and extension layout changes
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
+updated_date: '2026-11-01 21:58'
 labels:
   - ready-for-agent
   - implementation
