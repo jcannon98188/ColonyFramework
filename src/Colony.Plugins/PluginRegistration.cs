@@ -91,6 +91,41 @@ public sealed class PluginRegistration
     /// <summary>Registers an Input Command (spec section 7.3) owned by this Plugin; handler Systems read it with <c>context.Inputs&lt;T&gt;(type)</c>.</summary>
     public InputCommandType AddInputCommand<T>(string name) where T : unmanaged => Builder.AddInputCommand<T>(name);
 
+    /// <summary>Sets the access applying to a (source, command) no rule covers (TASK-35, <see cref="WorldBuilder.DefaultInputAccess"/>); one declaration per key across the Game and all Plugins.</summary>
+    public PluginRegistration DefaultInputAccess(InputAccess access)
+    {
+        Builder.DefaultInputAccess(access);
+        return this;
+    }
+
+    /// <summary>Sets the default access of every command from <paramref name="source"/> (<see cref="WorldBuilder.SetInputAccess(InputSource, InputAccess)"/>).</summary>
+    public PluginRegistration SetInputAccess(InputSource source, InputAccess access)
+    {
+        Builder.SetInputAccess(source, access);
+        return this;
+    }
+
+    /// <summary>Sets the default access of <paramref name="command"/> from every source (<see cref="WorldBuilder.SetInputAccess(InputCommandType, InputAccess)"/>).</summary>
+    public PluginRegistration SetInputAccess(InputCommandType command, InputAccess access)
+    {
+        Builder.SetInputAccess(command, access);
+        return this;
+    }
+
+    /// <summary>Allows <paramref name="source"/> to issue <paramref name="command"/> (<see cref="WorldBuilder.GrantInput"/>).</summary>
+    public PluginRegistration GrantInput(InputSource source, InputCommandType command)
+    {
+        Builder.GrantInput(source, command);
+        return this;
+    }
+
+    /// <summary>Denies <paramref name="source"/> the command <paramref name="command"/> (<see cref="WorldBuilder.DenyInput"/>).</summary>
+    public PluginRegistration DenyInput(InputSource source, InputCommandType command)
+    {
+        Builder.DenyInput(source, command);
+        return this;
+    }
+
     public InputCommandType InputCommand<T>() where T : unmanaged => Builder.InputCommand<T>();
 
     public InputCommandType InputCommand(string name) => Builder.InputCommand(name);
