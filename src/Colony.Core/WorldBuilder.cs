@@ -60,7 +60,7 @@ public sealed class WorldBuilder
         return null;
     }
 
-    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
+    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin(string, string, bool)"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
     public string? CurrentPluginId => _currentPlugin >= 0 ? _plugins[_currentPlugin].Id : null;
 
     public WorldBuilder()
