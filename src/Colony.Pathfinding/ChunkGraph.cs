@@ -199,6 +199,7 @@ internal sealed class ChunkGraph
         // Merge collected (cell, face) pairs into nodes: one per cell, ascending cell, face bits OR'ed.
         var collected = _collect.AsSpan(0, _collectCount);
         collected.Sort();
+        chunk.EnsureNodes(ChunkNodes.InitialCapacity);
         int count = 0;
         for (int i = 0; i < collected.Length; i++)
         {
@@ -231,7 +232,7 @@ internal sealed class ChunkGraph
 
         if (chunk.Dist.Length < count * count)
         {
-            chunk.Dist = new int[(int)BitOperations.RoundUpToPowerOf2((uint)(count * count))];
+            chunk.Dist = new int[Math.Max(ChunkNodes.InitialCapacity * ChunkNodes.InitialCapacity, (int)BitOperations.RoundUpToPowerOf2((uint)(count * count)))];
         }
 
         var passable = _map.PassableOf(ordinal);
@@ -411,9 +412,16 @@ internal sealed class ChunkGraph
         _faceChosen[best] = true;
     }
 
-    /// <summary>One chunk's transitions (nodes of the abstract graph) and the search scratch per node.</summary>
+    /// <summary>
+    /// One chunk's transitions (nodes of the abstract graph) and the search scratch per node. Capacity for
+    /// <see cref="InitialCapacity"/> nodes (about 18 KB with the distance matrix) is reserved at the first build
+    /// so that door traffic reshaping entrances does not allocate in steady state; a chunk with more transitions
+    /// grows once and keeps the larger arrays.
+    /// </summary>
     internal sealed class ChunkNodes
     {
+        public const int InitialCapacity = 64;
+
         public int Count;
         public ushort[] Cell = [];
         public byte[] Faces = [];
