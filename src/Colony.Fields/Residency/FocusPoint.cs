@@ -30,6 +30,13 @@ public sealed record ResidencyOptions
 
     /// <summary>When true, chunks outside every focus ring stay Hibernating instead of Unloaded (everything stays resident, nothing simulates far away).</summary>
     public bool HibernateInsteadOfUnload { get; init; }
+
+    /// <summary>
+    /// The residency of every chunk in a fresh World and whenever no focus point exists: <see cref="ChunkResidency.Active"/>
+    /// (the default, the never-unload policy of a World without streaming) or <see cref="ChunkResidency.Unloaded"/> (a
+    /// streaming World whose chunks are generated on demand as focus points arrive, spec section 5.3).
+    /// </summary>
+    public ChunkResidency InitialResidency { get; init; } = ChunkResidency.Active;
 }
 
 /// <summary>Chunk counts per residency state.</summary>

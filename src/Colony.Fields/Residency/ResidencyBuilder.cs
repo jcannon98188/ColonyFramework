@@ -53,13 +53,6 @@ public sealed class ResidencyBuilder : WorldExtensionDefinition
 
     public ResidencyOptions Options { get; }
 
-    /// <summary>
-    /// Where Unloaded chunks without stored bytes come from, resolved once per World. ProcGen's <c>AddGeneration</c>
-    /// sets it when the residency manager is registered first; a Game without generation leaves it null, and every
-    /// unloaded chunk is then kept as its save section.
-    /// </summary>
-    public Func<World, IChunkSource>? ChunkSource { get; set; }
-
     public override string Name => ExtensionName;
 
     public override ulong LayoutHash
@@ -68,7 +61,8 @@ public sealed class ResidencyBuilder : WorldExtensionDefinition
         {
             ulong hash = Hash64.Combine(LayoutSeed, (ulong)TilePos.Id);
             hash = Hash64.Combine(hash, (ulong)Options.MaxFocusPoints);
-            return Hash64.Combine(hash, Options.HibernateInsteadOfUnload ? 1UL : 0UL);
+            hash = Hash64.Combine(hash, Options.HibernateInsteadOfUnload ? 1UL : 0UL);
+            return Hash64.Combine(hash, (ulong)Options.InitialResidency);
         }
     }
 
@@ -104,8 +98,8 @@ public static class ResidencyRegistration
     /// <summary>
     /// Gives Worlds of this schema streaming residency over the chunks of <paramref name="fields"/> (spec section 5.3).
     /// Entities carrying <paramref name="tilePos"/> (a <see cref="TilePos"/> Component) belong to the chunk they stand
-    /// in and freeze with it. Call once per schema, after <see cref="WorldBuilderExtensions.AddFields"/> and before
-    /// a chunk source such as ProcGen's <c>AddGeneration</c>.
+    /// in and freeze with it. Call once per schema, after <see cref="WorldBuilderExtensions.AddFields"/>. Chunks the
+    /// manager holds no bytes for come from <see cref="FieldSet.ChunkSource"/> (ProcGen's generation sets it).
     /// </summary>
     public static ResidencyBuilder AddResidency(this WorldBuilder builder, FieldsBuilder fields, ComponentType tilePos, ResidencyOptions? options = null)
     {
@@ -113,6 +107,10 @@ public static class ResidencyRegistration
         ArgumentNullException.ThrowIfNull(fields);
         options ??= new ResidencyOptions();
         ArgumentOutOfRangeException.ThrowIfLessThan(options.MaxFocusPoints, 1);
+        if (options.InitialResidency is not (ChunkResidency.Active or ChunkResidency.Unloaded))
+        {
+            throw new ArgumentException("InitialResidency must be Active or Unloaded.", nameof(options));
+        }
         var residency = new ResidencyBuilder(builder, fields, tilePos, options);
         builder.AddExtension(residency);
         builder.AddSystem(ResidencyBuilder.DefineFocusSystem());

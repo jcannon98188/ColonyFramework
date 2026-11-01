@@ -32,11 +32,9 @@ public sealed class ChunkResidencyManager : IWorldExtension
     private readonly CommandBuffer _commands;
     private readonly CommandBuffer _placements;
     private readonly List<int> _placedOrdinals = [];
-    private FocusPoint[] _focus;
+    private readonly FocusPoint[] _focus;
     private int _focusCount;
     private List<EntityId>[] _movers = [];
-    private IChunkSource? _source;
-    private bool _sourceResolved;
     private ChunkCellBuffer? _cells;
     private int _cellsOrdinal = -1;
 
@@ -68,6 +66,14 @@ public sealed class ChunkResidencyManager : IWorldExtension
         _focus = new FocusPoint[definition.Options.MaxFocusPoints];
         _commands = world.CreateCommandBuffer();
         _placements = world.CreateCommandBuffer();
+        if (definition.Options.InitialResidency == ChunkResidency.Unloaded)
+        {
+            for (int ordinal = 0; ordinal < _layout.ChunkCount; ordinal++)
+            {
+                _fields.UnloadCells(ordinal, store: false);
+                _fields.SetResidency(ordinal, ChunkResidency.Unloaded);
+            }
+        }
     }
 
     public World World => _world;
@@ -107,20 +113,8 @@ public sealed class ChunkResidencyManager : IWorldExtension
     /// <summary>True once the chunk's initial Entities were placed from the chunk source (or the host marked it generated).</summary>
     public bool HasBeenGenerated(int ordinal) => _generated[ordinal];
 
-    /// <summary>The chunk source of this World, or null when the schema registered none.</summary>
-    public IChunkSource? Source
-    {
-        get
-        {
-            if (!_sourceResolved)
-            {
-                _sourceResolved = true;
-                _source = _definition.ChunkSource?.Invoke(_world);
-            }
-
-            return _source;
-        }
-    }
+    /// <summary>The chunk source of this World (<see cref="FieldSet.ChunkSource"/>), or null when it has none.</summary>
+    public IChunkSource? Source => _fields.ChunkSource;
 
     /// <summary>
     /// Records that the chunk's cells and Entities were written from the chunk source by the host (for example a
@@ -292,13 +286,15 @@ public sealed class ChunkResidencyManager : IWorldExtension
 
     private void ComputeDesired()
     {
+        var options = _definition.Options;
+        var far = options.HibernateInsteadOfUnload ? ChunkResidency.Hibernating : ChunkResidency.Unloaded;
         if (_focusCount == 0)
         {
-            Array.Fill(_desired, ChunkResidency.Active);
+            Array.Fill(_desired, options.InitialResidency == ChunkResidency.Active ? ChunkResidency.Active : far);
             return;
         }
 
-        Array.Fill(_desired, _definition.Options.HibernateInsteadOfUnload ? ChunkResidency.Hibernating : ChunkResidency.Unloaded);
+        Array.Fill(_desired, far);
         for (int i = 0; i < _focusCount; i++)
         {
             var focus = _focus[i];

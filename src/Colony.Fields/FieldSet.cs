@@ -97,6 +97,13 @@ public sealed class FieldSet : IWorldExtension
     /// <summary>The residency manager of this World, when the schema registered one (<see cref="ResidencyRegistration.AddResidency"/>).</summary>
     public ChunkResidencyManager? Residency { get; internal set; }
 
+    /// <summary>
+    /// Where the residency manager gets chunks nobody holds bytes for (spec section 5.3): set by ProcGen's generation
+    /// extension when its World is created, or by the host before the first Tick. Null means every unloaded chunk is
+    /// kept as its save section and a never-loaded chunk holds its Fields' initial values.
+    /// </summary>
+    public IChunkSource? ChunkSource { get; set; }
+
     internal void SetResidency(int ordinal, ChunkResidency state) => _residency[ordinal] = state;
 
     /// <summary>
