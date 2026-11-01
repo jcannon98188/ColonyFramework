@@ -6,7 +6,8 @@ public readonly record struct SavedComponent(string Name, int Size, int Alignmen
 
 public readonly record struct SavedResource(string Name, int Size, ulong LayoutHash, ResourceKind Kind, bool IsPersistent);
 
-public readonly record struct SavedExtension(string Name, ulong LayoutHash);
+/// <summary>A saved extension: its name, layout hash (compared on load) and optional content version (<see cref="WorldExtensionDefinition.Version"/>, recorded only).</summary>
+public readonly record struct SavedExtension(string Name, ulong LayoutHash, string? Version = null);
 
 public readonly record struct SavedRelation(string Name, RelationOptions Options);
 
@@ -16,7 +17,8 @@ public readonly record struct SavedSystemOverride(string System, string Original
 /// <summary>
 /// One Plugin of the saved World's Plugin set, in load order: its id and version, whether it is deterministic,
 /// the Components and Resources it registered (names into <see cref="SaveManifest.Components"/> and
-/// <see cref="SaveManifest.Resources"/>) and the Systems it replaced.
+/// <see cref="SaveManifest.Resources"/>), the Systems it replaced, and the C ABI version a Native Plugin was
+/// built against (0 for a C# Plugin; spec section 8, versioning).
 /// </summary>
 public sealed record SavedPlugin(
     string Id,
@@ -24,7 +26,8 @@ public sealed record SavedPlugin(
     bool Deterministic,
     ImmutableArray<string> Components,
     ImmutableArray<string> Resources,
-    ImmutableArray<SavedSystemOverride> Overrides);
+    ImmutableArray<SavedSystemOverride> Overrides,
+    int AbiVersion = 0);
 
 /// <summary>
 /// The manifest section of a save (spec section 7.1): the embedded schema table (every Component with its
@@ -114,7 +117,7 @@ public sealed class SaveManifest
         var extensions = ImmutableArray.CreateBuilder<SavedExtension>(schema.Extensions.Length);
         foreach (var e in schema.Extensions)
         {
-            extensions.Add(new SavedExtension(e.Name, e.LayoutHash));
+            extensions.Add(new SavedExtension(e.Name, e.LayoutHash, e.Version));
         }
 
         var relations = ImmutableArray.CreateBuilder<SavedRelation>(schema.RelationCount);
@@ -168,7 +171,7 @@ public sealed class SaveManifest
                 }
             }
 
-            plugins.Add(new SavedPlugin(plugin.Id, plugin.Version, plugin.Deterministic, components.ToImmutable(), resources.ToImmutable(), overrides.ToImmutable()));
+            plugins.Add(new SavedPlugin(plugin.Id, plugin.Version, plugin.Deterministic, components.ToImmutable(), resources.ToImmutable(), overrides.ToImmutable(), plugin.AbiVersion));
         }
 
         return plugins.MoveToImmutable();
@@ -242,6 +245,30 @@ public sealed class SaveManifest
                 w.WriteString(o.System);
                 w.WriteString(o.OriginalPlugin);
             }
+
+            w.WriteInt32(p.AbiVersion);
+        }
+
+
+        // Extension content versions (the generation version) trail the manifest and are written only when an
+        // extension has one, so saves without them encode exactly as before.
+        int versioned = 0;
+        foreach (var e in Extensions)
+        {
+            versioned += e.Version is null ? 0 : 1;
+        }
+
+        if (versioned > 0)
+        {
+            w.WriteInt32(versioned);
+            for (int i = 0; i < Extensions.Length; i++)
+            {
+                if (Extensions[i].Version is { } version)
+                {
+                    w.WriteInt32(i);
+                    w.WriteString(version);
+                }
+            }
         }
 
         return w.ToArray();
@@ -304,7 +331,26 @@ public sealed class SaveManifest
             string id = r.ReadString();
             string version = r.ReadString();
             bool deterministic = r.ReadByte() != 0;
-            plugins.Add(new SavedPlugin(id, version, deterministic, ReadNames(ref r), ReadNames(ref r), ReadOverrides(ref r)));
+            var ownedComponents = ReadNames(ref r);
+            var ownedResources = ReadNames(ref r);
+            var overrides = ReadOverrides(ref r);
+            plugins.Add(new SavedPlugin(id, version, deterministic, ownedComponents, ownedResources, overrides, r.ReadInt32()));
+        }
+
+        if (r.Remaining > 0)
+        {
+            int versioned = r.ReadCount(8);
+            for (int i = 0; i < versioned; i++)
+            {
+                int index = r.ReadInt32();
+                string extensionVersion = r.ReadString();
+                if ((uint)index >= (uint)extensions.Count)
+                {
+                    throw new SaveFormatException($"The manifest names extension #{index} for a version, but has {extensions.Count} extensions.");
+                }
+
+                extensions[index] = extensions[index] with { Version = extensionVersion };
+            }
         }
 
         r.ExpectEnd();

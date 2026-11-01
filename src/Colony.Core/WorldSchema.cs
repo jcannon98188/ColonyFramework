@@ -38,8 +38,10 @@ public sealed class WorldSchema
         List<InputCommandDescriptor> inputCommands,
         Dictionary<Type, int> inputByClrType,
         Dictionary<string, int> inputByName,
-        ResourceType? commandRejections)
+        ResourceType? commandRejections,
+        List<Colony.Diagnostics.InspectorDescriptor> inspectors)
     {
+        _inspectors = [.. inspectors];
         _inputCommands = [.. inputCommands];
         _inputByClrType = inputByClrType;
         _inputByName = inputByName;
@@ -351,6 +353,26 @@ public sealed class WorldSchema
         }
 
         return _inputCommands[type.Id];
+    }
+
+    private readonly Colony.Diagnostics.InspectorDescriptor[] _inspectors;
+
+    /// <summary>Registered inspectors (spec section 10.2) in registration order; not part of <see cref="SchemaHash"/>.</summary>
+    public ReadOnlySpan<Colony.Diagnostics.InspectorDescriptor> Inspectors => _inspectors;
+
+    /// <summary>The inspector registered under <paramref name="name"/>.</summary>
+    public Colony.Diagnostics.InspectorDescriptor Inspector(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        foreach (var inspector in _inspectors)
+        {
+            if (string.Equals(inspector.Name, name, StringComparison.Ordinal))
+            {
+                return inspector;
+            }
+        }
+
+        throw new ArgumentException($"No inspector named '{name}' is registered in this schema.", nameof(name));
     }
 
     /// <summary>Every Phase in the order a Tick runs them: the six named Phases with Game Phases between them.</summary>

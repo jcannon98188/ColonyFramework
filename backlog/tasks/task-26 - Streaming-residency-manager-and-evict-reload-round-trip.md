@@ -1,9 +1,11 @@
 ---
 id: TASK-26
 title: 'Streaming: residency manager and evict/reload round trip'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-11-01 16:15'
 labels:
   - ready-for-agent
   - implementation

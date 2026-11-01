@@ -43,10 +43,13 @@ jobs:
       # The benchmark projects (benchmarks/) are part of the solution build above; they are never run on shared
       # runners (spec section 10.3: performance is tracked on the dedicated machine, not gated here).
       - name: Publish Native AOT hosts
-        # The AOT comparison tests (Colony.Testing.Tests, HelloColony.Tests) skip unless these are published.
+        # The AOT comparison tests (Colony.Testing.Tests, HelloColony.Tests, Colony.Native.Tests) skip unless these are published.
+        # Colony.Native is the C ABI shared library (spec section 8); the C conformance host is compiled by the tests
+        # with the runner's C compiler (MSVC Build Tools on Windows, cc on Linux) and loads this library.
         run: |
           dotnet publish tests/Colony.Testing.AotHost --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
           dotnet publish samples/HelloColony --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
+          dotnet publish src/Colony.Native --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
 
       - name: Test
         run: dotnet test Colony.slnx --configuration Release --no-build

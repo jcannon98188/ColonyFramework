@@ -70,6 +70,12 @@ public abstract class DefinitionTable
 
     public ReadOnlySpan<char> NameOf(int index) => Registry.Strings.Get(NameIds[index]);
 
+    /// <summary>Bytes per Definition value: the registered struct size.</summary>
+    internal abstract int Stride { get; }
+
+    /// <summary>Every baked value as raw bytes, <see cref="Stride"/> each, in index order (the C ABI reads tables this way).</summary>
+    internal abstract ReadOnlySpan<byte> RawValues { get; }
+
     private protected void ThrowIfNotBaked()
     {
         if (!IsBaked)
@@ -102,10 +108,50 @@ public sealed class DefinitionTable<T> : DefinitionTable
 
     public ref readonly T this[int index] => ref Values[index];
 
+    internal override int Stride => System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
+
+    internal override ReadOnlySpan<byte> RawValues => System.Runtime.InteropServices.MemoryMarshal.AsBytes(Values);
+
     /// <summary>The Definition named <paramref name="name"/>; throws when there is none.</summary>
     public ref readonly T this[ReadOnlySpan<char> name] => ref Values[IndexOf(name)];
 
     internal void Bake(StringId[] names, int[] indexOfString, BlobRef<T> blob)
+    {
+        NameIds = names;
+        IndexOfString = indexOfString;
+        _blob = blob;
+        IsBaked = true;
+    }
+}
+
+/// <summary>
+/// A Definition table registered by layout alone (a Native Plugin's type, TASK-28): values are raw bytes of
+/// <see cref="Stride"/> each. C# code reads it through <see cref="DefinitionRegistry.Table{T}"/> only when the
+/// type was registered from C#; a raw table is read through the C ABI.
+/// </summary>
+internal sealed class RawDefinitionTable : DefinitionTable
+{
+    private readonly int _stride;
+    private BlobRef<byte> _blob;
+
+    internal RawDefinitionTable(DefinitionRegistry registry, string typeName, int stride)
+        : base(registry, typeName)
+    {
+        _stride = stride;
+    }
+
+    internal override int Stride => _stride;
+
+    internal override ReadOnlySpan<byte> RawValues
+    {
+        get
+        {
+            ThrowIfNotBaked();
+            return Registry.Blobs.Get(_blob);
+        }
+    }
+
+    internal void Bake(StringId[] names, int[] indexOfString, BlobRef<byte> blob)
     {
         NameIds = names;
         IndexOfString = indexOfString;

@@ -115,6 +115,18 @@ public sealed class PluginRegistration
     public LogMessageId AddLogMessage(string template) => Builder.AddLogMessage(template);
 
     /// <summary>
+    /// Registers an inspector named <c>&lt;plugin id&gt;.&lt;name&gt;</c> (spec section 10.2): a read-only callback
+    /// the inspection server runs at a Tick boundary and <c>colony-inspect inspectors</c> lists, so tooling shows the
+    /// Plugin's own view of its state.
+    /// </summary>
+    public PluginRegistration AddInspector(string name, Colony.Diagnostics.InspectorCallback callback)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Builder.AddInspector(name.StartsWith(Manifest.Id + ".", StringComparison.Ordinal) ? name : Manifest.Id + "." + name, callback);
+        return this;
+    }
+
+    /// <summary>
     /// Registers a System (spec section 4.3). With <paramref name="overridable"/>, a Plugin that depends on this
     /// one may replace it through <see cref="ReplaceSystem"/>; the replacement is recorded in the save manifest.
     /// Plugin Systems reach Core once every Plugin has registered, in registration order.

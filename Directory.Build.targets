@@ -23,4 +23,17 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!--
+    COLONY_NO_INSPECT (spec section 10.2): -p:ColonyNoInspect=true defines the symbol in every project, so hosts
+    can guard their inspection-server code; Colony.Diagnostics also drops its server sources (see its csproj).
+    Passing COLONY_NO_INSPECT in DefineConstants directly sets ColonyNoInspect too.
+  -->
+  <PropertyGroup Condition="$(DefineConstants.Contains('COLONY_NO_INSPECT'))">
+    <ColonyNoInspect>true</ColonyNoInspect>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ColonyNoInspect)' == 'true' and !$(DefineConstants.Contains('COLONY_NO_INSPECT'))">
+    <DefineConstants>$(DefineConstants);COLONY_NO_INSPECT</DefineConstants>
+  </PropertyGroup>
+
 </Project>
