@@ -108,4 +108,64 @@ public sealed class StreamingScenarioTests
 
         Assert.True(result.Passed, result.Describe());
     }
+
+    // ---- TASK-27: delayed loads, deadline stalls and the resident-chunk budget through the harness (AC #1, #2, #5) ----
+
+    private static StreamingScenario Delayed(int sourceDelayMs = 0) => new() { LoadDelayTicks = 2, RingWidth = 2, SourceDelayMs = sourceDelayMs };
+
+    private static StreamingScenario Budgeted() => new() { ResidentChunkBudget = 10 };
+
+    [Fact]
+    public void Delayed_background_loads_hash_identically_on_every_worker_count_and_match_the_golden_hashes()
+    {
+        var result = DeterminismHarness.Run(Delayed(), Options);
+
+        Assert.True(result.Passed, result.Describe());
+        Assert.Equal(36, result.Hashes.ToArray().Distinct().Count());
+        var golden = TestGolden.Store.Compare(result);
+        Assert.True(golden.Passed, golden.Message);
+    }
+
+    [Fact]
+    public void A_slow_chunk_source_stalls_Ticks_but_produces_the_hashes_of_a_fast_one()
+    {
+        var fast = DeterminismHarness.Run(Delayed(), Options);
+        var slow = Delayed(sourceDelayMs: 15);
+        var slowResult = DeterminismHarness.Run(slow, Options);
+
+        Assert.True(fast.Passed, fast.Describe());
+        Assert.True(slowResult.Passed, slowResult.Describe());
+        Assert.Null(slowResult.FirstDivergenceFrom(fast));
+        Assert.True(slow.LastCounters.Loads > 0, "the slow run loaded chunks");
+        Assert.True(slow.LastCounters.LoadStalls > 0, $"a 15 ms-per-chunk source two Ticks away from its deadline must stall at least once: {slow.LastCounters}");
+    }
+
+    [Fact]
+    public void The_resident_chunk_budget_hashes_identically_on_every_worker_count_and_matches_the_golden_hashes()
+    {
+        var scenario = Budgeted();
+        var result = DeterminismHarness.Run(scenario, Options);
+
+        Assert.True(result.Passed, result.Describe());
+        var golden = TestGolden.Store.Compare(result);
+        Assert.True(golden.Passed, golden.Message);
+        Assert.True(scenario.LastCounters.Evictions > 0, "the two focus points demanded more than 10 resident chunks at some point");
+
+        using var world = DeterminismHarness.CreateWorld(scenario, DeterminismHarness.BuildSchema(scenario, null), workers: 2, listener: null);
+        for (int i = 0; i < 36; i++)
+        {
+            scenario.Advance(world);
+            var counts = world.Residency().Counts;
+            Assert.True(counts.Active + counts.Hibernating <= 10, $"Tick {i}: {counts}");
+            Assert.True(world.Residency().RingInvariantHolds());
+        }
+    }
+
+    [Fact]
+    public void A_steady_state_tick_with_delayed_loading_and_a_settled_focus_allocates_nothing()
+    {
+        var result = AllocationHarness.Run(new StreamingScenario { LoadDelayTicks = 2, RingWidth = 2, FocusMovesUntilTick = 12, RoundTripEvery = 0 }, new AllocationOptions { Workers = 1, WarmupTicks = 20, MeasuredTicks = 10 });
+
+        Assert.True(result.Passed, result.Describe());
+    }
 }
