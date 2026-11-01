@@ -133,6 +133,7 @@ internal sealed class FlowFieldStore
 
         var bounds = BoundsOf(canonical, radiusChunks, map.Fields.Size);
         long bytes = FlowField.BytesFor(bounds.ChunkCount, canonical.Length);
+        FoldUsed(inTick ? tick : tick - 1);
         while (_fields.Count > 0 && _bytes + bytes > _options.FlowFieldMemoryBudgetBytes)
         {
             Evict(LeastRecentlyUsed());
@@ -225,11 +226,17 @@ internal sealed class FlowFieldStore
     public void BeginTick(long tick)
     {
         _workUnitsThisTick = 0;
+        FoldUsed(tick - 1);
+    }
+
+    /// <summary>Parallel reads only raise a flag (order independent); the Tick thread turns it into a recency stamp here.</summary>
+    private void FoldUsed(long tick)
+    {
         foreach (var field in _fields)
         {
             if (field.ConsumeUsed())
             {
-                field.LastUsedTick = tick - 1;
+                field.LastUsedTick = Math.Max(field.LastUsedTick, tick);
             }
         }
     }

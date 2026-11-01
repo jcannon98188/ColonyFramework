@@ -173,7 +173,12 @@ internal sealed class FlowBuilder
         }
     }
 
-    /// <summary>Adds the unaffected face neighbours of the <paramref name="index"/>-th affected chunk whose adjacent face values differ from the old ones.</summary>
+    /// <summary>
+    /// Adds the unaffected face neighbours of the <paramref name="index"/>-th affected chunk whose adjacent face
+    /// values differ from the old ones. A horizontal edge changes only with a face cell's passability, which shows
+    /// in its value; a climb out of a dirty chunk's top face also depends on that cell's Up bit, which does not,
+    /// so the chunk above joins too when one of its cells may have leaned on a climb that is gone.
+    /// </summary>
     private void GrowIfFacesMoved(FlowField field, int index)
     {
         int slot = _affectedSlots[index];
@@ -187,16 +192,46 @@ internal sealed class FlowBuilder
                 continue;
             }
 
-            for (int cell = 0; cell < FieldChunk.CellCount; cell++)
+            bool join = false;
+            for (int cell = 0; cell < FieldChunk.CellCount && !join; cell++)
             {
-                if (OnFace(cell, d) && now[cell] != old[cell])
-                {
-                    Join(field, nSlot);
-                    break;
-                }
+                join = OnFace(cell, d) && now[cell] != old[cell];
+            }
+
+            if (!join && d == 5 && field.IsDirtyChunk(slot))
+            {
+                join = AClimbMayHaveGone(field, slot, nSlot, old);
+            }
+
+            if (join)
+            {
+                Join(field, nSlot);
             }
         }
     }
+
+    /// <summary>True when a bottom-face cell of the chunk above sits at exactly old + 1 over a top-face cell it can no longer climb down to.</summary>
+    private static bool AClimbMayHaveGone(FlowField field, int slot, int above, ReadOnlySpan<ushort> old)
+    {
+        var theirs = field.DistancesOf(above);
+        for (int cell = FieldChunk.CellCount - FaceCells; cell < FieldChunk.CellCount; cell++)
+        {
+            ushort was = old[cell];
+            if (was == FlowField.Unreached || field.TryNeighbour(slot, cell, 5, out _, out _))
+            {
+                continue;
+            }
+
+            if (theirs[cell - (FieldChunk.Mask * FaceCells)] == was + 1)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private const int FaceCells = FieldChunk.Size * FieldChunk.Size;
 
     private static bool OnFace(int cell, int direction)
     {
