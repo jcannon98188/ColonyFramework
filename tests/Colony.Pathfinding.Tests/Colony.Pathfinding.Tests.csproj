@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Zero-allocation gates: tiered recompilation inside a measured window allocates (see Colony.Core.Tests). -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Pathfinding\Colony.Pathfinding.csproj" />
+    <!-- The unreachable-target scenario runs through the determinism and allocation harnesses (spec section 10.3). -->
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <!-- Region data must be absent from saves and rebuilt on load (AC #4). -->
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Committed golden hashes (GoldenHashStore); located by source path, not copied. -->
+    <None Include="Golden\**" />
+  </ItemGroup>
+
+</Project>

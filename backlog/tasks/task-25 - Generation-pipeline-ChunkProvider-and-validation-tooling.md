@@ -1,11 +1,11 @@
 ---
 id: TASK-25
 title: 'Generation pipeline, ChunkProvider and validation tooling'
-status: In Progress
+status: Done
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-10-31 20:49'
+updated_date: '2026-11-01 16:15'
 labels:
   - ready-for-agent
   - implementation
@@ -32,10 +32,22 @@ Spec section 9.3 (decided in the procedural generation ticket): named stages dec
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A pipeline of stages with declared Fields produces a chunk from (seed, coordinate) with identical bytes regardless of generation order or thread
-- [ ] #2 Adding a stage does not change the random numbers drawn by other stages
-- [ ] #3 Region-keyed placement and halo reads produce seamless features across chunk boundaries, verified by the seam check
-- [ ] #4 The pre-pass Resource is deterministic and cached; placed Entities have IDs derived from (seed, stage, coordinate, index)
-- [ ] #5 Validation tooling reports golden hash drift, order dependence and seam mismatches per stage, with per-stage timing
-- [ ] #6 The save manifest records the generation version and regeneration is refused on mismatch
+- [x] #1 A pipeline of stages with declared Fields produces a chunk from (seed, coordinate) with identical bytes regardless of generation order or thread
+- [x] #2 Adding a stage does not change the random numbers drawn by other stages
+- [x] #3 Region-keyed placement and halo reads produce seamless features across chunk boundaries, verified by the seam check
+- [x] #4 The pre-pass Resource is deterministic and cached; placed Entities have IDs derived from (seed, stage, coordinate, index)
+- [x] #5 Validation tooling reports golden hash drift, order dependence and seam mismatches per stage, with per-stage timing
+- [x] #6 The save manifest records the generation version and regeneration is refused on mismatch
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+API: builder.AddGeneration(fields, version), stages with Reads/Writes/HaloReads/After/Before/ChunkLocal, pre-pass Resources, immutable thread-shared ChunkProvider, GenerationValidator (golden drift, order dependence, seam check, timing). Generation version is a single int set by the Game; save manifest records it, regeneration refused on mismatch. No generation scenario linked into AOT host yet (fits TASK-26/27).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Generation pipeline, ChunkProvider, stage-keyed randomness, validation tooling and generation-version save check merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->
