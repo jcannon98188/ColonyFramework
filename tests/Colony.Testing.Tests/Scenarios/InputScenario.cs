@@ -48,7 +48,17 @@ public sealed class InputScenario : Scenario
     public const int RejectNegativeDeposit = 1;
     public const int RejectTooMany = 2;
 
-    public override string Name => "inputs";
+    public override string Name => Restricted ? "inputs-restricted" : "inputs";
+
+    /// <summary>
+    /// TASK-35: with permissions. Source 0 is the host; the last source is a spectator (every command denied);
+    /// Dismiss is denied by default and granted to the host only. Denied commands stay in the canonical list and
+    /// replay log and count as rejections.
+    /// </summary>
+    public bool Restricted { get; init; }
+
+    /// <summary>The host source of a <see cref="Restricted"/> run.</summary>
+    public static InputSource Host => new(0);
 
     public override ulong Seed { get; init; } = DefaultSeed;
 
@@ -63,7 +73,24 @@ public sealed class InputScenario : Scenario
 
     public override int InitialEntityCapacity => 4096;
 
-    public override void Compose(WorldBuilder builder) => ComposeStatic(builder);
+    public override void Compose(WorldBuilder builder)
+    {
+        ComposeStatic(builder);
+        if (Restricted)
+        {
+            DeclarePermissions(builder, Sources);
+        }
+    }
+
+    /// <summary>The permission table of a <see cref="Restricted"/> run (spectator = source <paramref name="sources"/> - 1).</summary>
+    public static void DeclarePermissions(WorldBuilder builder, int sources)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        var dismiss = builder.InputCommand<Dismiss>();
+        builder.SetInputAccess(new InputSource((uint)(sources - 1)), InputAccess.Deny);
+        builder.SetInputAccess(dismiss, InputAccess.Deny);
+        builder.GrantInput(Host, dismiss);
+    }
 
     public override void Populate(World world)
     {
