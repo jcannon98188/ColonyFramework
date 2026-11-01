@@ -20,6 +20,8 @@
     <!-- A shared library has no entry point; the SDK still wants an OutputType for NativeLib. -->
     <OutputType>Library</OutputType>
     <IsPackable>true</IsPackable>
+    <!-- The NativeLib publish copies no XML doc file into the RID output; the public surface is colony.h, not managed docs. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
