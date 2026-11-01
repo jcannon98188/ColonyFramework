@@ -36,7 +36,7 @@ internal static unsafe class WorldLoader
         CheckPlugins(manifest, schema, options);
         var plans = PlanComponents(manifest, schema, options);
         var resourcePlans = PlanResources(manifest, schema, options);
-        PlanExtensions(manifest, schema);
+        var extensionPlans = PlanExtensions(manifest, schema, options);
 
         var entities = reader.Section(SaveContainer.EntitiesSection);
         var er = new ByteReader(entities, SaveContainer.EntitiesSection);
@@ -75,7 +75,7 @@ internal static unsafe class WorldLoader
             world.MarkAllChunksChanged();
             LoadWorldSection(reader, world, manifest);
             world.RebuildRelationIndex();
-            world.LoadExtensions(name => new SectionReader(reader, name, SaveContainer.ExtensionPrefix + name + "/"));
+            world.LoadExtensions(name => ExtensionReader(reader, name, extensionPlans));
 
             if (options.VerifyWorldHash && manifest.SchemaHash == schema.SchemaHash)
             {
@@ -220,28 +220,71 @@ internal static unsafe class WorldLoader
         return plans;
     }
 
-    private static void PlanExtensions(SaveManifest manifest, WorldSchema schema)
+    /// <summary>
+    /// Per saved extension: the schema must have it with the same layout hash; a saved format version behind the
+    /// build's resolves to a migration chain (keyed by the extension's name), one ahead of the build is refused.
+    /// Returns the chains by extension name (only extensions that need migrating are listed).
+    /// </summary>
+    private static Dictionary<string, (SavedExtension Saved, WorldExtensionDefinition Current, ExtensionMigration[] Chain)> PlanExtensions(SaveManifest manifest, WorldSchema schema, LoadOptions options)
     {
+        var plans = new Dictionary<string, (SavedExtension, WorldExtensionDefinition, ExtensionMigration[])>(StringComparer.Ordinal);
         foreach (var saved in manifest.Extensions)
         {
-            bool found = false;
-            foreach (var current in schema.Extensions)
+            WorldExtensionDefinition? current = null;
+            foreach (var candidate in schema.Extensions)
             {
-                if (string.Equals(current.Name, saved.Name, StringComparison.Ordinal))
+                if (string.Equals(candidate.Name, saved.Name, StringComparison.Ordinal))
                 {
-                    found = true;
-                    if (current.LayoutHash != saved.LayoutHash)
-                    {
-                        throw new MigrationException($"Extension '{saved.Name}' changed layout (saved 0x{saved.LayoutHash:X16}, schema 0x{current.LayoutHash:X16}); extension migrations are not supported.");
-                    }
+                    current = candidate;
+                    break;
                 }
             }
 
-            if (!found)
+            if (current is null)
             {
                 throw new MigrationException($"Extension '{saved.Name}' is not registered in the schema.");
             }
+
+            if (current.LayoutHash != saved.LayoutHash)
+            {
+                throw new MigrationException($"Extension '{saved.Name}' changed layout (saved 0x{saved.LayoutHash:X16}, schema 0x{current.LayoutHash:X16}); an extension's layout cannot be migrated, only its section format (FormatVersion).");
+            }
+
+            if (saved.FormatVersion > current.FormatVersion)
+            {
+                throw new MigrationException($"Extension '{saved.Name}' was saved with format version {saved.FormatVersion}, newer than this build's version {current.FormatVersion}: the save needs a newer build.");
+            }
+
+            if (saved.FormatVersion < current.FormatVersion)
+            {
+                plans[saved.Name] = (saved, current, options.Migrations.ResolveExtension(saved.Name, saved.FormatVersion, current.FormatVersion));
+            }
         }
+
+        return plans;
+    }
+
+    /// <summary>The sections of one extension as its <see cref="IWorldExtension.Load"/> expects them: straight from the container, or rewritten by the extension's migration chain first.</summary>
+    private static ExtensionStateReader ExtensionReader(SaveContainer.Reader reader, string name, Dictionary<string, (SavedExtension Saved, WorldExtensionDefinition Current, ExtensionMigration[] Chain)> plans)
+    {
+        string prefix = SaveContainer.ExtensionPrefix + name + "/";
+        if (!plans.TryGetValue(name, out var plan))
+        {
+            return new SectionReader(reader, name, prefix);
+        }
+
+        var sections = new ExtensionSections(name, plan.Saved.LayoutHash, plan.Current.LayoutHash);
+        foreach (string full in reader.NamesWithPrefix(prefix))
+        {
+            sections.Set(full[prefix.Length..], reader.Section(full));
+        }
+
+        foreach (var step in plan.Chain)
+        {
+            step.Migrate(sections);
+        }
+
+        return new MigratedSectionReader(name, sections);
     }
 
     private static void LoadArchetypes(SaveContainer.Reader reader, World world, SaveManifest manifest, ColumnPlan?[] plans)
@@ -760,6 +803,38 @@ internal static unsafe class WorldLoader
             bool found = _reader.TryGetSection(_prefix + name, out var bytes);
             payload = bytes;
             return found;
+        }
+    }
+
+    /// <summary>Sections after an extension's migration chain rewrote them (<see cref="ExtensionSections"/>), in ordinal name order.</summary>
+    private sealed class MigratedSectionReader : ExtensionStateReader
+    {
+        private readonly ExtensionSections _sections;
+        private readonly string[] _names;
+
+        public MigratedSectionReader(string extension, ExtensionSections sections)
+        {
+            ExtensionName = extension;
+            _sections = sections;
+            _names = [.. sections.Names];
+        }
+
+        public override string ExtensionName { get; }
+
+        public override int SectionCount => _names.Length;
+
+        public override string SectionName(int index) => _names[index];
+
+        public override bool TryGetSection(string name, out ReadOnlySpan<byte> payload)
+        {
+            if (_sections.Contains(name))
+            {
+                payload = _sections.GetBytes(name);
+                return true;
+            }
+
+            payload = default;
+            return false;
         }
     }
 }
