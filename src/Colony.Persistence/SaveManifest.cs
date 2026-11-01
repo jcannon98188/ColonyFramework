@@ -46,7 +46,8 @@ public sealed class SaveManifest
         ImmutableArray<SavedResource> resources,
         ImmutableArray<SavedExtension> extensions,
         ImmutableArray<SavedRelation> relations,
-        ImmutableArray<SavedPlugin> plugins)
+        ImmutableArray<SavedPlugin> plugins,
+        SavedInputPermissions? inputPermissions = null)
     {
         ContainerVersion = containerVersion;
         SchemaHash = schemaHash;
@@ -58,6 +59,7 @@ public sealed class SaveManifest
         Extensions = extensions;
         Relations = relations;
         Plugins = plugins;
+        InputPermissions = inputPermissions ?? SavedInputPermissions.Unrestricted;
     }
 
     public int ContainerVersion { get; }
@@ -81,6 +83,9 @@ public sealed class SaveManifest
 
     /// <summary>The Plugin set the World ran with, in load order; empty for a World built without Plugins.</summary>
     public ImmutableArray<SavedPlugin> Plugins { get; }
+
+    /// <summary>The Input Command permission table the World ran with (TASK-35); <see cref="SavedInputPermissions.Unrestricted"/> when none was declared.</summary>
+    public SavedInputPermissions InputPermissions { get; }
 
     /// <summary>False when any Plugin declared itself non-deterministic: the World's hash and replay carry no guarantee (<see cref="World.IsDeterministic"/>).</summary>
     public bool IsDeterministic
@@ -136,7 +141,8 @@ public sealed class SaveManifest
             resources.MoveToImmutable(),
             extensions.MoveToImmutable(),
             relations.MoveToImmutable(),
-            CapturePlugins(schema));
+            CapturePlugins(schema),
+            SavedInputPermissions.Of(schema));
     }
 
     private static ImmutableArray<SavedPlugin> CapturePlugins(WorldSchema schema)
@@ -258,7 +264,9 @@ public sealed class SaveManifest
             versioned += e.Version is null ? 0 : 1;
         }
 
-        if (versioned > 0)
+        // The Input permission table (TASK-35) follows the version block, so a restricted save always writes that
+        // block (possibly with count 0); unrestricted saves encode exactly as before.
+        if (versioned > 0 || !InputPermissions.IsUnrestricted)
         {
             w.WriteInt32(versioned);
             for (int i = 0; i < Extensions.Length; i++)
@@ -269,6 +277,11 @@ public sealed class SaveManifest
                     w.WriteString(version);
                 }
             }
+        }
+
+        if (!InputPermissions.IsUnrestricted)
+        {
+            InputPermissions.Write(w);
         }
 
         return w.ToArray();
@@ -353,8 +366,9 @@ public sealed class SaveManifest
             }
         }
 
+        var permissions = r.Remaining > 0 ? SavedInputPermissions.Read(ref r) : SavedInputPermissions.Unrestricted;
         r.ExpectEnd();
-        return new SaveManifest(containerVersion, schemaHash, tick, worldHash, seed, components.MoveToImmutable(), resources.MoveToImmutable(), extensions.MoveToImmutable(), relations.MoveToImmutable(), plugins.MoveToImmutable());
+        return new SaveManifest(containerVersion, schemaHash, tick, worldHash, seed, components.MoveToImmutable(), resources.MoveToImmutable(), extensions.MoveToImmutable(), relations.MoveToImmutable(), plugins.MoveToImmutable(), permissions);
     }
 
     private static ImmutableArray<string> ReadNames(ref ByteReader r)

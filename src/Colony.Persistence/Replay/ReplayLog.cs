@@ -27,6 +27,8 @@ internal sealed class ReplayData
 
     public List<string> Plugins { get; } = [];
 
+    public SavedInputPermissions InputPermissions { get; set; } = SavedInputPermissions.Unrestricted;
+
     public List<(long Tick, byte[] Frame)> Frames { get; } = [];
 
     public List<(long Tick, ulong Hash)> Checkpoints { get; } = [];
@@ -35,7 +37,7 @@ internal sealed class ReplayData
 
     public ReplayData Copy(long? upToTick = null)
     {
-        var copy = new ReplayData { Seed = Seed, SchemaHash = SchemaHash, StartTick = StartTick, EndTick = upToTick ?? EndTick, TickRate = TickRate };
+        var copy = new ReplayData { Seed = Seed, SchemaHash = SchemaHash, StartTick = StartTick, EndTick = upToTick ?? EndTick, TickRate = TickRate, InputPermissions = InputPermissions };
         copy.Inputs.AddRange(Inputs);
         copy.Plugins.AddRange(Plugins);
         foreach (var f in Frames)
@@ -144,6 +146,13 @@ internal sealed class ReplayData
                 w.WriteString(plugin);
             }
 
+            // The Input permission table (TASK-35) trails the header only when one was declared, so unrestricted
+            // logs encode exactly as before.
+            if (!InputPermissions.IsUnrestricted)
+            {
+                InputPermissions.Write(w);
+            }
+
             sections.Add(new ContainerSection(ReplayLog.HeaderSection, w.ToArray()));
         }
 
@@ -213,6 +222,11 @@ internal sealed class ReplayData
             for (int i = 0; i < plugins; i++)
             {
                 data.Plugins.Add(r.ReadString());
+            }
+
+            if (r.Remaining > 0)
+            {
+                data.InputPermissions = SavedInputPermissions.Read(ref r);
             }
 
             r.ExpectEnd();
@@ -338,6 +352,9 @@ public sealed class ReplayLog
 
     /// <summary>The Plugin set of the recording; empty until the Plugins package exists.</summary>
     public ImmutableArray<string> Plugins { get; }
+
+    /// <summary>The Input Command permission table of the recording schema (TASK-35); denied commands stay in the frames.</summary>
+    public SavedInputPermissions InputPermissions => _data.InputPermissions;
 
     public int FrameCount => _frameTicks.Length;
 
