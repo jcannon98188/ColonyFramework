@@ -1,9 +1,11 @@
 ---
 id: TASK-35
 title: Per-source Input Command permissions
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:30'
+updated_date: '2026-11-01 21:31'
 labels:
   - ready-for-agent
   - implementation
