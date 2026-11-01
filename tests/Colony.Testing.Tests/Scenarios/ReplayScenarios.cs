@@ -12,24 +12,41 @@ namespace Colony.Testing.Tests.Scenarios;
 public sealed class ReplayPlaybackScenario : Scenario
 {
     private readonly ReplayLog _log;
+    private readonly Scenario? _schema;
     private ReplayPlayer? _player;
 
-    public ReplayPlaybackScenario(ReplayLog log)
+    /// <summary>Plays <paramref name="log"/> back on the schema and initial state of <paramref name="schema"/> (the input scenario when null).</summary>
+    public ReplayPlaybackScenario(ReplayLog log, Scenario? schema = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         _log = log;
+        _schema = schema;
         Seed = log.Seed;
     }
 
-    public override string Name => "inputs-replay";
+    public override string Name => (_schema?.Name ?? "inputs") + "-replay";
 
     public override ulong Seed { get; init; }
 
-    public override int InitialEntityCapacity => 4096;
+    public override int InitialEntityCapacity => _schema?.InitialEntityCapacity ?? 4096;
 
-    public override void Compose(WorldBuilder builder) => InputScenario.ComposeStatic(builder);
+    public override void Compose(WorldBuilder builder)
+    {
+        if (_schema is null)
+        {
+            InputScenario.ComposeStatic(builder);
+        }
+        else
+        {
+            _schema.Compose(builder);
+        }
+    }
 
-    public override void Populate(World world) => _player = null;
+    public override void Populate(World world)
+    {
+        _player = null;
+        _schema?.Populate(world);
+    }
 
     public override void Advance(World world)
     {
@@ -43,7 +60,7 @@ public sealed class ReplayPlaybackScenario : Scenario
     }
 
     /// <summary>Runs <paramref name="scenario"/> live for <paramref name="ticks"/> Ticks on a fresh World and records it.</summary>
-    public static ReplayLog Record(InputScenario scenario, int ticks, int workers, ReplayOptions? options = null)
+    public static ReplayLog Record(Scenario scenario, int ticks, int workers, ReplayOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(scenario);
         var builder = new WorldBuilder();
