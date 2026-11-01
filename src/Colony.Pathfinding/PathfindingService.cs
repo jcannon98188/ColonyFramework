@@ -1,5 +1,6 @@
 ﻿using Colony.Fields;
 using Colony.Hashing;
+using Colony.Numerics;
 
 namespace Colony.Pathfinding;
 
@@ -168,6 +169,16 @@ public sealed class PathfindingService : IWorldExtension
             return waypoints.Length > 1 && LocalStep.Toward(map, from, waypoints[1], _search.LocalDistanceScratch, _search.LocalQueueScratch, out next);
         }
     }
+
+    /// <summary>
+    /// The path-follow helper (spec section 9.1): moves <paramref name="state"/> by <paramref name="distance"/> tiles
+    /// along <paramref name="waypoints"/> (a <see cref="FindPath"/> or request result), choosing each face move by
+    /// local A* inside the unit's chunk and keeping a fixed-point sub-tile offset. Safe from parallel chunk jobs
+    /// (reads only the class's passability; the state is the caller's) and allocation free. Games own movement:
+    /// write the resulting tile and offset back to the Entity's Components.
+    /// </summary>
+    public PathFollowStatus Follow(ref PathFollowState state, ReadOnlySpan<TilePos> waypoints, MovementClass movementClass, Fixed32 distance)
+        => PathFollower.Advance(Regions(movementClass), ref state, waypoints, distance);
 
     /// <summary>Residency of a chunk as the search sees it; tests override it until the streaming manager (TASK-25) reports Unloaded chunks.</summary>
     internal Func<int, ChunkResidency>? ResidencyOverride { get; set; }
