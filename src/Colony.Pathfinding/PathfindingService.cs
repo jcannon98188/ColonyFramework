@@ -29,12 +29,15 @@ public sealed class PathfindingService : IWorldExtension
     private readonly Lock _searchLock = new();
     private readonly PathSearch _search = new();
     private readonly Func<int, ChunkResidency> _residency;
+    private readonly Lock _flowLock = new();
+    private readonly FlowFieldStore _flows;
+    private readonly PathfindingCounterIds _counters;
     private FieldSet? _fields;
     private PathRequestQueue? _queue;
     private bool _inTick;
     private bool _disposed;
 
-    internal PathfindingService(World world, PathfindingOptions options, List<MovementClassDefinition> definitions, List<MovementClassDescriptor> descriptors)
+    internal PathfindingService(World world, PathfindingOptions options, List<MovementClassDefinition> definitions, List<MovementClassDescriptor> descriptors, PathfindingCounterIds counters)
     {
         World = world;
         Options = options;
@@ -42,6 +45,8 @@ public sealed class PathfindingService : IWorldExtension
         _descriptors = [.. descriptors];
         _maps = new RegionMap?[_definitions.Length];
         _residency = Residency;
+        _flows = new FlowFieldStore(this, options);
+        _counters = counters;
     }
 
     public World World { get; }
@@ -86,7 +91,148 @@ public sealed class PathfindingService : IWorldExtension
     public void EnsureBuilt(MovementClass movementClass) => _ = Regions(movementClass);
 
     /// <summary>Relabels every chunk of a class from scratch; the oracle for the incremental path. Call between Ticks or from a Begin/End hook.</summary>
-    public void Rebuild(MovementClass movementClass) => Regions(movementClass).RebuildAll(parallel: !_inTick);
+    public void Rebuild(MovementClass movementClass)
+    {
+        var map = Regions(movementClass);
+        map.RebuildAll(parallel: !_inTick);
+        lock (_flowLock)
+        {
+            _flows.MarkDirty(map, map.LastRelabelled, World.CurrentTick);
+        }
+    }
+
+    /// <summary>
+    /// The flow Field of a goal set for a class (spec section 9.1): the breadth-first distances to the nearest
+    /// goal over the goal chunks plus <paramref name="radiusChunks"/> (default <see cref="PathfindingOptions.DefaultFlowRadiusChunks"/>),
+    /// built now when no Field with the same goals exists, evicting the least recently used Fields past
+    /// <see cref="PathfindingOptions.FlowFieldMemoryBudgetBytes"/>. Goal order and duplicates do not matter.
+    /// Call it from serial code (host, Begin/End hooks); read the result from anywhere. Between Ticks a dirty
+    /// Field is repaired before it is returned (lazy repair on read); during a Tick the Begin repair pass and the
+    /// staleness bound apply.
+    /// </summary>
+    public FlowField FlowField(ReadOnlySpan<TilePos> goals, MovementClass movementClass, int radiusChunks = -1)
+    {
+        if (goals.IsEmpty)
+        {
+            throw new ArgumentException("A flow Field needs at least one goal tile.", nameof(goals));
+        }
+
+        if (radiusChunks < 0)
+        {
+            radiusChunks = Options.DefaultFlowRadiusChunks;
+        }
+
+        var map = Regions(movementClass);
+        lock (_flowLock)
+        {
+            return _flows.GetOrCreate(goals, map, radiusChunks, World.CurrentTick, _inTick);
+        }
+    }
+
+    /// <summary>The flow Field with this id, null once it was evicted (or never existed).</summary>
+    public FlowField? FlowField(FlowFieldId id)
+    {
+        lock (_flowLock)
+        {
+            return _flows.Find(id);
+        }
+    }
+
+    /// <summary>Brings a flow Field up to date now whatever the budget (serial code only: host, Begin/End hooks).</summary>
+    public void Repair(FlowField field)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        lock (_flowLock)
+        {
+            _flows.Repair(field);
+        }
+    }
+
+    /// <summary>
+    /// One face move toward the goals of <paramref name="field"/> from <paramref name="from"/>: the flow Field's
+    /// step inside its bound, otherwise HPA* toward the nearest goal (which enters the bound on the way), as spec
+    /// section 9.1 routes units outside the bound. <see cref="FlowStepStatus.OutsideBound"/> is returned only when
+    /// HPA* finds no path to any goal either.
+    /// </summary>
+    public FlowStepStatus TryNextStep(FlowField field, TilePos from, out TilePos next)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        var status = field.TryStep(from, out next);
+        if (status != FlowStepStatus.OutsideBound)
+        {
+            return status;
+        }
+
+        var goals = field.Goals;
+        int best = -1;
+        int bestDistance = int.MaxValue;
+        for (int i = 0; i < goals.Length; i++)
+        {
+            int distance = Math.Abs(goals[i].X - from.X) + Math.Abs(goals[i].Y - from.Y) + Math.Abs(goals[i].Z - from.Z);
+            if (distance < bestDistance && Reachable(from, goals[i], field.MovementClass))
+            {
+                bestDistance = distance;
+                best = i;
+            }
+        }
+
+        return best >= 0 && TryNextStep(from, goals[best], field.MovementClass, out next) ? FlowStepStatus.Step : FlowStepStatus.OutsideBound;
+    }
+
+    public int FlowFieldCount
+    {
+        get
+        {
+            lock (_flowLock)
+            {
+                return _flows.Count;
+            }
+        }
+    }
+
+    /// <summary>Memory the live flow Fields hold now.</summary>
+    public long FlowFieldBytes
+    {
+        get
+        {
+            lock (_flowLock)
+            {
+                return _flows.Bytes;
+            }
+        }
+    }
+
+    public FlowFieldCounters FlowCounters
+    {
+        get
+        {
+            lock (_flowLock)
+            {
+                return _flows.Counters;
+            }
+        }
+    }
+
+    /// <summary>Begin Phase, after delivery: the layered repair pass, then the Tick's counters.</summary>
+    internal void RepairFlowFields(in SystemContext context)
+    {
+        int backlog;
+        long bytes;
+        long repairUnits;
+        lock (_flowLock)
+        {
+            _flows.RepairPass(context.Tick);
+            backlog = _flows.Backlog;
+            bytes = _flows.Bytes;
+            repairUnits = _flows.WorkUnitsThisTick;
+        }
+
+        context.Count(_counters.QueueDepth, Queue.Count);
+        context.Count(_counters.WorkUnits, Queue.WorkUnitsThisTick + repairUnits);
+        context.Count(_counters.RepairBacklog, backlog);
+        context.Count(_counters.FlowFieldBytes, bytes);
+        context.Count(_counters.FlowFieldBudgetBytes, Options.FlowFieldMemoryBudgetBytes);
+    }
 
     /// <summary>Applies Field writes made since the last sync point to every built class now (host code between Ticks, or a Begin/End hook).</summary>
     public void Sync() => SyncAll(parallel: true);
@@ -234,7 +380,19 @@ public sealed class PathfindingService : IWorldExtension
     {
         foreach (var map in _maps)
         {
-            map?.Sync(parallel);
+            if (map is null)
+            {
+                continue;
+            }
+
+            map.Sync(parallel);
+            if (!map.LastRelabelled.IsEmpty)
+            {
+                lock (_flowLock)
+                {
+                    _flows.MarkDirty(map, map.LastRelabelled, World.CurrentTick);
+                }
+            }
         }
     }
 
@@ -251,6 +409,11 @@ public sealed class PathfindingService : IWorldExtension
     /// <summary>The start-of-Tick sync point: End-Phase writes of the previous Tick and host writes since.</summary>
     void IWorldExtension.BeginTick(long tick)
     {
+        lock (_flowLock)
+        {
+            _flows.BeginTick(tick);
+        }
+
         SyncAll(parallel: true);
         _inTick = true;
     }
@@ -289,6 +452,11 @@ public sealed class PathfindingService : IWorldExtension
         lock (_buildLock)
         {
             Array.Clear(_maps);
+        }
+
+        lock (_flowLock)
+        {
+            _flows.Clear();
         }
 
         if (reader.TryGetSection(PathRequestQueue.SectionName, out var requests))

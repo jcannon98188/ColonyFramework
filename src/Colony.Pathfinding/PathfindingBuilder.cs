@@ -31,6 +31,28 @@ public sealed record PathfindingOptions
     /// <summary>Ticks between a request's submission Tick T and its delivery at the Begin Phase of T + N; at least 1.</summary>
     public int ResultDelayTicks { get; init; } = 2;
 
+    /// <summary>Chunks of radius a flow Field spans around its goal chunks when the caller names none.</summary>
+    public int DefaultFlowRadiusChunks { get; init; } = 2;
+
+    /// <summary>
+    /// Memory the World's flow Fields may hold together (about 8 KB per chunk of bound); asking for a Field past
+    /// it evicts the least recently used ones first. A single Field larger than the budget is still built.
+    /// </summary>
+    public long FlowFieldMemoryBudgetBytes { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>Work units (cells popped) the Begin-Phase flow repair pass may spend per Tick; a Field is started only while there is room, so at least one dirty Field is repaired per Tick.</summary>
+    public long FlowRepairBudgetPerTick { get; init; } = 100_000;
+
+    /// <summary>A dirty flow Field this many Ticks old is repaired whatever the budget (the staleness bound).</summary>
+    public int FlowStalenessTicks { get; init; } = 8;
+
+    /// <summary>
+    /// Rebuild-vs-incremental threshold for flow Fields: when at least this fraction of a Field's chunks is dirty
+    /// (or the incremental repair's affected set grows to it), the whole Field is recomputed instead. Both paths
+    /// give identical distances; 0 always rebuilds, 1 never does unless every chunk is dirty.
+    /// </summary>
+    public double FlowRebuildFraction { get; init; } = 0.25;
+
     internal void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxMovementClasses, 1);
@@ -39,7 +61,36 @@ public sealed record PathfindingOptions
         ArgumentOutOfRangeException.ThrowIfGreaterThan(FullRebuildFraction, 1.0);
         ArgumentOutOfRangeException.ThrowIfLessThan(WorkBudgetPerTick, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(ResultDelayTicks, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(DefaultFlowRadiusChunks, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(FlowFieldMemoryBudgetBytes, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(FlowRepairBudgetPerTick, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(FlowStalenessTicks, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(FlowRebuildFraction, 0.0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(FlowRebuildFraction, 1.0);
     }
+}
+
+/// <summary>
+/// The diagnostics counters the pathfinding service writes every Tick into the Tick record
+/// (<see cref="Colony.Diagnostics.TickRecordView.Counters"/>, indexed by <see cref="Colony.Diagnostics.CounterId.Id"/>); registered by <see cref="PathfindingRegistration.AddPathfinding"/>.
+/// </summary>
+/// <param name="QueueDepth">Requests pending after the Tick's delivery.</param>
+/// <param name="WorkUnits">Work units spent this Tick by searches and flow repairs.</param>
+/// <param name="RepairBacklog">Dirty flow Field chunks left after the repair pass.</param>
+/// <param name="FlowFieldBytes">Memory the live flow Fields hold.</param>
+/// <param name="FlowFieldBudgetBytes">The configured flow Field memory budget.</param>
+public readonly record struct PathfindingCounterIds(
+    Colony.Diagnostics.CounterId QueueDepth,
+    Colony.Diagnostics.CounterId WorkUnits,
+    Colony.Diagnostics.CounterId RepairBacklog,
+    Colony.Diagnostics.CounterId FlowFieldBytes,
+    Colony.Diagnostics.CounterId FlowFieldBudgetBytes)
+{
+    public const string QueueDepthName = "pathfinding.queue-depth";
+    public const string WorkUnitsName = "pathfinding.work-units";
+    public const string RepairBacklogName = "pathfinding.repair-backlog";
+    public const string FlowFieldBytesName = "pathfinding.flow-bytes";
+    public const string FlowFieldBudgetBytesName = "pathfinding.flow-budget-bytes";
 }
 
 /// <summary>
@@ -156,11 +207,14 @@ public sealed class PathfindingBuilder : WorldExtensionDefinition
         _layoutHash = hash;
     }
 
+    /// <summary>The counters the service writes each Tick (see <see cref="PathfindingCounterIds"/>).</summary>
+    public PathfindingCounterIds Counters { get; internal set; }
+
     public override IWorldExtension Create(World world)
     {
         ArgumentNullException.ThrowIfNull(world);
         Freeze();
-        return new PathfindingService(world, Options, _definitions, _descriptors);
+        return new PathfindingService(world, Options, _definitions, _descriptors, Counters);
     }
 
     internal static SystemDefinition DefineSystem() => new()
@@ -185,9 +239,11 @@ public sealed class PathfindingBuilder : WorldExtensionDefinition
         WritesResources = ResourceMask.Of(results),
         Begin = (in SystemContext context) =>
         {
-            var queue = context.World.Pathfinding().Queue;
+            var service = context.World.Pathfinding();
+            var queue = service.Queue;
             queue.Compute();
             queue.Deliver(in context, results, context.Tick);
+            service.RepairFlowFields(in context);
         },
     };
 }
@@ -211,6 +267,12 @@ public static class PathfindingRegistration
         builder.AddEvent<PathResult>(PathfindingBuilder.ResultQueueName);
         pathfinding.RequestQueue = builder.Resource(PathfindingBuilder.RequestQueueName);
         pathfinding.ResultQueue = builder.Resource(PathfindingBuilder.ResultQueueName);
+        pathfinding.Counters = new PathfindingCounterIds(
+            builder.AddCounter(PathfindingCounterIds.QueueDepthName),
+            builder.AddCounter(PathfindingCounterIds.WorkUnitsName),
+            builder.AddCounter(PathfindingCounterIds.RepairBacklogName),
+            builder.AddCounter(PathfindingCounterIds.FlowFieldBytesName),
+            builder.AddCounter(PathfindingCounterIds.FlowFieldBudgetBytesName));
         builder.AddSystem(PathfindingBuilder.DefineSystem());
         builder.AddSystem(PathfindingBuilder.DefineIntake(pathfinding.RequestQueue));
         builder.AddSystem(PathfindingBuilder.DefineDeliver(pathfinding.ResultQueue));

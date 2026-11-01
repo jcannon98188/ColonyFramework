@@ -163,6 +163,9 @@ public sealed class RegionMap
     /// <summary>Bumps every time the chunk's local labels are rebuilt; consumers rebuild derived data when it moves.</summary>
     internal int LabelVersionOf(int ordinal) => _chunks[ordinal].Version;
 
+    /// <summary>The chunks whose passability changed in the last <see cref="Sync"/> or <see cref="RebuildAll"/> (ascending ordinals; every chunk after a rebuild).</summary>
+    internal ReadOnlySpan<int> LastRelabelled => _changed.AsSpan(0, _changedCount);
+
     /// <summary>Local component label per cell (0 = impassable); null while the chunk has no passable tile.</summary>
     internal ushort[]? LabelsOf(int ordinal) => _chunks[ordinal].Count == 0 ? null : _chunks[ordinal].Labels;
 
@@ -208,6 +211,7 @@ public sealed class RegionMap
     internal void Sync(bool parallel)
     {
         _dirtyCount = 0;
+        _changedCount = 0;
         _chunkStamp++;
         foreach (var change in _fields.ChangedSince(_syncedVersion))
         {
