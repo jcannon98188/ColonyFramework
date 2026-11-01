@@ -1,9 +1,11 @@
 ---
 id: TASK-39
 title: Pathfinding memory bound and incremental door-toggle cost
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
+updated_date: '2026-11-01 21:53'
 labels:
   - ready-for-agent
   - implementation
