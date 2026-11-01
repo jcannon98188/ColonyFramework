@@ -30,6 +30,7 @@ public sealed class PathfindingService : IWorldExtension
     private readonly PathSearch _search = new();
     private readonly Func<int, ChunkResidency> _residency;
     private FieldSet? _fields;
+    private PathRequestQueue? _queue;
     private bool _inTick;
     private bool _disposed;
 
@@ -180,6 +181,31 @@ public sealed class PathfindingService : IWorldExtension
     public PathFollowStatus Follow(ref PathFollowState state, ReadOnlySpan<TilePos> waypoints, MovementClass movementClass, Fixed32 distance)
         => PathFollower.Advance(Regions(movementClass), ref state, waypoints, distance);
 
+    /// <summary>The <see cref="PathRequest"/> event queue (emit requests on it; from host code through a command buffer).</summary>
+    public ResourceType RequestQueue => World.Schema.Resource(PathfindingBuilder.RequestQueueName);
+
+    /// <summary>The <see cref="PathResult"/> event queue, filled at the Begin Phase of each delivery Tick.</summary>
+    public ResourceType ResultQueue => World.Schema.Resource(PathfindingBuilder.ResultQueueName);
+
+    /// <summary>The waypoints of a result delivered this Tick (start, chunk transitions, goal); empty unless found.</summary>
+    public ReadOnlySpan<TilePos> Waypoints(in PathResult result) => Queue.Waypoints(in result);
+
+    /// <summary>The results emitted at the last delivery (the most recent Begin Phase), in canonical order; for hosts and tests, Systems read <see cref="ResultQueue"/>.</summary>
+    public ReadOnlySpan<PathResult> Delivered => Queue.Delivered;
+
+    /// <summary>Requests taken in and not yet delivered.</summary>
+    public int PendingRequestCount => Queue.Count;
+
+    public PathQueueCounters QueueCounters => Queue.Counters;
+
+    internal PathRequestQueue Queue => _queue ??= new PathRequestQueue(this);
+
+    internal Lock SearchLock => _searchLock;
+
+    internal PathSearch Search => _search;
+
+    internal Func<int, ChunkResidency> ResidencyFunc => _residency;
+
     /// <summary>Residency of a chunk as the search sees it; tests override it until the streaming manager (TASK-25) reports Unloaded chunks.</summary>
     internal Func<int, ChunkResidency>? ResidencyOverride { get; set; }
 
@@ -235,15 +261,14 @@ public sealed class PathfindingService : IWorldExtension
 
     void IWorldExtension.EndTick(long tick) => _inTick = false;
 
-    /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash).</summary>
-    void IWorldExtension.Hash(ref Hash64State state)
-    {
-    }
+    /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash); the pending request queue is state and is hashed.</summary>
+    void IWorldExtension.Hash(ref Hash64State state) => Queue.Hash(ref state);
 
-    /// <summary>Region data is not saved (spec section 9.1); only the ids of the built classes, so loading rebuilds the same set.</summary>
+    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set) and, once used, the request queue are.</summary>
     void IWorldExtension.Save(ExtensionStateWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
+        Queue.Save(writer);
         Span<byte> built = stackalloc byte[(_maps.Length + 7) >> 3];
         built.Clear();
         for (int i = 0; i < _maps.Length; i++)
@@ -264,6 +289,11 @@ public sealed class PathfindingService : IWorldExtension
         lock (_buildLock)
         {
             Array.Clear(_maps);
+        }
+
+        if (reader.TryGetSection(PathRequestQueue.SectionName, out var requests))
+        {
+            Queue.Load(requests, reader.ExtensionName);
         }
 
         if (!reader.TryGetSection(BuiltSectionName, out var built))
