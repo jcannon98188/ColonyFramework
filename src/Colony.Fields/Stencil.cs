@@ -173,7 +173,7 @@ internal sealed class StencilRunner<T>
             // Materialise first so the input's centre aliases the output.
             var output = _front.WriteCells(ordinal);
             Fields.MarkWritten(_fieldId, ordinal);
-            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary);
+            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary, aliasCentre: true);
             _kernel(in input, MemoryMarshal.Cast<byte, T>(output));
         }
 
@@ -185,7 +185,7 @@ internal sealed class StencilRunner<T>
                 return;
             }
 
-            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary);
+            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary, aliasCentre: false);
             var output = _back!.WriteCells(ordinal);
             _kernel(in input, MemoryMarshal.Cast<byte, T>(output));
             _changed[ordinal] = _front.CellsEqual(ordinal, output) ? (byte)0 : (byte)1;
