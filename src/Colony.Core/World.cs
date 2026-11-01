@@ -70,6 +70,22 @@ public sealed partial class World : IDisposable
         throw new InvalidOperationException($"No extension of type {typeof(T).Name} is registered in this World's schema.");
     }
 
+    /// <summary>The per-World state of a registered extension, or false when the schema registered none of that type (tooling probes with this).</summary>
+    public bool TryGetExtension<T>([global::System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? extension) where T : class, IWorldExtension
+    {
+        foreach (var candidate in _extensions)
+        {
+            if (candidate is T match)
+            {
+                extension = match;
+                return true;
+            }
+        }
+
+        extension = null;
+        return false;
+    }
+
     /// <summary>Extensions in registration order, for the Tick runner and the hash.</summary>
     internal ReadOnlySpan<IWorldExtension> Extensions => _extensions;
 
@@ -117,6 +133,9 @@ public sealed partial class World : IDisposable
 
     /// <summary>Ticks completed so far; the Tick about to run has this number.</summary>
     public long CurrentTick { get; private set; }
+
+    /// <summary>The gate the host passed in <see cref="WorldOptions.TickGate"/> (pause and step, spec section 4.3), or null.</summary>
+    public TickGate? TickGate => _options.TickGate;
 
     /// <summary>Set when a System threw: the World no longer Ticks (spec section 4.3).</summary>
     public WorldFault? Fault { get; private set; }
@@ -199,7 +218,8 @@ public sealed partial class World : IDisposable
 
     internal ScratchArena Scratch { get; }
 
-    internal int ArchetypeCount => _archetypeCount;
+    /// <summary>Archetypes this World has created so far (per World, in creation order; see <see cref="DescribeArchetype"/>).</summary>
+    public int ArchetypeCount => _archetypeCount;
 
     internal Archetype ArchetypeAt(int index) => _archetypes[index];
 

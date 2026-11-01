@@ -3,8 +3,8 @@
   <!--
     Colony.ProcGen: procedural generation (spec section 9.3). Fixed-point noise utilities (value, gradient,
     simplex, cellular, fBm, domain warping, region-keyed spot sampling) keyed by (seed, stage, coordinate, use index)
-    so any chunk is a pure function of (seed, coordinate). Later tickets add the stage pipeline and ChunkProvider.
-    Depends on Colony.Core (and Colony.Fields once it exists); enforced by tools/Colony.DependencyCheck.
+    so any chunk is a pure function of (seed, coordinate). The stage pipeline, ChunkProvider and validation tooling live in
+    Generation/ and Validation/. Depends on Colony.Core and Colony.Fields; enforced by tools/Colony.DependencyCheck.
   -->
 
   <PropertyGroup>
@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
   </ItemGroup>
 
   <ItemGroup>

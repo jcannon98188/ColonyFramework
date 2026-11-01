@@ -17,6 +17,13 @@ public abstract class WorldExtensionDefinition
     /// <summary>Identity of the registered layout (names, cell layouts, dimensions). Part of the schema hash, so read after <see cref="Freeze"/>.</summary>
     public abstract ulong LayoutHash { get; }
 
+    /// <summary>
+    /// A content version the save manifest records beside <see cref="LayoutHash"/> (for example the generation
+    /// version, spec section 9.3). Unlike the layout hash it is neither part of the schema hash nor compared on
+    /// load: the extension decides what a mismatch means. Null (the default) records nothing.
+    /// </summary>
+    public virtual string? Version => null;
+
     /// <summary>Closes registration; called once from <see cref="WorldBuilder.Build"/> before <see cref="LayoutHash"/> is read.</summary>
     public virtual void Freeze()
     {

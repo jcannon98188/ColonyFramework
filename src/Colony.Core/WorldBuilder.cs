@@ -42,6 +42,27 @@ public sealed class WorldBuilder
         return this;
     }
 
+    /// <summary>
+    /// The first registered extension of type <typeparamref name="T"/>, or null: lets a Plugin find an
+    /// extension the Game registered (for example the generation pipeline) without holding its builder.
+    /// </summary>
+    public T? FindExtension<T>()
+        where T : WorldExtensionDefinition
+    {
+        foreach (var extension in _extensions)
+        {
+            if (extension is T match)
+            {
+                return match;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Id of the Plugin whose scope is open (<see cref="BeginPlugin"/>), or null outside a Plugin scope; extensions use it for provenance.</summary>
+    public string? CurrentPluginId => _currentPlugin >= 0 ? _plugins[_currentPlugin].Id : null;
+
     public WorldBuilder()
     {
         // Resource 0 in every schema: the queue that structural ops losing a conflict are reported on
@@ -171,6 +192,27 @@ public sealed class WorldBuilder
 
         _counters.Add(name);
         return new Colony.Diagnostics.CounterId(_counters.Count - 1);
+    }
+
+    private readonly List<Colony.Diagnostics.InspectorDescriptor> _inspectors = [];
+
+    /// <summary>
+    /// Registers a named inspector (spec section 10.2): a read-only view a Plugin or Game exposes to the
+    /// inspection server and <c>colony-inspect</c>. Plugins register theirs from <c>Register</c>; the server
+    /// runs them at Tick boundaries. Names are unique per schema.
+    /// </summary>
+    public WorldBuilder AddInspector(string name, Colony.Diagnostics.InspectorCallback inspector)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(inspector);
+        ThrowIfBuilt();
+        if (_inspectors.Exists(i => string.Equals(i.Name, name, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException($"An inspector named '{name}' is already registered.", nameof(name));
+        }
+
+        _inspectors.Add(new Colony.Diagnostics.InspectorDescriptor(_inspectors.Count, name, inspector));
+        return this;
     }
 
     /// <summary>
@@ -601,7 +643,7 @@ public sealed class WorldBuilder
             extension.Freeze();
         }
 
-        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections)
+        return new WorldSchema(_components, _byClrType, _byName, _resources, _resourceByClrType, _resourceByName, _phases, schedule, _extensions, _relations, _debugValidation, _logMessages, _counters, _inputCommands, _inputByClrType, _inputByName, _commandRejections, _inspectors)
         {
             Plugins = [.. _plugins],
             SystemOverrides = [.. _systemOverrides],
