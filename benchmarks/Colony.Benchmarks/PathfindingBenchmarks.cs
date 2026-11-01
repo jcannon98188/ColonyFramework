@@ -10,6 +10,9 @@ namespace Colony.Benchmarks;
 /// big 512x512x64, over <see cref="PrototypeTerrain"/> (rooms, doors, rock, stairs, sealed pockets): the
 /// from-scratch rebuild a load performs, an incremental sync after one door toggle, and 1024 Reachable queries
 /// (constant time: the same cost on both sizes).
+/// TASK-39 ToggleDoorAndSync (1 / 8 workers, after the setup Ticks): BFS relabelling of every affected region
+/// 508 / 482 us small, 4,623 / 4,431 us big; union-find merge fast path and bounded split search 118 / 91 us
+/// small, 124 / 98 us big.
 /// </summary>
 public class PathfindingBenchmarks
 {
