@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-11-01 16:24'
+updated_date: '2026-11-01 21:28'
 labels:
   - ready-for-agent
   - implementation
@@ -35,7 +35,7 @@ Spec section 10.2 (decided in the debug and inspection tooling ticket): one vers
 - [x] #2 Pause, step and replay-based rewind work through the shared Tick gate; debug mutations go through the command buffer and appear in the replay log
 - [x] #3 The desync finder compares two hash trails and reports the first diverging Tick, Phase and System; the diff command compares two saves or a World and a save
 - [x] #4 Building with COLONY_NO_INSPECT removes the server entirely; without a token the server refuses connections; AllowMutation is required for any write
-- [ ] #5 Plugins register inspectors in Register and they appear in colony-inspect
+- [x] #5 Plugins register inspectors in Register and they appear in colony-inspect
 <!-- AC:END -->
 
 ## Implementation Notes
