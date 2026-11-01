@@ -22,6 +22,9 @@ public sealed class PathfindingService : IWorldExtension
     /// <summary>Name of the one saved section: the ids of the built classes.</summary>
     internal const string BuiltSectionName = "built";
 
+    /// <summary>Prefix of the per-class sections holding the pathfinding summary of Unloaded chunks (spec section 5.3), written only when some chunk is Unloaded.</summary>
+    internal const string SummarySectionPrefix = "summary/";
+
     private readonly MovementClassDefinition[] _definitions;
     private readonly MovementClassDescriptor[] _descriptors;
     private readonly RegionMap?[] _maps;
@@ -213,7 +216,9 @@ public sealed class PathfindingService : IWorldExtension
 
     private FieldSet Fields => _fields ??= World.Fields();
 
-    private RegionMap Build(int id)
+    private RegionMap Build(int id) => Build(id, default, string.Empty);
+
+    private RegionMap Build(int id, ReadOnlySpan<byte> summary, string extensionName)
     {
         lock (_buildLock)
         {
@@ -224,11 +229,18 @@ public sealed class PathfindingService : IWorldExtension
             }
 
             var map = new RegionMap(World, Fields, _definitions[id], _descriptors[id].Class, Options);
+            if (!summary.IsEmpty)
+            {
+                map.RestoreSummary(summary, extensionName);
+            }
+
             map.RebuildAll(parallel: !_inTick);
             Volatile.Write(ref _maps[id], map);
             return map;
         }
     }
+
+    private static string SummarySectionName(int id) => string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{SummarySectionPrefix}{id}");
 
     internal void SyncAll(bool parallel)
     {
@@ -264,7 +276,7 @@ public sealed class PathfindingService : IWorldExtension
     /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash); the pending request queue is state and is hashed.</summary>
     void IWorldExtension.Hash(ref Hash64State state) => Queue.Hash(ref state);
 
-    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set) and, once used, the request queue are.</summary>
+    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set), the pathfinding summary of Unloaded chunks (spec section 5.3) and, once used, the request queue are.</summary>
     void IWorldExtension.Save(ExtensionStateWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
@@ -273,9 +285,14 @@ public sealed class PathfindingService : IWorldExtension
         built.Clear();
         for (int i = 0; i < _maps.Length; i++)
         {
-            if (_maps[i] is not null)
+            if (_maps[i] is { } map)
             {
                 built[i >> 3] |= (byte)(1 << (i & 7));
+                var summary = map.WriteSummary();
+                if (summary.Length > 0)
+                {
+                    writer.WriteSection(SummarySectionName(i), summary);
+                }
             }
         }
 
@@ -310,7 +327,7 @@ public sealed class PathfindingService : IWorldExtension
         {
             if ((built[i >> 3] & (1 << (i & 7))) != 0)
             {
-                _ = Build(i);
+                _ = reader.TryGetSection(SummarySectionName(i), out var summary) ? Build(i, summary, reader.ExtensionName) : Build(i);
             }
         }
     }

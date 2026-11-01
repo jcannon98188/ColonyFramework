@@ -53,6 +53,7 @@ public sealed class RegionMap
     private int[] _touched = new int[64];
     private int _touchedCount;
     private readonly int[] _chunkMark;
+    private readonly bool[] _summaryValid;
     private int _chunkStamp;
     private long[] _affected = new long[64];
     private int _affectedCount;
@@ -94,6 +95,7 @@ public sealed class RegionMap
         _neighbours = new int[count * 6];
         _inWorld = new ulong[]?[count];
         _chunkMark = new int[count];
+        _summaryValid = new bool[count];
         var size = fields.Size;
         for (int ordinal = 0; ordinal < count; ordinal++)
         {
@@ -181,6 +183,87 @@ public sealed class RegionMap
         return (uint)x < (uint)size.ChunksX && (uint)y < (uint)size.ChunksY && (uint)z < (uint)size.ChunksZ
             ? _fields.OrdinalOf(new ChunkCoord(x, y, z))
             : -1;
+    }
+
+    /// <summary>Bytes of one chunk's summary record: the ordinal then the passable bits and, for a class with a vertical rule, the up bits.</summary>
+    private int SummaryRecordBytes => 4 + (Words * 8 * (_definition.Vertical is null ? 1 : 2));
+
+    /// <summary>
+    /// The pathfinding summary of every Unloaded chunk evaluated while it was resident (spec section 5.3), as a
+    /// section payload: per chunk its ordinal (little-endian int32), 64 passable words and, when the class has a
+    /// vertical rule, 64 up words. Empty when no chunk is Unloaded, so saves without streaming are unchanged.
+    /// </summary>
+    internal byte[] WriteSummary()
+    {
+        int count = 0;
+        for (int ordinal = 0; ordinal < _chunks.Length; ordinal++)
+        {
+            if (_summaryValid[ordinal] && _fields.ResidencyOf(ordinal) == ChunkResidency.Unloaded)
+            {
+                count++;
+            }
+        }
+
+        if (count == 0)
+        {
+            return [];
+        }
+
+        var payload = new byte[count * SummaryRecordBytes];
+        int offset = 0;
+        for (int ordinal = 0; ordinal < _chunks.Length; ordinal++)
+        {
+            if (!_summaryValid[ordinal] || _fields.ResidencyOf(ordinal) != ChunkResidency.Unloaded)
+            {
+                continue;
+            }
+
+            var chunk = _chunks[ordinal];
+            System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(payload.AsSpan(offset), ordinal);
+            offset += 4;
+            System.Runtime.InteropServices.MemoryMarshal.AsBytes(chunk.Passable.AsSpan()).CopyTo(payload.AsSpan(offset));
+            offset += Words * 8;
+            if (chunk.Up is not null)
+            {
+                System.Runtime.InteropServices.MemoryMarshal.AsBytes(chunk.Up.AsSpan()).CopyTo(payload.AsSpan(offset));
+                offset += Words * 8;
+            }
+        }
+
+        return payload;
+    }
+
+    /// <summary>Restores a <see cref="WriteSummary"/> payload before the first <see cref="RebuildAll"/>: those chunks are labelled from the summary, not from their (absent) cells.</summary>
+    internal void RestoreSummary(ReadOnlySpan<byte> payload, string extensionName)
+    {
+        int record = SummaryRecordBytes;
+        if (payload.Length % record != 0)
+        {
+            throw new InvalidDataException($"Extension '{extensionName}': the pathfinding summary of class '{_definition.Name}' holds {payload.Length} bytes, not a multiple of {record}.");
+        }
+
+        for (int offset = 0; offset < payload.Length; offset += record)
+        {
+            int ordinal = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(payload[offset..]);
+            if ((uint)ordinal >= (uint)_chunks.Length)
+            {
+                throw new InvalidDataException($"Extension '{extensionName}': the pathfinding summary of class '{_definition.Name}' names chunk {ordinal} of {_chunks.Length}.");
+            }
+
+            if (_fields.ResidencyOf(ordinal) != ChunkResidency.Unloaded)
+            {
+                continue; // resident now: its cells are the source
+            }
+
+            var chunk = _chunks[ordinal];
+            payload.Slice(offset + 4, Words * 8).CopyTo(System.Runtime.InteropServices.MemoryMarshal.AsBytes(chunk.Passable.AsSpan()));
+            if (chunk.Up is not null)
+            {
+                payload.Slice(offset + 4 + (Words * 8), Words * 8).CopyTo(System.Runtime.InteropServices.MemoryMarshal.AsBytes(chunk.Up.AsSpan()));
+            }
+
+            _summaryValid[ordinal] = true;
+        }
     }
 
     /// <summary>Relabels every chunk and the whole graph from the current Field state.</summary>
@@ -520,6 +603,21 @@ public sealed class RegionMap
     private void Evaluate(int ordinal, bool force)
     {
         var chunk = _chunks[ordinal];
+        if (_fields.ResidencyOf(ordinal) == ChunkResidency.Unloaded && _summaryValid[ordinal])
+        {
+            // Spec section 5.3: an Unloaded chunk keeps its pathfinding summary. Its cells are gone (the storage
+            // holds the initial value), so the bits evaluated while it was resident stay as they are.
+            chunk.Passable.CopyTo(chunk.NextPassable.AsSpan());
+            if (chunk.Up is not null)
+            {
+                chunk.Up.CopyTo(chunk.NextUp!.AsSpan());
+            }
+
+            chunk.PendingChanged = force;
+            return;
+        }
+
+        _summaryValid[ordinal] = true;
         var passable = chunk.NextPassable.AsSpan();
         passable.Clear();
         _definition.Rule(new PassabilityInput(_fields, ordinal, _fields.ChunkAt(ordinal)), passable);
