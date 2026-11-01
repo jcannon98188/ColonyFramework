@@ -2,9 +2,9 @@ using System.Runtime.InteropServices;
 
 namespace Colony.Plugins.Native;
 
-// The C ABI's data structures (spec section 8), mirrored field for field by the generated colony.h; the header
-// asserts every size, so a layout drift fails the C compile. Natural C alignment on 64-bit targets: a pointer
-// after an int32 is padded to 8 in both languages. Field names are the header's, in PascalCase.
+// The C ABI's data structures (spec section 8), mirrored field for field by the generated colony.h (see
+// AbiDefinition.Structs); the header asserts every size, so a layout drift fails the C compile. Natural C
+// alignment on 64-bit targets: a pointer after an int32 is padded to 8 in both languages.
 #pragma warning disable CA1051, CA1815 // Plain interop data, compared by nobody.
 
 /// <summary><c>colony_random</c>: a <see cref="Numerics.RandomSource"/> (World seed, stream key).</summary>
@@ -81,7 +81,8 @@ internal struct ColonyContext
     public int Reserved;
     public ColonyRandom Random;
     public nint Commands;
-    public nint Schema;
+    public nint World;
+    public nint System;
 }
 
 /// <summary><c>colony_input</c>: one Input Command of this Tick's canonical list.</summary>
@@ -144,7 +145,7 @@ internal unsafe struct ColonyPluginDesc
     public byte** Dependencies;
     public int DependencyCount;
     public int Reserved;
-    public delegate* unmanaged<void*, void*, nint, int> Register;
+    public delegate* unmanaged<void*, nint, int> Register;
     public void* UserData;
 }
 
