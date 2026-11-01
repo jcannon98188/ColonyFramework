@@ -10,7 +10,12 @@ namespace Colony.Fields;
 /// </summary>
 public interface IChunkSource
 {
-    /// <summary>Writes the chunk's cells for every Field into <paramref name="cells"/>, which arrives filled with each Field's initial value.</summary>
+    /// <summary>
+    /// Writes the chunk's cells for every Field into <paramref name="cells"/>, which arrives filled with each Field's
+    /// initial value. With <see cref="ResidencyOptions.LoadDelayTicks"/> &gt; 0 this runs on thread-pool workers,
+    /// several chunks at a time and concurrently with <see cref="PlaceEntities"/> on the Tick thread: the
+    /// implementation must be thread-safe (pure functions of (seed, coordinate) are; shared scratch needs a lock).
+    /// </summary>
     public void GenerateCells(ChunkCoord coord, ChunkCellBuffer cells);
 
     /// <summary>Records the chunk's initial Entities; called once per chunk, the first time it becomes resident.</summary>

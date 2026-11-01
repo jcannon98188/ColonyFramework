@@ -1,11 +1,11 @@
 ---
 id: TASK-27
 title: 'Streaming: background loaders, eviction budget and catch-up'
-status: In Progress
+status: Done
 assignee:
   - '@jason'
 created_date: '2026-10-31 01:56'
-updated_date: '2026-11-01 17:04'
+updated_date: '2026-11-01 21:40'
 labels:
   - ready-for-agent
   - implementation
@@ -31,9 +31,21 @@ Spec section 5.3: loads run on background workers with a bounded queue and apply
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Loads complete on background workers and apply exactly N Ticks after request; a late load stalls the Tick and the stall is counted in diagnostics
-- [ ] #2 Eviction under the resident-chunk budget follows the specified order and emits the budget-pressure event; results are identical across thread counts
-- [ ] #3 A System with opt-in catch-up produces the same state as if it had run every Tick, within the replayed-Tick cap, under the work budget
-- [ ] #4 Unloaded chunks retain a pathfinding summary and Reachable answers across them; a path request into an Unloaded chunk fails with needs-loading and the chunk coordinate
-- [ ] #5 Load-deadline stall scenarios are added to the determinism harness and streaming counters appear in the diagnostics records
+- [x] #1 Loads complete on background workers and apply exactly N Ticks after request; a late load stalls the Tick and the stall is counted in diagnostics
+- [x] #2 Eviction under the resident-chunk budget follows the specified order and emits the budget-pressure event; results are identical across thread counts
+- [x] #3 A System with opt-in catch-up produces the same state as if it had run every Tick, within the replayed-Tick cap, under the work budget
+- [x] #4 Unloaded chunks retain a pathfinding summary and Reachable answers across them; a path request into an Unloaded chunk fails with needs-loading and the chunk coordinate
+- [x] #5 Load-deadline stall scenarios are added to the determinism harness and streaming counters appear in the diagnostics records
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Two-pass Streaming Phase (load lands Hibernating, activate only with all neighbours resident); eviction key (focus distance desc, Hibernating before Active, Morton ordinal asc); IChunkSource.GenerateCells now runs on pool workers and must be thread-safe; catch-up per Component via ResidencyBuilder.AddCatchUp with FrozenAt stamp; pathfinding summaries retained for Unloaded chunks and saved. Gaps: LoadOptions.VerifyWorldHash fails for a saved streamed World whose IChunkSource is set host-side (needs host-supplied source before verification or excluding regenerable chunks from the saved hash); catch-up runs serially on the Tick thread; AOT comparison for streaming variants compiled but not run.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Background chunk loading with deterministic delay, in-flight bound and stall counting, eviction budget with pressure events, per-Component catch-up and Unloaded-chunk pathfinding summaries merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->

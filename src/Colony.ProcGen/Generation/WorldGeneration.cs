@@ -49,6 +49,7 @@ public sealed class WorldGeneration : IWorldExtension, IChunkSource
 
     private readonly GenerationBuilder _definition;
     private readonly ResourceType[] _prePassResources;
+    private readonly Lock _streamingLock = new();
     private GeneratedChunk? _streamingChunk;
     private bool _streamingChunkValid;
 
@@ -148,24 +149,34 @@ public sealed class WorldGeneration : IWorldExtension, IChunkSource
         }
     }
 
-    /// <summary>The chunk source seam of the residency manager: the pipeline's cells for every Field it writes (other Fields keep the buffer's initial values).</summary>
+    /// <summary>
+    /// The chunk source seam of the residency manager: the pipeline's cells for every Field it writes (other Fields
+    /// keep the buffer's initial values). Delayed loads call this from thread-pool workers while the Tick thread
+    /// places Entities, so the streaming chunk is used under a lock.
+    /// </summary>
     void IChunkSource.GenerateCells(ChunkCoord coord, ChunkCellBuffer cells)
     {
         ArgumentNullException.ThrowIfNull(cells);
-        var chunk = StreamingChunk(coord);
-        foreach (var field in Pipeline.Fields)
+        lock (_streamingLock)
         {
-            chunk.CellBytes(field.Id).CopyTo(cells.Cells(field.Id));
+            var chunk = StreamingChunk(coord);
+            foreach (var field in Pipeline.Fields)
+            {
+                chunk.CellBytes(field.Id).CopyTo(cells.Cells(field.Id));
+            }
         }
     }
 
     void IChunkSource.PlaceEntities(ChunkCoord coord, CommandBuffer commands)
     {
         ArgumentNullException.ThrowIfNull(commands);
-        Place(StreamingChunk(coord), commands);
+        lock (_streamingLock)
+        {
+            Place(StreamingChunk(coord), commands);
+        }
     }
 
-    /// <summary>One reusable chunk for streaming; regenerated only when the coordinate changes, so cells and placements of one load come from one generation.</summary>
+    /// <summary>One reusable chunk for streaming (guarded by <see cref="_streamingLock"/>); regenerated only when the coordinate changes, so cells and placements of one load come from one generation.</summary>
     private GeneratedChunk StreamingChunk(ChunkCoord coord)
     {
         _streamingChunk ??= Provider.CreateChunk();
