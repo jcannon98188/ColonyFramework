@@ -47,6 +47,12 @@ public class PathfindingBenchmarks
         _service = _world.Pathfinding();
         _service.EnsureBuilt(_walker);
 
+        // Two Ticks move the change feed past the terrain written above. Without them every chunk carries the
+        // running version, so each Sync re-evaluates the whole World (host writes at the running version stay
+        // dirty until a Tick passes), which is what the TASK-19 numbers (13 ms small, 143 ms big) measured.
+        _world.Tick();
+        _world.Tick();
+
         int door = Array.FindIndex(tiles, static t => t is PrototypeTerrain.OpenDoor or PrototypeTerrain.ClosedDoor);
         _door = new TilePos(door % size.X, door / size.X % size.Y, door / (size.X * size.Y));
         _from = new TilePos[Queries];

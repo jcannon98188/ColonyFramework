@@ -55,9 +55,20 @@ public sealed class RegionMap
     private readonly int[] _chunkMark;
     private readonly bool[] _summaryValid;
     private int _chunkStamp;
-    private long[] _affected = new long[64];
-    private int _affectedCount;
     private long[] _queue = new long[256];
+
+    // Regions are slots in a union-find (TASK-39): a node holds a slot, the region id is the root's minimum.
+    private int[] _slotParent = [];
+    private byte[] _slotRank = [];
+    private long[] _slotMin = [];
+    private int _slotCount;
+
+    // Groups of one incremental update: new components and the outside nodes touching the changed chunks.
+    private int[] _groupParent = new int[64];
+    private int[] _groupPending = new int[64];
+    private long[] _groupMin = new long[64];
+    private int[] _groupSlot = new int[64];
+    private int _groupCount;
     private int _stamp;
     private uint _syncedVersion;
 
@@ -146,7 +157,7 @@ public sealed class RegionMap
         }
 
         int label = chunk.Labels![tile.CellIndex];
-        return label == 0 ? RegionId.None : new RegionId(chunk.Region[label - 1]);
+        return label == 0 ? RegionId.None : new RegionId(_slotMin[RootOf(chunk.Slot[label - 1])]);
     }
 
     /// <summary>Local components of a chunk (nodes of the chunk graph); for diagnostics and tests.</summary>
@@ -343,20 +354,6 @@ public sealed class RegionMap
 
         bool full = _changedCount >= Math.Max(1, (int)(_options.FullRebuildFraction * _chunks.Length));
 
-        // Old regions of the changed chunks, captured before their labels go.
-        _affectedCount = 0;
-        if (!full)
-        {
-            for (int i = 0; i < _changedCount; i++)
-            {
-                var chunk = _chunks[_changed[i]];
-                for (int c = 0; c < chunk.Count; c++)
-                {
-                    Append(ref _affected, ref _affectedCount, chunk.Region[c]);
-                }
-            }
-        }
-
         Run(ChunkJob.Mode.Relabel, _changed, _changedCount, parallel);
         _relabelled += _changedCount;
 
@@ -391,18 +388,179 @@ public sealed class RegionMap
         }
 
         Array.Sort(_touched, 0, _touchedCount);
-        Run(ChunkJob.Mode.Edges, _touched, _touchedCount, parallel);
-
         if (full)
         {
+            Run(ChunkJob.Mode.Edges, _touched, _touchedCount, parallel);
             _full++;
             LabelAll();
             return;
         }
 
         _incremental++;
+        _stamp++;
+        _groupCount = 0;
 
-        // Regions outside the changed chunks that now touch them may merge.
+        // Every new component of a changed chunk starts a group; so does every outside node that touched a changed
+        // chunk before (a region may split there) or touches one now (regions may merge there).
+        for (int i = 0; i < _changedCount; i++)
+        {
+            int ordinal = _changed[i];
+            var chunk = _chunks[ordinal];
+            for (int c = 0; c < chunk.Count; c++)
+            {
+                chunk.Visit[c] = _stamp;
+                chunk.Group[c] = NewGroup(Key(ordinal, chunk.MinCell[c]), 0);
+            }
+        }
+
+        int tail = 0;
+        CollectPortals(changedStamp, ref tail, unite: false);
+        Run(ChunkJob.Mode.Edges, _touched, _touchedCount, parallel);
+        CollectPortals(changedStamp, ref tail, unite: true);
+        for (int i = 0; i < _changedCount; i++)
+        {
+            int ordinal = _changed[i];
+            var chunk = _chunks[ordinal];
+            for (int e = 0; e < chunk.EdgeCount; e++)
+            {
+                int edge = chunk.Edges[e];
+                int n = _neighbours[(ordinal * 6) + ((edge >> 12) & 7)];
+                if (_chunkMark[n] == changedStamp)
+                {
+                    LinkGroups(FindGroup(chunk.Group[edge >> 15]), FindGroup(_chunks[n].Group[edge & 0xFFF]));
+                }
+            }
+        }
+
+        if (_slotCount + _groupCount > _slotParent.Length)
+        {
+            LabelAll(); // slots exhausted: compact (the same ids, fresh dense slots)
+            return;
+        }
+
+        // Merge fast path: the groups linked through the changed chunks are their merged regions, no search. Then a
+        // bounded split search: one breadth-first search over the unchanged nodes, all groups interleaved, which
+        // stops as soon as at most one group can still grow. Every finished group is a whole region; the one left
+        // (usually the big side of a split) keeps the old slots it reached, so its unvisited part is never walked.
+        int active = 0;
+        for (int g = 0; g < _groupCount; g++)
+        {
+            if (_groupParent[g] == g && _groupPending[g] > 0)
+            {
+                active++;
+            }
+        }
+
+        int head = 0;
+        while (head < tail && active > 1)
+        {
+            long node = _queue[head++];
+            int o = (int)(node >> CompBits);
+            int c = (int)(node & ((1 << CompBits) - 1));
+            var chunk = _chunks[o];
+            int g = FindGroup(chunk.Group[c]);
+            int end = chunk.EdgeStart[c + 1];
+            for (int e = chunk.EdgeStart[c]; e < end; e++)
+            {
+                int edge = chunk.Edges[e];
+                int n = _neighbours[(o * 6) + ((edge >> 12) & 7)];
+                if (_chunkMark[n] == changedStamp)
+                {
+                    continue; // linked above
+                }
+
+                int their = edge & 0xFFF;
+                var other = _chunks[n];
+                if (other.Visit[their] != _stamp)
+                {
+                    other.Visit[their] = _stamp;
+                    other.Group[their] = g;
+                    _groupPending[g]++;
+                    _groupMin[g] = Math.Min(_groupMin[g], Key(n, other.MinCell[their]));
+                    Push(ref tail, ((long)n << CompBits) | (uint)their);
+                }
+                else
+                {
+                    int h = FindGroup(other.Group[their]);
+                    if (h != g)
+                    {
+                        if (_groupPending[h] > 0)
+                        {
+                            active--;
+                        }
+
+                        g = LinkGroups(g, h);
+                    }
+                }
+            }
+
+            if (--_groupPending[g] == 0)
+            {
+                active--;
+            }
+        }
+
+        _visited += tail;
+        int left = head < tail ? FindGroup(_chunks[(int)(_queue[head] >> CompBits)].Group[(int)(_queue[head] & ((1 << CompBits) - 1))]) : -1;
+        for (int g = 0; g < _groupCount; g++)
+        {
+            _groupSlot[g] = -1;
+        }
+
+        // Finished groups get fresh slots; the old slots the remaining group reached are joined into one.
+        int slot = -1;
+        long oldMin = long.MaxValue;
+        for (int i = 0; i < tail; i++)
+        {
+            long node = _queue[i];
+            var chunk = _chunks[(int)(node >> CompBits)];
+            int c = (int)(node & ((1 << CompBits) - 1));
+            int g = FindGroup(chunk.Group[c]);
+            if (g != left)
+            {
+                chunk.Slot[c] = SlotOf(g);
+                continue;
+            }
+
+            int old = FindSlot(chunk.Slot[c]);
+            if (old != slot)
+            {
+                oldMin = Math.Min(oldMin, _slotMin[old]);
+                slot = slot < 0 ? old : LinkSlots(slot, old);
+            }
+        }
+
+        for (int i = 0; i < _changedCount; i++)
+        {
+            var chunk = _chunks[_changed[i]];
+            _visited += chunk.Count;
+            for (int c = 0; c < chunk.Count; c++)
+            {
+                int g = FindGroup(chunk.Group[c]);
+                chunk.Slot[c] = g != left ? SlotOf(g) : slot;
+            }
+        }
+
+        if (left < 0)
+        {
+            return;
+        }
+
+        // The remaining group's id: the smallest key over what was visited, or over the unvisited rest, whose
+        // smallest key is at least the smallest old id among the joined slots (that node may have left the region).
+        slot = FindSlot(slot);
+        long id = _groupMin[left];
+        if (oldMin < id)
+        {
+            id = Holds(oldMin, slot, changedStamp) ? oldMin : SmallestFrom(oldMin, id, slot, changedStamp);
+        }
+
+        _slotMin[slot] = id;
+    }
+
+    /// <summary>Starts a group for every outside node with an edge into a changed chunk; with <paramref name="unite"/>, links it to the component it touches.</summary>
+    private void CollectPortals(int changedStamp, ref int tail, bool unite)
+    {
         for (int i = 0; i < _touchedCount; i++)
         {
             int ordinal = _touched[i];
@@ -416,62 +574,210 @@ public sealed class RegionMap
             {
                 int edge = chunk.Edges[e];
                 int n = _neighbours[(ordinal * 6) + ((edge >> 12) & 7)];
-                if (_chunkMark[n] == changedStamp)
-                {
-                    Append(ref _affected, ref _affectedCount, chunk.Region[edge >> 15]);
-                }
-            }
-        }
-
-        Array.Sort(_affected, 0, _affectedCount);
-        _affectedCount = Unique(_affected.AsSpan(0, _affectedCount));
-        var affected = _affected.AsSpan(0, _affectedCount);
-
-        _stamp++;
-        for (int i = 0; i < _touchedCount; i++)
-        {
-            int ordinal = _touched[i];
-            var chunk = _chunks[ordinal];
-            bool changed = _chunkMark[ordinal] == changedStamp;
-            for (int c = 0; c < chunk.Count; c++)
-            {
-                if (chunk.Visit[c] == _stamp)
+                if (_chunkMark[n] != changedStamp)
                 {
                     continue;
                 }
 
-                // Unvisited nodes still carry their old region id.
-                if (changed || affected.BinarySearch(chunk.Region[c]) >= 0)
+                int c = edge >> 15;
+                if (chunk.Visit[c] != _stamp)
                 {
-                    RelabelComponent(ordinal, c);
+                    chunk.Visit[c] = _stamp;
+                    chunk.Group[c] = NewGroup(Key(ordinal, chunk.MinCell[c]), 1);
+                    Push(ref tail, ((long)ordinal << CompBits) | (uint)c);
+                }
+
+                if (unite)
+                {
+                    LinkGroups(FindGroup(chunk.Group[c]), FindGroup(_chunks[n].Group[edge & 0xFFF]));
                 }
             }
         }
     }
 
-    /// <summary>Breadth-first search from one node; every member gets the smallest key found.</summary>
-    private void RelabelComponent(int ordinal, int comp)
+    /// <summary>Whether the node with smallest cell <paramref name="key"/> still exists outside the changed chunks and lies in <paramref name="root"/>.</summary>
+    private bool Holds(long key, int root, int changedStamp)
     {
-        int tail = Search(ordinal, comp);
-        long min = long.MaxValue;
-        for (int i = 0; i < tail; i++)
+        int ordinal = (int)(key >> 12);
+        int cell = (int)(key & 0xFFF);
+        var chunk = _chunks[ordinal];
+        if (_chunkMark[ordinal] == changedStamp || chunk.Count == 0)
         {
-            long node = _queue[i];
-            int o = (int)(node >> CompBits);
-            int c = (int)(node & ((1 << CompBits) - 1));
-            long key = Key(o, _chunks[o].MinCell[c]);
-            min = Math.Min(min, key);
+            return false;
         }
 
-        for (int i = 0; i < tail; i++)
-        {
-            long node = _queue[i];
-            _chunks[(int)(node >> CompBits)].Region[(int)(node & ((1 << CompBits) - 1))] = min;
-        }
+        int label = chunk.Labels![cell];
+        return label != 0 && chunk.MinCell[label - 1] == cell && FindSlot(chunk.Slot[label - 1]) == root;
     }
 
+    /// <summary>The smallest key in <c>[from, below)</c> of a node in <paramref name="root"/>, or <paramref name="below"/>.</summary>
+    private long SmallestFrom(long from, long below, int root, int changedStamp)
+    {
+        for (int ordinal = (int)(from >> 12); ordinal <= (int)(below >> 12); ordinal++)
+        {
+            if (_chunkMark[ordinal] == changedStamp)
+            {
+                continue; // its components are in the visited part
+            }
+
+            var chunk = _chunks[ordinal];
+            for (int c = 0; c < chunk.Count; c++)
+            {
+                long key = Key(ordinal, chunk.MinCell[c]);
+                _visited++;
+                if (key >= below)
+                {
+                    return below;
+                }
+
+                if (key >= from && FindSlot(chunk.Slot[c]) == root)
+                {
+                    return key;
+                }
+            }
+        }
+
+        return below;
+    }
+
+    private int NewGroup(long key, int pending)
+    {
+        if (_groupCount == _groupParent.Length)
+        {
+            int capacity = _groupParent.Length * 2;
+            Array.Resize(ref _groupParent, capacity);
+            Array.Resize(ref _groupPending, capacity);
+            Array.Resize(ref _groupMin, capacity);
+            Array.Resize(ref _groupSlot, capacity);
+        }
+
+        int g = _groupCount++;
+        _groupParent[g] = g;
+        _groupPending[g] = pending;
+        _groupMin[g] = key;
+        return g;
+    }
+
+    private int FindGroup(int g)
+    {
+        while (_groupParent[g] != g)
+        {
+            _groupParent[g] = _groupParent[_groupParent[g]];
+            g = _groupParent[g];
+        }
+
+        return g;
+    }
+
+    /// <summary>Links two group roots (the lower index stays root); returns the root.</summary>
+    private int LinkGroups(int a, int b)
+    {
+        if (a == b)
+        {
+            return a;
+        }
+
+        if (b < a)
+        {
+            (a, b) = (b, a);
+        }
+
+        _groupParent[b] = a;
+        _groupPending[a] += _groupPending[b];
+        _groupMin[a] = Math.Min(_groupMin[a], _groupMin[b]);
+        return a;
+    }
+
+    /// <summary>The fresh slot of a finished group root, allocated on first use.</summary>
+    private int SlotOf(int group)
+    {
+        int slot = _groupSlot[group];
+        if (slot < 0)
+        {
+            slot = _slotCount++;
+            _slotParent[slot] = slot;
+            _slotRank[slot] = 0;
+            _slotMin[slot] = _groupMin[group];
+            _groupSlot[group] = slot;
+        }
+
+        return slot;
+    }
+
+    /// <summary>The root of a slot, halving the path (upkeep only, on the Tick thread).</summary>
+    private int FindSlot(int slot)
+    {
+        while (_slotParent[slot] != slot)
+        {
+            _slotParent[slot] = _slotParent[_slotParent[slot]];
+            slot = _slotParent[slot];
+        }
+
+        return slot;
+    }
+
+    /// <summary>The root of a slot without writing (reads may run on any thread).</summary>
+    private int RootOf(int slot)
+    {
+        int parent;
+        while ((parent = _slotParent[slot]) != slot)
+        {
+            slot = parent;
+        }
+
+        return slot;
+    }
+
+    /// <summary>Unites two slot roots by rank; the root keeps the smaller id.</summary>
+    private int LinkSlots(int a, int b)
+    {
+        if (a == b)
+        {
+            return a;
+        }
+
+        if (_slotRank[a] < _slotRank[b])
+        {
+            (a, b) = (b, a);
+        }
+        else if (_slotRank[a] == _slotRank[b])
+        {
+            _slotRank[a]++;
+        }
+
+        _slotParent[b] = a;
+        _slotMin[a] = Math.Min(_slotMin[a], _slotMin[b]);
+        return a;
+    }
+
+    /// <summary>Labels the whole graph from scratch: one dense slot per region.</summary>
     private void LabelAll()
     {
+        int nodes = 0;
+        for (int ordinal = 0; ordinal < _chunks.Length; ordinal++)
+        {
+            nodes += _chunks[ordinal].Count;
+        }
+
+        // Room for twice the nodes: incremental updates spend slots until the next compaction.
+        int capacity = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(64, nodes * 2));
+        if (_slotParent.Length < capacity)
+        {
+            _slotParent = new int[capacity];
+            _slotRank = new byte[capacity];
+            _slotMin = new long[capacity];
+        }
+
+        // An update has at most one group per node: size them now, not on a later Tick.
+        if (_groupParent.Length < capacity / 2)
+        {
+            _groupParent = new int[capacity / 2];
+            _groupPending = new int[capacity / 2];
+            _groupMin = new long[capacity / 2];
+            _groupSlot = new int[capacity / 2];
+        }
+
+        _slotCount = 0;
         _stamp++;
         for (int ordinal = 0; ordinal < _chunks.Length; ordinal++)
         {
@@ -484,12 +790,15 @@ public sealed class RegionMap
                 }
 
                 // Ascending (ordinal, component) is ascending key: the first unvisited node is its region's minimum.
-                long key = Key(ordinal, chunk.MinCell[c]);
+                int slot = _slotCount++;
+                _slotParent[slot] = slot;
+                _slotRank[slot] = 0;
+                _slotMin[slot] = Key(ordinal, chunk.MinCell[c]);
                 int tail = Search(ordinal, c);
                 for (int i = 0; i < tail; i++)
                 {
                     long node = _queue[i];
-                    _chunks[(int)(node >> CompBits)].Region[(int)(node & ((1 << CompBits) - 1))] = key;
+                    _chunks[(int)(node >> CompBits)].Slot[(int)(node & ((1 << CompBits) - 1))] = slot;
                 }
             }
         }
@@ -539,36 +848,7 @@ public sealed class RegionMap
 
     private static long Key(int ordinal, int minCell) => ((long)ordinal << 12) | (uint)minCell;
 
-    private static int Unique(Span<long> sorted)
-    {
-        if (sorted.IsEmpty)
-        {
-            return 0;
-        }
-
-        int w = 1;
-        for (int i = 1; i < sorted.Length; i++)
-        {
-            if (sorted[i] != sorted[w - 1])
-            {
-                sorted[w++] = sorted[i];
-            }
-        }
-
-        return w;
-    }
-
     private static void Append(ref int[] array, ref int count, int value)
-    {
-        if (count == array.Length)
-        {
-            Array.Resize(ref array, array.Length * 2);
-        }
-
-        array[count++] = value;
-    }
-
-    private static void Append(ref long[] array, ref int count, long value)
     {
         if (count == array.Length)
         {
@@ -743,7 +1023,7 @@ public sealed class RegionMap
         chunk.Count = count;
         for (int c = 0; c < count; c++)
         {
-            chunk.Region[c] = -1;
+            chunk.Slot[c] = -1;
         }
     }
 
@@ -838,8 +1118,9 @@ public sealed class RegionMap
         public ushort[]? Labels;
         public int Count;
         public ushort[] MinCell = [];
-        public long[] Region = [];
+        public int[] Slot = [];
         public int[] Visit = [];
+        public int[] Group = [];
         public int[] Edges = [];
         public int EdgeCount;
         public int[] EdgeStart = [0];
@@ -853,8 +1134,9 @@ public sealed class RegionMap
 
             int capacity = Math.Max(8, (int)BitOperations.RoundUpToPowerOf2((uint)count));
             Array.Resize(ref MinCell, capacity);
-            Array.Resize(ref Region, capacity);
+            Array.Resize(ref Slot, capacity);
             Array.Resize(ref Visit, capacity);
+            Array.Resize(ref Group, capacity);
             Array.Resize(ref EdgeStart, capacity + 1);
         }
 
