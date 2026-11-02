@@ -65,4 +65,7 @@ public sealed class SystemAttribute : Attribute
 
     /// <summary>Skip chunks whose asleep bit is set (<see cref="SystemDefinition.SkipAsleepChunks"/>).</summary>
     public bool SkipAsleepChunks { get; set; }
+
+    /// <summary>Visit chunks even when a queried Component is disabled on every row (<see cref="SystemDefinition.IgnoreEnableBits"/>).</summary>
+    public bool IgnoreEnableBits { get; set; }
 }

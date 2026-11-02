@@ -90,3 +90,35 @@ public sealed class ChangeFilterAttribute : Attribute
 
     public Type[] Components { get; }
 }
+
+/// <summary>
+/// Declares the Resources a generated System reads (<see cref="SystemDefinition.ReadsResources"/>): value Resources
+/// through <see cref="SystemContext.ReadResource{T}"/>, event queues through <see cref="SystemContext.Events{T}"/>.
+/// Each type must already be registered with <see cref="WorldBuilder.AddResource{T}"/> or
+/// <see cref="WorldBuilder.AddEvent{T}"/>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class ReadsResourcesAttribute : Attribute
+{
+    public ReadsResourcesAttribute(params Type[] resources)
+    {
+        Resources = resources;
+    }
+
+    public Type[] Resources { get; }
+}
+
+/// <summary>
+/// Declares the Resources a generated System writes (<see cref="SystemDefinition.WritesResources"/>): value Resources
+/// through <see cref="SystemContext.Resource{T}"/>, event queues through <see cref="SystemContext.Emit{T}"/>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
+public sealed class WritesResourcesAttribute : Attribute
+{
+    public WritesResourcesAttribute(params Type[] resources)
+    {
+        Resources = resources;
+    }
+
+    public Type[] Resources { get; }
+}

@@ -65,6 +65,9 @@ internal sealed record SystemModel(
     EquatableArray<ColumnModel> With,
     EquatableArray<ColumnModel> Without,
     EquatableArray<ColumnModel> ChangeFilter,
+    EquatableArray<ColumnModel> ReadsResources,
+    EquatableArray<ColumnModel> WritesResources,
+    bool IgnoreEnableBits,
     EquatableArray<DiagnosticInfo> Diagnostics)
 {
     public IEnumerable<ColumnModel> Writes => Columns.Where(c => c.IsWrite);
@@ -85,6 +88,19 @@ internal sealed record SystemModel(
     }
 
     public bool HasQuery => Kind is SystemKind.PerEntity or SystemKind.TypedQuery;
+
+    /// <summary>Every Resource the definition needs a <c>ResourceType</c> for, each once (a type both read and written counts once).</summary>
+    public IEnumerable<ColumnModel> AllResources()
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var resource in WritesResources.Concat(ReadsResources))
+        {
+            if (seen.Add(resource.TypeCode))
+            {
+                yield return resource;
+            }
+        }
+    }
 }
 
 /// <summary>A [System] method together with the partial type it lives in; grouped per type before emission.</summary>
