@@ -111,4 +111,29 @@ public sealed class ClaimResolutionTests
 
         Assert.Equal(new[] { agents[1] }, ClaimTestWorld.Sources(world, target, claims.Relation));
     }
+
+    [Fact]
+    public void A_slot_reused_in_the_round_keeps_one_group_per_target_generation_and_never_grants_past_capacity()
+    {
+        using var world = ClaimTestWorld.Create(out var claims, out var log, new ClaimOptions { Policy = ClaimPolicy.None });
+        var agents = ClaimTestWorld.SpawnAgents(world, claims, 3);
+        var old = ClaimTestWorld.SpawnTargets(world, claims, 1, slots: 1)[0];
+        var buffer = world.CreateCommandBuffer();
+        buffer.Destroy(old);
+        world.Playback(buffer);
+        var reused = ClaimTestWorld.SpawnTargets(world, claims, 1, slots: 1)[0];
+        Assert.Equal(old.Index, reused.Index);
+        Assert.NotEqual(old, reused);
+
+        // Sorted on the slot alone these interleave as reused, old, reused: the second reused group recounted held = 0.
+        ClaimTestWorld.Propose(world, claims, agents[0], reused, priority: 1);
+        ClaimTestWorld.Propose(world, claims, agents[1], old, priority: 2);
+        ClaimTestWorld.Propose(world, claims, agents[2], reused, priority: 3);
+        world.Tick();
+
+        Assert.Equal(new[] { agents[0] }, ClaimTestWorld.Sources(world, reused, claims.Relation));
+        Assert.Equal(new[] { agents[0] }, log.Granted.Select(g => g.Claimant).ToArray());
+        Assert.Equal(ClaimDenialReason.TargetGone, log.Denied.Single(d => d.Claimant == agents[1]).Reason);
+        Assert.Equal(ClaimDenialReason.Capacity, log.Denied.Single(d => d.Claimant == agents[2]).Reason);
+    }
 }
