@@ -2,9 +2,6 @@
 
   <PropertyGroup>
     <RootNamespace>Colony.Jobs.Tests</RootNamespace>
-    <!-- Zero-allocation gates: tiered recompilation inside a measured window allocates (see Colony.Core.Tests). -->
-    <TieredCompilation>false</TieredCompilation>
-    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
