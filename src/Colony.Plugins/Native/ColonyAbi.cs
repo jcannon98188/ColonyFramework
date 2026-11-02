@@ -29,6 +29,8 @@ public static unsafe class ColonyAbi
     /// <summary><c>COLONY_VERSION_MISMATCH</c>: <c>colony_get_api</c> was asked for another ABI version.</summary>
     public const int VersionMismatch = 4;
 
+    // Process-wide by design (spec section 3 exception, ADR 0005): the C errno convention, per thread, so
+    // concurrent Worlds on different threads never see each other's messages. Never simulation state.
     [ThreadStatic]
     private static string? _lastError;
 

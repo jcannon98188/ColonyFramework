@@ -32,7 +32,18 @@ Spec section 3 listed `Plugins` as depending on `Core`. Since TASK-27/28 it refe
 
 All three edges point down the existing graph (none of these packages references `Plugins`; `Plugins` stays on the "never referenced" list), so there is no cycle, and a Game that does not use Plugins still never loads them. Splitting the C ABI into its own package was rejected for now: `Colony.Native` already is the separate shipping unit, and the managed host would only move, not shrink.
 
+## Process-wide state outside the World
+
+Spec section 3 says there is no static state or singletons. Three exceptions exist (code review finding 10); each holds no simulation state, never feeds a hash, and never decides an outcome, so many Worlds still coexist in a process:
+
+- **The C ABI handle table** (`NativeHandles`, `Colony.Plugins`). C code holds plain integers that any entry may receive, so the table cannot hang off one World. Handles a World owns are released when it is disposed (review finding 7).
+- **The C ABI last-error message** (`[ThreadStatic] ColonyAbi._lastError`). `colony_last_error` follows the C `errno` convention: the message of the last failed call on the calling thread. Per-thread, so concurrent Worlds on different threads cannot see each other's errors.
+- **The `Colony-Diagnostics` EventSource** (`ColonyEventSource.Log`, `Colony.Diagnostics`). An `EventSource` name is registered once per process by the runtime, so the source is a singleton by design; its counters follow the first attached `MeterBridge`. It only observes.
+
+Read-only caches of immutable data (for example the Testing harness's `DeterminismOptions` cache) are not state and need no entry here. A new process-wide field needs to be added to this list.
+
 ## Consequences
 
 - Spec section 3 now names these two grants next to "tests only", and its dependency rules list the `Plugins` edges.
 - CONVENTIONS.md (the implementer notes) says the same.
+- Spec section 3 names the three process-wide exceptions next to "no static state or singletons".
