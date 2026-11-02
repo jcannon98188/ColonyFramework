@@ -755,7 +755,7 @@ public sealed class ChunkResidencyManager : IWorldExtension
             return false;
         }
 
-        state.Append(Regenerate(source, ordinal).Cells(fieldId));
+        _fields.AppendCells(fieldId, Regenerate(source, ordinal).Cells(fieldId), ref state);
         return true;
     }
 

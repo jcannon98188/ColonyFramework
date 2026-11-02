@@ -11,18 +11,40 @@ namespace Colony.Fields;
 /// A chunk is either uniform (one value, no cell storage) or dense (<see cref="FieldChunk.CellCount"/> cells).
 /// Contract: the memory behind <see cref="ReadCells"/>/<see cref="WriteCells"/> is stable (native or pinned)
 /// for as long as the chunk is dense; stencils cache references to it for the duration of a job.
+/// Padding (spec section 6): bytes outside <see cref="CellDataMask"/> carry no data and may hold anything a writer
+/// left there; <see cref="HashChunk"/> and <see cref="CellsEqual"/> must ignore them (hash them as zero).
 /// </summary>
 public abstract class FieldStorage : IDisposable
 {
     protected FieldStorage(int cellSize, int chunkCount)
+        : this(cellSize, chunkCount, ReadOnlySpan<byte>.Empty)
+    {
+    }
+
+    /// <summary>A storage whose cells may have padding bytes (see <paramref name="cellDataMask"/>).</summary>
+    /// <param name="cellSize">Bytes per cell.</param>
+    /// <param name="chunkCount">Chunks of the Field.</param>
+    /// <param name="cellDataMask">Per cell byte 0xFF for data and 0x00 for padding (<see cref="ValueLayout.DataMaskOf{T}"/>); empty when every byte is data.</param>
+    protected FieldStorage(int cellSize, int chunkCount, ReadOnlySpan<byte> cellDataMask)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(cellSize, 1);
         ArgumentOutOfRangeException.ThrowIfNegative(chunkCount);
+        if (!cellDataMask.IsEmpty && cellDataMask.Length != cellSize)
+        {
+            throw new ArgumentException($"The data mask is {cellDataMask.Length} bytes but a cell is {cellSize}.", nameof(cellDataMask));
+        }
+
         CellSize = cellSize;
         ChunkCount = chunkCount;
+        _cellDataMask = cellDataMask.IsEmpty ? null : cellDataMask.ToArray();
     }
 
+    private readonly byte[]? _cellDataMask;
+
     public int CellSize { get; }
+
+    /// <summary>Which bytes of a cell hold data (0xFF) and which are padding (0x00); empty when every byte is data.</summary>
+    public ReadOnlySpan<byte> CellDataMask => _cellDataMask;
 
     public int ChunkCount { get; }
 

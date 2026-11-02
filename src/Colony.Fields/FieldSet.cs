@@ -21,25 +21,27 @@ public sealed class FieldSet : IWorldExtension
     private readonly Type[] _cellTypes;
     private readonly FieldStorage[] _storage;
     private readonly byte[][] _initial;
+    private readonly byte[]?[] _dataMasks;
     private readonly uint[][] _versions;
     private readonly ChunkResidency[] _residency;
     private readonly byte[]?[][] _stored;
     private bool _disposed;
 
-    internal FieldSet(World world, ChunkLayout layout, List<FieldDescriptor> fields, List<Type> cellTypes, List<byte[]> initialValues)
+    internal FieldSet(World world, ChunkLayout layout, List<FieldDescriptor> fields, List<Type> cellTypes, List<byte[]> initialValues, List<byte[]?> dataMasks)
     {
         World = world;
         _layout = layout;
         _fields = [.. fields];
         _cellTypes = [.. cellTypes];
         _initial = [.. initialValues];
+        _dataMasks = [.. dataMasks];
         _storage = new FieldStorage[_fields.Length];
         _versions = new uint[_fields.Length][];
         _stored = new byte[]?[_fields.Length][];
         _residency = new ChunkResidency[layout.ChunkCount];
         for (int i = 0; i < _fields.Length; i++)
         {
-            _storage[i] = new CpuFieldStorage(_fields[i].CellSize, layout.ChunkCount, initialValues[i]);
+            _storage[i] = new CpuFieldStorage(_fields[i].CellSize, layout.ChunkCount, initialValues[i], _dataMasks[i]);
             _versions[i] = new uint[layout.ChunkCount];
             _stored[i] = new byte[]?[layout.ChunkCount];
         }
@@ -153,6 +155,7 @@ public sealed class FieldSet : IWorldExtension
         var dense = new byte[1 + cells.Length];
         dense[0] = 1;
         cells.CopyTo(dense.AsSpan(1));
+        ValueLayout.ZeroPadding(storage.CellDataMask, dense.AsSpan(1)); // saves never carry padding (spec section 6)
         return dense;
     }
 
@@ -182,7 +185,7 @@ public sealed class FieldSet : IWorldExtension
         int chunkBytes = _storage[f].CellSize * FieldChunk.CellCount;
         if (payload[0] == 1)
         {
-            state.Append(payload[1..]);
+            AppendCells(f, payload[1..], ref state);
             return;
         }
 
@@ -194,6 +197,7 @@ public sealed class FieldSet : IWorldExtension
         var cells = _expandScratch.AsSpan(0, chunkBytes);
         var value = payload[1..];
         value.CopyTo(cells);
+        ValueLayout.ZeroPadding(_storage[f].CellDataMask, cells[..value.Length]);
         int filled = value.Length;
         while (filled < cells.Length)
         {
@@ -203,6 +207,30 @@ public sealed class FieldSet : IWorldExtension
         }
 
         state.Append(cells);
+    }
+
+    /// <summary>
+    /// Appends a full chunk of Field <paramref name="f"/>'s cells (storage order) to a hash with their padding
+    /// zeroed (spec section 6): for cells held outside the storage, such as stored sections and regenerations.
+    /// </summary>
+    internal void AppendCells(int f, ReadOnlySpan<byte> cells, ref Hash64State state)
+    {
+        var mask = _storage[f].CellDataMask;
+        if (mask.IsEmpty)
+        {
+            state.Append(cells);
+            return;
+        }
+
+        if (_expandScratch is null || _expandScratch.Length < cells.Length)
+        {
+            _expandScratch = new byte[cells.Length];
+        }
+
+        var copy = _expandScratch.AsSpan(0, cells.Length);
+        cells.CopyTo(copy);
+        ValueLayout.ZeroPadding(mask, copy);
+        state.Append(copy);
     }
 
     public FieldDescriptor Describe<T>(Field<T> field)
@@ -263,10 +291,11 @@ public sealed class FieldSet : IWorldExtension
         }
 
         var first = cells[..size];
+        var mask = storage.CellDataMask;
         bool uniform = true;
         for (int offset = size; offset < cells.Length; offset += size)
         {
-            if (!cells.Slice(offset, size).SequenceEqual(first))
+            if (!ValueLayout.DataEqual(mask, cells.Slice(offset, size), first))
             {
                 uniform = false;
                 break;
@@ -275,7 +304,7 @@ public sealed class FieldSet : IWorldExtension
 
         if (uniform)
         {
-            if (storage.IsUniform(ordinal) && storage.UniformValue(ordinal).SequenceEqual(first))
+            if (storage.IsUniform(ordinal) && ValueLayout.DataEqual(mask, storage.UniformValue(ordinal), first))
             {
                 return;
             }
@@ -311,7 +340,7 @@ public sealed class FieldSet : IWorldExtension
         where T : unmanaged
     {
         int id = Validate(field);
-        var storage = new CpuFieldStorage(_fields[id].CellSize, _layout.ChunkCount, _storage[id].UniformValue(0));
+        var storage = new CpuFieldStorage(_fields[id].CellSize, _layout.ChunkCount, _storage[id].UniformValue(0), _dataMasks[id]);
         _scratch.Add(storage);
         return storage;
     }
