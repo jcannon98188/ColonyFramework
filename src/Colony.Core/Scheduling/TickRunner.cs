@@ -321,7 +321,7 @@ internal sealed class TickRunner : WorkerPool.IJobSource, IDisposable
         {
             var context = new SystemContext(_world, def, state.Buffers[j.JobIndex], _tick, j.System, j.JobIndex, state.Jobs, state.Random, slot);
             var view = _accessChecking
-                ? new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation, _access[j.System], def.Name)
+                ? new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation, _access[j.System], def.Writes, def.Name)
                 : new ChunkView(j.Archetype, j.Chunk, _world.DebugValidation);
             rows = view.Count;
             def.ForEachChunk!(in context, in view);

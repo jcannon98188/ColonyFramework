@@ -177,7 +177,7 @@ internal static class SystemEmitter
         w.Line("_chunk = chunk;");
         foreach (var column in system.Columns)
         {
-            w.Line($"{column.PropertyName} = chunk.Column<{column.TypeCode}>({column.LocalName});");
+            w.Line($"{column.PropertyName} = chunk.{(column.IsWrite ? "Column" : "ReadColumn")}<{column.TypeCode}>({column.LocalName});");
         }
 
         w.Close();

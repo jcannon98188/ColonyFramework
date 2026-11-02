@@ -86,8 +86,8 @@ public sealed class ConformanceTwinPlugin : IPlugin
             WritesResources = ResourceMask.Of(moved),
             ForEachChunk = (in SystemContext context, in ChunkView chunk) =>
             {
-                var positions = chunk.Column<Position>(position);
-                var velocities = chunk.Column<Velocity>(velocity);
+                var positions = chunk.ReadColumn<Position>(position);
+                var velocities = chunk.ReadColumn<Velocity>(velocity);
                 var entities = chunk.Entities;
                 for (int i = 0; i < chunk.Count; i++)
                 {

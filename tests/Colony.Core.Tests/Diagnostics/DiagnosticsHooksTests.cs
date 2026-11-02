@@ -262,6 +262,90 @@ public sealed class DiagnosticsHooksTests
         Assert.True(uncheckedWorld.Tick());
     }
 
+    /// <summary>
+    /// TASK-42 AC #1: taking a writable column (Column, PaddedColumn) or flipping an enable bit of a Component the
+    /// System declared only in Reads is a write the scheduler did not order, so access checking rejects it.
+    /// </summary>
+    [Theory]
+    [InlineData("column")]
+    [InlineData("padded")]
+    [InlineData("enable")]
+    public void Access_checking_rejects_writes_to_a_component_declared_only_in_reads(string how)
+    {
+        var builder = new WorldBuilder().AddComponent<Position>("position").AddComponent<Hunger>("hunger");
+        var position = builder.Component<Position>();
+        var hunger = builder.Component<Hunger>();
+        ChunkSystemAction body = how switch
+        {
+            "column" => (in SystemContext _, in ChunkView chunk) => chunk.Column<Hunger>(hunger)[0].Value++,
+            "padded" => (in SystemContext _, in ChunkView chunk) => chunk.PaddedColumn<Hunger>(hunger)[0].Value++,
+            _ => (in SystemContext _, in ChunkView chunk) => chunk.SetEnabled(hunger, 0, enabled: false),
+        };
+        var schema = builder
+            .AddSystem(new SystemDefinition
+            {
+                Name = "ReadOnlyWriter",
+                Phase = Phase.Simulate,
+                Reads = ComponentMask.Of(hunger),
+                Writes = ComponentMask.Of(position),
+                ForEachChunk = body,
+            })
+            .Build();
+        using var world = Populate(schema, position, chunks: 1, new WorldOptions
+        {
+            WorkerThreads = 1,
+            Diagnostics = new DiagnosticsOptions { AccessChecking = true },
+        }, hunger);
+
+        var fault = Assert.Throws<SystemFaultException>(() => world.Tick());
+        Assert.Equal("ReadOnlyWriter", fault.Fault!.Value.SystemName);
+        Assert.Contains("declares only in Reads", fault.Fault.Value.Exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// TASK-42 AC #1, the boundary: reads through ReadColumn and IsEnabled pass, and a buffer Component's accessor
+    /// (<see cref="ChunkView.Buffer{TElement}"/>) is deliberately not checked for writes, because it is also the
+    /// only way to read a buffer from a chunk job. A System that grows a buffer it declared only in Reads is not
+    /// detected; this test pins that boundary.
+    /// </summary>
+    [Fact]
+    public void Access_checking_lets_declared_reads_through_and_does_not_police_buffer_accessors()
+    {
+        var builder = new WorldBuilder().AddComponent<Position>("position").AddComponent<Hunger>("hunger");
+        builder.AddBufferComponent<int, Inline4<int>>("inventory");
+        var position = builder.Component<Position>();
+        var hunger = builder.Component<Hunger>();
+        var inventory = builder.Component("inventory");
+        int seen = 0;
+        var schema = builder
+            .AddSystem(new SystemDefinition
+            {
+                Name = "Reader",
+                Phase = Phase.Simulate,
+                Reads = ComponentMask.Of(hunger, inventory),
+                Writes = ComponentMask.Of(position),
+                ForEachChunk = (in SystemContext _, in ChunkView chunk) =>
+                {
+                    seen += chunk.ReadColumn<Hunger>(hunger).Length + (chunk.IsEnabled(hunger, 0) ? 1 : 0);
+                    chunk.Column<Position>(position)[0].X++;
+                    chunk.Buffer<int>(inventory, 0).Add(7); // a write through a read declaration: not detected
+                },
+            })
+            .Build();
+        using var world = Populate(schema, position, chunks: 1, new WorldOptions
+        {
+            WorkerThreads = 1,
+            Diagnostics = new DiagnosticsOptions { AccessChecking = true },
+        }, hunger, inventory);
+
+        Assert.True(world.Tick());
+        Assert.True(seen > 1);
+        foreach (var chunk in world.Query(inventory))
+        {
+            Assert.Equal(1, chunk.Buffer<int>(inventory, 0).Length);
+        }
+    }
+
     [Fact]
     public void Counters_registered_at_build_time_are_summed_over_every_thread()
     {
