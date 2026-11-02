@@ -193,9 +193,12 @@ public sealed class StreamingLoadTests
 
         byte[] image = world.SaveToBytes();
         Assert.Contains("ext/residency/loads", WorldPersistence.SectionNames(image));
-        // The source is host-set after loading, so the loader cannot verify the hash (unstored Unloaded chunks hash through the source).
-        using var loaded = WorldPersistence.Load(image, schema.World, new LoadOptions { WorldOptions = new WorldOptions { WorkerThreads = 2, Seed = 11 }, VerifyWorldHash = false });
-        loaded.Fields().ChunkSource = new Terrain(schema);
+        // The source is host-set; PrepareWorld supplies it before the loader verifies the hash (TASK-40 AC #4).
+        using var loaded = WorldPersistence.Load(image, schema.World, new LoadOptions
+        {
+            WorldOptions = new WorldOptions { WorkerThreads = 2, Seed = 11 },
+            PrepareWorld = w => w.Fields().ChunkSource = new Terrain(schema),
+        });
         Assert.Equal(16, loaded.Residency().PendingLoadCount);
         Assert.Equal(world.Hash(), loaded.Hash());
 
@@ -207,6 +210,43 @@ public sealed class StreamingLoadTests
         }
 
         Assert.Equal(new ResidencyCounts(9, 7, 8), loaded.Residency().Counts);
+    }
+
+    [Fact]
+    public void A_streamed_save_whose_chunk_source_the_host_supplies_passes_VerifyWorldHash_when_PrepareWorld_sets_it()
+    {
+        // TASK-40 AC #4: never-generated (unstored) Unloaded chunks hash through the chunk source.
+        var schema = Build(new ResidencyOptions { InitialResidency = ChunkResidency.Unloaded });
+        using var world = CreateStreaming(schema, new Terrain(schema));
+        SubmitFocus(world, Focus, 1);
+        world.Tick();
+        world.Tick();
+        Assert.True(world.Residency().Counts.Unloaded > 0);
+        byte[] image = world.SaveToBytes();
+
+        // Without the source the loaded World hashes differently, and the default verification rejects the save.
+        Assert.Throws<SaveCorruptionException>(() => WorldPersistence.Load(image, schema.World));
+
+        int prepared = 0;
+        using var loaded = WorldPersistence.Load(image, schema.World, new LoadOptions
+        {
+            PrepareWorld = w =>
+            {
+                prepared++;
+                w.Fields().ChunkSource = new Terrain(schema);
+            },
+        });
+        Assert.Equal(1, prepared);
+        Assert.Equal(world.Hash(), loaded.Hash());
+
+        for (int t = 0; t < 3; t++)
+        {
+            SubmitFocus(world, new TilePos(40 + (16 * t), 20, 3), 1);
+            SubmitFocus(loaded, new TilePos(40 + (16 * t), 20, 3), 1);
+            world.Tick();
+            loaded.Tick();
+            Assert.Equal(world.Hash(), loaded.Hash());
+        }
     }
 
     [Fact]
