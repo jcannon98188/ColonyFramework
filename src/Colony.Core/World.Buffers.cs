@@ -25,7 +25,7 @@ public sealed partial class World
         }
 
         ThrowIfMissing(id, type);
-        if (_engineDepth == 0)
+        if (_tickOrBatchDepth == 0)
         {
             StampHostWrite(id.Index, type.Id);
         }

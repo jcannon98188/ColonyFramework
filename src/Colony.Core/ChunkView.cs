@@ -100,7 +100,7 @@ public readonly ref struct ChunkView
 
     private void StampHostWrite(ComponentType type)
     {
-        if (_host is { InEngine: false } host)
+        if (_host is { InTickOrBatch: false } host)
         {
             host.StampHostColumn(_archetype, ChunkIndex, type.Id);
         }

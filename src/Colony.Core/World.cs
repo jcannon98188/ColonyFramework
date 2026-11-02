@@ -103,14 +103,14 @@ public sealed partial class World : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         ThrowIfDisposed();
         _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
-        _engineDepth++;
+        _tickOrBatchDepth++;
         try
         {
             _runner.RunParallel(count, job);
         }
         finally
         {
-            _engineDepth--;
+            _tickOrBatchDepth--;
         }
     }
 
@@ -187,7 +187,7 @@ public sealed partial class World : IDisposable
 
         _runner ??= new TickRunner(this, Schema.Schedule, Diagnostics.WorkerCount);
         Diagnostics.BeforeTick(CurrentTick);
-        _engineDepth++;
+        _tickOrBatchDepth++;
         try
         {
             _runner.RunTick(CurrentTick);
@@ -199,7 +199,7 @@ public sealed partial class World : IDisposable
         }
         finally
         {
-            _engineDepth--;
+            _tickOrBatchDepth--;
         }
 
         CurrentTick++;
@@ -357,7 +357,7 @@ public sealed partial class World : IDisposable
     public ref T Get<T>(EntityId id, ComponentType type) where T : unmanaged
     {
         ValidateGet<T>(id, type);
-        if (_engineDepth == 0)
+        if (_tickOrBatchDepth == 0)
         {
             StampHostWrite(id.Index, type.Id);
         }
@@ -387,10 +387,10 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>
-    /// Nesting depth of engine-driven execution (<see cref="Tick"/>, <see cref="RunParallel"/>). Zero means the
+    /// Nesting depth of World-driven execution (<see cref="Tick"/>, <see cref="RunParallel"/>). Zero means the
     /// caller is the host between Ticks: World API writes are then change-stamped (spec section 4.3).
     /// </summary>
-    private int _engineDepth;
+    private int _tickOrBatchDepth;
 
     /// <summary>
     /// Runs <paramref name="callback"/> first thing in <see cref="Dispose"/>: lets a package that keyed state by this
@@ -403,7 +403,7 @@ public sealed partial class World : IDisposable
     }
 
     /// <summary>True while the World runs a Tick or a <see cref="RunParallel"/> batch.</summary>
-    internal bool InEngine => _engineDepth != 0;
+    internal bool InTickOrBatch => _tickOrBatchDepth != 0;
 
     /// <summary>
     /// Stamps one Component column of the chunk holding Entity slot <paramref name="index"/> as written by the
