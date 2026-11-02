@@ -1,4 +1,4 @@
-﻿using Colony.Fields;
+using Colony.Fields;
 using Colony.Hashing;
 using Colony.Numerics;
 
@@ -31,6 +31,7 @@ public sealed class PathfindingService : IWorldExtension
     private readonly Lock _buildLock = new();
     private readonly Lock _searchLock = new();
     private readonly PathSearch _search = new();
+    private readonly ChunkGraphPool _graphPool;
     private readonly Func<int, ChunkResidency> _residency;
     private readonly Lock _flowLock = new();
     private readonly FlowFieldStore _flows;
@@ -49,6 +50,7 @@ public sealed class PathfindingService : IWorldExtension
         _maps = new RegionMap?[_definitions.Length];
         _residency = Residency;
         _flows = new FlowFieldStore(this, options);
+        _graphPool = new ChunkGraphPool(options.ChunkGraphMemoryBudgetBytes);
         _counters = counters;
     }
 
@@ -205,6 +207,30 @@ public sealed class PathfindingService : IWorldExtension
         }
     }
 
+    /// <summary>Memory the HPA* chunk graphs of every class hold now (bounded by <see cref="PathfindingOptions.ChunkGraphMemoryBudgetBytes"/>).</summary>
+    public long ChunkGraphBytes
+    {
+        get
+        {
+            lock (_searchLock)
+            {
+                return _graphPool.Bytes;
+            }
+        }
+    }
+
+    /// <summary>Chunk graph chunks evicted to stay within the budget since the World was created (each is rebuilt when read again).</summary>
+    public long ChunkGraphEvictions
+    {
+        get
+        {
+            lock (_searchLock)
+            {
+                return _graphPool.Evictions;
+            }
+        }
+    }
+
     public FlowFieldCounters FlowCounters
     {
         get
@@ -235,6 +261,17 @@ public sealed class PathfindingService : IWorldExtension
         context.Count(_counters.RepairBacklog, backlog);
         context.Count(_counters.FlowFieldBytes, bytes);
         context.Count(_counters.FlowFieldBudgetBytes, Options.FlowFieldMemoryBudgetBytes);
+        long graphBytes;
+        long evictions;
+        lock (_searchLock)
+        {
+            graphBytes = _graphPool.Bytes;
+            evictions = _graphPool.Evictions;
+        }
+
+        context.Count(_counters.ChunkGraphBytes, graphBytes);
+        context.Count(_counters.ChunkGraphBudgetBytes, Options.ChunkGraphMemoryBudgetBytes);
+        context.Count(_counters.ChunkGraphEvictions, evictions);
     }
 
     /// <summary>Applies Field writes made since the last sync point to every built class now (host code between Ticks, or a Begin/End hook).</summary>
@@ -374,7 +411,7 @@ public sealed class PathfindingService : IWorldExtension
                 return existing;
             }
 
-            var map = new RegionMap(World, Fields, _definitions[id], _descriptors[id].Class, Options);
+            var map = new RegionMap(World, Fields, _definitions[id], _descriptors[id].Class, Options, _graphPool);
             if (!summary.IsEmpty)
             {
                 map.RestoreSummary(summary, extensionName);

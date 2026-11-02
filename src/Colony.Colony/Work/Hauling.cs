@@ -17,8 +17,8 @@ public readonly record struct HaulMatch(EntityId Supply, EntityId Demand, TilePo
 
 /// <summary>
 /// A filter over (supply, demand) pairs the matcher may form, as a struct so matching allocates nothing. The
-/// reachability filter of spec section 9.2 wraps the Game's pathfinding service:
-/// <c>CanHaul =&gt; pathfinding.Reachable(supply.Position, demand.Position, haulerClass)</c>.
+/// reachability filter of spec section 9.2 ships as <see cref="ReachableHaulFilter"/>; write your own struct to
+/// combine it with Game rules (hauler capacity, zones).
 /// </summary>
 public interface IHaulFilter
 {

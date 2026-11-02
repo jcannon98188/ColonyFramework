@@ -78,11 +78,46 @@ Re-measured on the real implementation (same machine: i9-9900KF, 8 physical / 16
 | colonist-1m | 1 | off | 19.560 | 19.463 | 21.448 | 0 B | 216 195 | - | 7.8 ms -> 19.6 ms (+151%) |
 | colonist-1m | 8 (all cores) | on | 11.829 | 12.287 | - | 0 B | 216 195 | - | - |
 
-The two Field stencils (Diffuse double-buffered + Life in-place over 40 chunks) account for roughly 15 ms of the
+The two Field stencils (Diffuse double-buffered + Life in-place over 40 chunks) accounted for roughly 15 ms of the
 single-threaded 100k Tick; the ECS part alone is 1.65 ms. The 1M scenario is ~2.5x slower than the prototype
 single-threaded, attributable to enable bits, change filters, Relations and access enforcement that the prototype
-did not have. The prototype cap of 1.02 ms is therefore not met by the full implementation; treat these as the new
-baselines and track regressions against them with `--baseline`.
+did not have. The prototype cap of 1.02 ms is therefore not met by the full implementation. The Fields rows above
+are superseded by the TASK-38 table below; track regressions against the newest numbers with `--baseline`.
+
+### Fields stencil pass (TASK-38, 2026-11-01)
+
+Profile of the TASK-30 numbers (same machine; Fields-only World of the Field scenario, 1 worker, thread cycle
+counts via `QueryThreadCycleTime` so a loaded machine does not skew the split):
+
+| Part of the Fields Tick | Mcycles/Tick | Share | What it is |
+|---|---|---|---|
+| Life in-place stencil (40 chunks x 4096 cells x 26 `Read`s) | 49 | 83% | kernel neighbour reads |
+| Diffuse double-buffered stencil (40 x 4096 x 7 `Read`s) | 9 | 15% | kernel neighbour reads + `CellsEqual` + commit copy |
+| Stencil bookkeeping with empty kernels (expand, stamp, `RunParallel` x10, change feed) | 0.9 | 1.5% | framework |
+
+So 98% of the Fields cost was `StencilInput<T>.Read`: it was never inlined (one call per neighbour, 4.3 M calls
+per Tick for Life) and did a slot computation, two `InlineArray` range checks and a uniform/dense branch per
+call, about 12 cycles per read. Hashing is not per Tick and the change feed is 80 version compares; neither shows.
+Target set from the profile: halve the Fields share of the 100k single-worker Tick (about 16 ms -> 8 ms).
+
+Change: `StencilInput<T>` now gathers the one-cell halo (18x18x18, boundary baked in) into a per-thread native
+scratch block in its constructor (324 row copies) and `Read` is forced inline as a live centre load (in-place mode),
+a halo load for `[-1, 17)`, or the old pointer-table path for anything further out. No World hash, golden or save
+changed (`fields`, `streaming*` goldens, `world-hash` and `chunks-visited` gates all equal).
+
+Re-measured A/B in one session, both binaries at high process priority, p50 ms/Tick (old -> new):
+
+| Scenario | Workers | Fields | Old p50 | New p50 | Delta | Alloc | Chunks visited | Hash |
+|---|---|---|---|---|---|---|---|---|
+| colonist-100k | 1 | on | 18.081 | 12.963 | -28% (Fields part 16.1 -> 11.0 ms, 1.46x) | 0 B | 21 750 | `0x5C04E91ED56A9470` (unchanged) |
+| colonist-100k | 8 | on | 7.114 | 4.689 | -34% | 0 B | 21 750 | unchanged |
+| colonist-1m | 1 | on | 36.340 | 31.197 | -14% | 0 B | 216 195 | `0x89AA1AAFF646FB06` (unchanged) |
+| colonist-1m | 8 | on | 14.707 | 11.700 | -20% | 0 B | 216 195 | unchanged |
+
+Fields-only World (Field scenario Tick, 1 worker): 59 -> 35..40 Mcycles (Life 49 -> 29..34, Diffuse 9 -> 5.5). The
+target of 2x was not fully met: the remaining cost is the per-cell `Read(x, y, z)` API itself (the two tier tests and
+the index math on every call). A kernel that gathers the same halo itself and indexes it directly runs Life in 14
+Mcycles, so exposing the halo (or row spans) to kernels is the next step and a follow-up ticket, not this pass.
 
 Off-vs-Standard diagnostics overhead (TASK-17's 1% gate, `DiagnosticsOverheadBenchmarks`, 100k colonists):
 

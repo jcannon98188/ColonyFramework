@@ -83,6 +83,68 @@ public sealed class StencilTests
     }
 
     [Fact]
+    public void Reads_inside_an_edge_chunk_but_outside_the_World_return_the_boundary_value()
+    {
+        var builder = new WorldBuilder().DebugValidation(false);
+        var registration = builder.AddFields(new WorldSize(20, 16, 16)); // chunk 1 holds tiles 16..19 only
+        var value = registration.AddField<int>("value");
+        // Every cell becomes its +x neighbour: the World edge at x = 20 (not the chunk edge at 32) must feed the boundary.
+        builder.AddSystem(Stencil.DoubleBuffered("Pull", value, static (in StencilInput<int> input, Span<int> output) =>
+        {
+            for (int i = 0; i < FieldChunk.CellCount; i++)
+            {
+                var (x, y, z) = FieldChunk.CellCoordinates(i);
+                output[i] = input.Read(x + 1, y, z);
+            }
+        }, boundary: -1));
+        using var world = builder.Build().CreateWorld(new WorldOptions { WorkerThreads = 1 });
+        var fields = world.Fields();
+        var accessor = fields.Accessor(value);
+        accessor[19, 0, 0] = 5;
+        accessor[16, 0, 0] = 5;
+        world.Tick();
+
+        Assert.Equal(5, accessor[15, 0, 0]); // crossed the chunk seam from chunk 1's previous state
+        Assert.Equal(5, accessor[18, 0, 0]);
+        Assert.Equal(-1, accessor[19, 0, 0]); // x = 20 lies in the chunk's storage but outside the World
+        var cells = accessor.ReadChunk(fields.OrdinalOf(new ChunkCoord(1, 0, 0)));
+        Assert.Equal(0, cells[FieldChunk.CellIndex(0, 15, 15)]); // x = 17 is inside the World and empty
+        Assert.Equal(-1, cells[FieldChunk.CellIndex(3, 15, 15)]); // x = 20 is the boundary on every row
+        Assert.Equal(-1, cells[FieldChunk.CellIndex(4, 0, 0)]); // storage-only cells beyond the bound read the boundary too (they are hashed)
+    }
+
+    [Fact]
+    public void An_in_place_stencil_on_an_edge_chunk_sees_its_own_updates_but_reads_the_boundary_past_the_World()
+    {
+        var builder = new WorldBuilder().DebugValidation(false);
+        var registration = builder.AddFields(new WorldSize(20, 16, 16)); // chunk 1 holds tiles 16..19 only
+        var value = registration.AddField<int>("value");
+        // Sweep max(left, self) in place: a value races along +x through a chunk; the boundary (-1) never wins.
+        builder.AddSystem(Stencil.InPlace("Sweep", value, static (in StencilInput<int> input, Span<int> output) =>
+        {
+            for (int i = 0; i < FieldChunk.CellCount; i++)
+            {
+                var (x, y, z) = FieldChunk.CellCoordinates(i);
+                output[i] = Math.Max(input.Read(x - 1, y, z), input.Read(x, y, z));
+            }
+        }, boundary: -1));
+        using var world = builder.Build().CreateWorld(new WorldOptions { WorkerThreads = 1 });
+        var fields = world.Fields();
+        var accessor = fields.Accessor(value);
+        int edge = fields.OrdinalOf(new ChunkCoord(1, 0, 0));
+        accessor[16, 3, 3] = 5;
+        accessor.WriteChunk(edge)[FieldChunk.CellIndex(5, 0, 0)] = 8; // a storage-only cell (tile x = 21) holding data
+        world.Tick();
+
+        var cells = accessor.ReadChunk(edge);
+        Assert.Equal(5, cells[FieldChunk.CellIndex(0, 3, 3)]);
+        Assert.Equal(5, cells[FieldChunk.CellIndex(3, 3, 3)]); // own earlier cells are seen updated (in-place order)
+        Assert.Equal(0, cells[FieldChunk.CellIndex(4, 0, 0)]); // tile 20: its in-World neighbour x = 19 is read, itself is the boundary
+        Assert.Equal(-1, cells[FieldChunk.CellIndex(5, 0, 0)]); // a cell past the World reads itself as the boundary, not its stored 8
+        Assert.Equal(0, accessor[15, 3, 3]); // chunk 0 (colour 0) ran first and reads only -x: untouched
+    }
+
+    [Fact]
     public void Chunk_colouring_never_puts_two_adjacent_chunks_in_one_colour()
     {
         var layout = new ChunkLayout(new WorldSize(80, 48, 32));
