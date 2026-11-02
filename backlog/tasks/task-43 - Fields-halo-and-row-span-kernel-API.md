@@ -1,9 +1,11 @@
 ---
 id: TASK-43
 title: Fields halo and row-span kernel API
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 22:13'
+updated_date: '2026-11-02 02:25'
 labels:
   - ready-for-agent
   - implementation
