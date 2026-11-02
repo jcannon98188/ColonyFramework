@@ -111,7 +111,7 @@ public sealed class StreamingScenarioTests
 
     // ---- TASK-27: delayed loads, deadline stalls and the resident-chunk budget through the harness (AC #1, #2, #5) ----
 
-    private static StreamingScenario Delayed(int sourceDelayMs = 0) => new() { LoadDelayTicks = 2, RingWidth = 2, SourceDelayMs = sourceDelayMs };
+    private static StreamingScenario Delayed(bool holdLoadsUntilStall = false) => new() { LoadDelayTicks = 2, RingWidth = 2, HoldLoadsUntilStall = holdLoadsUntilStall };
 
     private static StreamingScenario Budgeted() => new() { ResidentChunkBudget = 10 };
 
@@ -129,15 +129,17 @@ public sealed class StreamingScenarioTests
     [Fact]
     public void A_slow_chunk_source_stalls_Ticks_but_produces_the_hashes_of_a_fast_one()
     {
+        // TASK-44: the slow source holds every background load back until a Tick has stalled on one, so the stall is
+        // certain on any machine (a fixed sleep raced the deadline and lost on a fast Linux runner).
         var fast = DeterminismHarness.Run(Delayed(), Options);
-        var slow = Delayed(sourceDelayMs: 15);
+        var slow = Delayed(holdLoadsUntilStall: true);
         var slowResult = DeterminismHarness.Run(slow, Options);
 
         Assert.True(fast.Passed, fast.Describe());
         Assert.True(slowResult.Passed, slowResult.Describe());
         Assert.Null(slowResult.FirstDivergenceFrom(fast));
         Assert.True(slow.LastCounters.Loads > 0, "the slow run loaded chunks");
-        Assert.True(slow.LastCounters.LoadStalls > 0, $"a 15 ms-per-chunk source two Ticks away from its deadline must stall at least once: {slow.LastCounters}");
+        Assert.True(slow.LastCounters.LoadStalls > 0, $"a source that finishes only once a Tick waits for it must stall: {slow.LastCounters}");
     }
 
     [Fact]

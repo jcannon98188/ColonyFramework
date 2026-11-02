@@ -371,6 +371,7 @@ public sealed class ChunkResidencyManager : IWorldExtension
             {
                 stalls++;
                 context.Log(_definition.StallMessage, ordinal, pending.ApplyTick, _pendingCount);
+                LoadStalled?.Invoke(ordinal);
                 pending.WaitDone();
             }
 
@@ -1162,6 +1163,13 @@ public sealed class ChunkResidencyManager : IWorldExtension
             _pendingCount++;
         }
     }
+
+    /// <summary>
+    /// Test seam (TASK-44): called on the Tick thread with the chunk ordinal when a load is not done by its Tick,
+    /// just before the Tick waits for it, so a test can hold a loader back until the stall is certain instead of
+    /// racing a sleep against the deadline. Never set by the framework.
+    /// </summary>
+    internal Action<int>? LoadStalled { get; set; }
 
     /// <summary>Waits for every background generation still running, so no worker touches a buffer after the World is gone.</summary>
     public void Dispose()
