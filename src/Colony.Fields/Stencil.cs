@@ -159,6 +159,7 @@ internal sealed class StencilRunner<T>
         private readonly StencilKernel<T>? _kernel;
         private readonly StencilHaloKernel<T>? _haloKernel;
         private readonly T _boundary;
+        private readonly StencilScratchPool _scratch;
 
         public State(FieldSet fields, int fieldId, FieldStorage front, FieldStorage? back, StencilKernel<T>? kernel, StencilHaloKernel<T>? haloKernel, T boundary)
         {
@@ -171,6 +172,7 @@ internal sealed class StencilRunner<T>
             _kernel = kernel;
             _haloKernel = haloKernel;
             _boundary = boundary;
+            _scratch = fields.StencilScratch;
         }
 
         public FieldSet Fields { get; }
@@ -197,7 +199,7 @@ internal sealed class StencilRunner<T>
             }
         }
 
-        private void ExecuteInPlace(int ordinal)
+        private unsafe void ExecuteInPlace(int ordinal)
         {
             // Only Active chunks compute (spec section 5.3); a Hibernating neighbour is read as a fixed boundary.
             if (Fields.ResidencyOf(ordinal) != ChunkResidency.Active)
@@ -209,21 +211,38 @@ internal sealed class StencilRunner<T>
             if (_haloKernel is not null)
             {
                 // The halo is the working buffer: gather (centre included) first, run, then copy the centre back.
-                var gathered = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false);
-                var cells = MemoryMarshal.Cast<byte, T>(_front.WriteCells(ordinal));
-                Fields.MarkWritten(_fieldId, ordinal);
-                RunHalo(in gathered, coord, cells, inPlace: true);
+                int haloSlot = _scratch.Rent(StencilInput<T>.HaloBytes, out void* haloScratch);
+                try
+                {
+                    var gathered = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false, haloScratch);
+                    var cells = MemoryMarshal.Cast<byte, T>(_front.WriteCells(ordinal));
+                    Fields.MarkWritten(_fieldId, ordinal);
+                    RunHalo(in gathered, coord, cells, inPlace: true);
+                }
+                finally
+                {
+                    _scratch.Return(haloSlot);
+                }
+
                 return;
             }
 
             // Materialise first so the input's centre aliases the output.
             var output = _front.WriteCells(ordinal);
             Fields.MarkWritten(_fieldId, ordinal);
-            var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: true);
-            _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
+            int slot = _scratch.Rent(StencilInput<T>.HaloBytes, out void* scratch);
+            try
+            {
+                var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: true, scratch);
+                _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
+            }
+            finally
+            {
+                _scratch.Return(slot);
+            }
         }
 
-        private void Compute(int ordinal)
+        private unsafe void Compute(int ordinal)
         {
             if (Fields.ResidencyOf(ordinal) != ChunkResidency.Active)
             {
@@ -232,15 +251,23 @@ internal sealed class StencilRunner<T>
             }
 
             var coord = Layout.CoordOf(ordinal);
-            var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false);
             var output = _back!.WriteCells(ordinal);
-            if (_haloKernel is not null)
+            int slot = _scratch.Rent(StencilInput<T>.HaloBytes, out void* scratch);
+            try
             {
-                RunHalo(in input, coord, MemoryMarshal.Cast<byte, T>(output), inPlace: false);
+                var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false, scratch);
+                if (_haloKernel is not null)
+                {
+                    RunHalo(in input, coord, MemoryMarshal.Cast<byte, T>(output), inPlace: false);
+                }
+                else
+                {
+                    _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
+                }
             }
-            else
+            finally
             {
-                _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
+                _scratch.Return(slot);
             }
 
             _changed[ordinal] = _front.CellsEqual(ordinal, output) ? (byte)0 : (byte)1;

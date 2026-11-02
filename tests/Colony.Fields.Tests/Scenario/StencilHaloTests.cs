@@ -45,6 +45,34 @@ public sealed class StencilHaloTests
     }
 
     [Fact]
+    public void Halo_scratch_belongs_to_the_World_and_is_freed_when_it_is_disposed()
+    {
+        var builder = new WorldBuilder().DebugValidation(false);
+        var registration = builder.AddFields(new WorldSize(64, 16, 16));
+        var value = registration.AddField<int>("value");
+        builder.AddSystem(Stencil.DoubleBuffered("Copy", value, static (in StencilHalo<int> halo) =>
+        {
+            for (int z = 0; z < FieldChunk.Size; z++)
+            {
+                for (int y = 0; y < FieldChunk.Size; y++)
+                {
+                    halo.Row(y, z).Slice(1, FieldChunk.Size).CopyTo(halo.OutputRow(y, z));
+                }
+            }
+        }, boundary: 0));
+        var world = builder.Build().CreateWorld(new WorldOptions { WorkerThreads = 3 });
+        var scratch = world.Fields().StencilScratch;
+        world.Tick();
+        world.Tick();
+        int live = scratch.LiveBlocks;
+        Assert.InRange(live, 1, 3); // at most one block per worker, reused across Ticks
+
+        world.Dispose();
+
+        Assert.Equal(0, scratch.LiveBlocks);
+    }
+
+    [Fact]
     public void An_in_place_halo_kernel_sees_its_own_writes_and_lower_coloured_chunks_already_updated()
     {
         var builder = new WorldBuilder().DebugValidation(false);
