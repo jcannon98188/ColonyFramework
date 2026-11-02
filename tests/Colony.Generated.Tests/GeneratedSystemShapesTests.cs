@@ -96,6 +96,7 @@ public static partial class ShapeSystems
 }
 
 /// <summary>Ticket AC #1 and #2: generated Systems of every shape run under the scheduler with the same hash on 1, 2 and 4 workers.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class GeneratedSystemShapesTests
 {
     private static WorldSchema BuildSchema()

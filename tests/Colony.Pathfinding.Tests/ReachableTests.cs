@@ -5,6 +5,7 @@ using Colony.Testing;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #3: Reachable answers in constant time, and the unreachable-target scenario runs through the determinism harness.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ReachableTests
 {
     [Fact]

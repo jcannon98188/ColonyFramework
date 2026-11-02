@@ -3,6 +3,7 @@ using Colony.Fields;
 namespace Colony.Fields.Tests.Scenario;
 
 /// <summary>AC #3: queries from parallel Systems allocate nothing and yield identical results across thread counts. AC #2: the update is incremental.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class SpatialIndexParallelTests
 {
     [Fact]

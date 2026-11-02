@@ -4,6 +4,7 @@ using Colony.Testing;
 namespace Colony.Jobs.Tests;
 
 /// <summary>AC #1 (thread-count independence), AC #3 (budgeted decisions stay deterministic), AC #4 (thrash measurably lower with the defaults) and zero steady-state allocation.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ClaimScenarioTests
 {
     [Fact]

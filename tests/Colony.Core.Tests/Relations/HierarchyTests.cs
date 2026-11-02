@@ -1,6 +1,7 @@
 namespace Colony.Core.Tests.Relations;
 
 /// <summary>AC #2: the built-in parent/child hierarchy with cascade delete removes descendants deterministically without managed allocation.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class HierarchyTests
 {
     private static WorldSchema Schema(bool cascade = true)

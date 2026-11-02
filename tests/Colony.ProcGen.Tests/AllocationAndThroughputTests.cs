@@ -9,6 +9,7 @@ namespace Colony.ProcGen.Tests;
 /// test that prints samples per second for the active SIMD path and the scalar path; benchmarks/ holds only a
 /// README stub until TASK-30 lands BenchmarkDotNet, so this is the committed throughput evidence for now.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class AllocationAndThroughputTests
 {
     private const int BatchSize = 4096;

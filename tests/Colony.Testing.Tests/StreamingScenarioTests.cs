@@ -6,6 +6,7 @@ using Colony.Testing.Tests.Scenarios;
 namespace Colony.Testing.Tests;
 
 /// <summary>TASK-26 AC #1 and #6: streaming residency, on-demand generation and forced evict/reload round trips run through the determinism harness.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class StreamingScenarioTests
 {
     private static readonly DeterminismOptions Options = new() { Ticks = 36, CheckpointEvery = 1 };

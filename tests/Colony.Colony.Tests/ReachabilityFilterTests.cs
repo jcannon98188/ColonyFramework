@@ -8,6 +8,7 @@ namespace Colony.Jobs.Tests;
 /// over <see cref="PathfindingService.Reachable"/> drive the work index and the hauling matcher, follow doors
 /// opening and closing from the next Tick, work from parallel chunk jobs and allocate nothing.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ReachabilityFilterTests
 {
     private const int Wood = 1;

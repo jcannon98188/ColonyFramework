@@ -1,6 +1,7 @@
 namespace Colony.Core.Tests.Tables;
 
 /// <summary>AC #4: interning yields identical StringIds for identical insertion sequences; the table is saved World state.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class StringTableTests
 {
     private static World NewWorld() => new WorldBuilder().AddComponent<Position>("position").DebugValidation(false).Build().CreateWorld();

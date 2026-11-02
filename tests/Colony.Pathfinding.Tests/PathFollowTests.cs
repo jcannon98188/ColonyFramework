@@ -4,6 +4,7 @@ using Colony.Numerics;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #4: the path-follow helper moves a grid Entity along a result with fixed-point sub-tile offsets.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class PathFollowTests
 {
     [Fact]

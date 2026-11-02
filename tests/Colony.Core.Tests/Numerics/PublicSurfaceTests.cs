@@ -8,6 +8,7 @@ namespace Colony.Core.Tests.Numerics;
 /// Spec section 3: the public API is safe. Nothing public in the math, hashing or random areas exposes a pointer,
 /// and none of it allocates on the managed heap (spec section 2). Reflection is fine here: tests are not simulation code.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class PublicSurfaceTests
 {
     [Fact]

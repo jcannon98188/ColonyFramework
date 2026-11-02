@@ -7,6 +7,7 @@ namespace Colony.Core.Tests.Diagnostics;
 /// TASK-17 AC #3 (structured logging), #4 (allocation check names the System per thread), the Tick budget,
 /// the validation switches (access declarations, determinism spot-check), counters and the Detailed trace.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class DiagnosticsHooksTests
 {
     [Fact]

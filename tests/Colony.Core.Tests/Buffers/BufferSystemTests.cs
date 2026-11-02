@@ -5,6 +5,7 @@ namespace Colony.Core.Tests.Buffers;
 /// the World hash is the same on 1 and 4 workers (handles never reach the hash), and a steady-state Tick
 /// allocates nothing on any Tick thread.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class BufferSystemTests
 {
     private const int Entities = 4_000;

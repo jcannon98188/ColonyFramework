@@ -4,6 +4,7 @@ using Colony.Testing;
 namespace Colony.Jobs.Tests;
 
 /// <summary>TASK-42 AC #3: the work index oracle is thread-count independent (and so fit for the AOT comparison) and allocation-free in steady state.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class WorkIndexScenarioTests
 {
     [Fact]

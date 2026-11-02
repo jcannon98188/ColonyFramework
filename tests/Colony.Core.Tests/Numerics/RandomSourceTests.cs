@@ -6,6 +6,7 @@ namespace Colony.Core.Tests.Numerics;
 /// Counter-based RNG (Philox4x32-10) addressed by (World seed, stream key, counter). Known-answer vectors come
 /// from the Random123 reference distribution; everything else is reproducibility and independence evidence.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class RandomSourceTests
 {
     [Fact]

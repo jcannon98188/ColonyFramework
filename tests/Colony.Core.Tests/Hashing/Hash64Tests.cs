@@ -7,6 +7,7 @@ namespace Colony.Core.Tests.Hashing;
 /// Hash64 is the XXH64 algorithm (the published 64-bit xxHash). Published reference values pin the algorithm;
 /// committed golden values for Framework-shaped inputs pin our implementation against future refactors.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class Hash64Tests
 {
     [Theory]

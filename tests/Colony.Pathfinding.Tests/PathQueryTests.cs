@@ -3,6 +3,7 @@ using Colony.Fields;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #3: approximate path cost and the next-step-toward-goal query, both allocation free.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class PathQueryTests
 {
     [Fact]

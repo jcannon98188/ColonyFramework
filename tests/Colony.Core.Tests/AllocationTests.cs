@@ -5,6 +5,7 @@ namespace Colony.Core.Tests;
 /// heap. Measured with GC.GetAllocatedBytesForCurrentThread around the steady-state iterations, which
 /// is what the Framework's allocation harness (TASK-10) will do across all Tick threads.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class AllocationTests
 {
     private const int EntityCount = 100_000;

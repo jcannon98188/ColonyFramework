@@ -5,6 +5,7 @@ using Colony.Testing;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #3: flow Field results are identical across thread counts; Fields are not hashed, and saved only so load-then-continue is exact (FlowDeterminismTests).</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class FlowFieldScenarioTests
 {
     [Theory]

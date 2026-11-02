@@ -16,4 +16,9 @@
     <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
+  <!-- Allocation- and timing-gated tests run serially via this xUnit collection (every xUnit test project; the AOT host has none). -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'Colony.Testing.AotHost'">
+    <Compile Include="$(MSBuildThisFileDirectory)AllocationSensitiveGroup.cs" Link="AllocationSensitiveGroup.cs" />
+  </ItemGroup>
+
 </Project>

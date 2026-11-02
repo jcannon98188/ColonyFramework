@@ -1,6 +1,7 @@
 namespace Colony.Core.Tests.Tables;
 
 /// <summary>AC #4: blobs are immutable once stored; the store is saved World state.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class BlobStoreTests
 {
     private static World NewWorld() => new WorldBuilder().AddComponent<Position>("position").DebugValidation(false).Build().CreateWorld();

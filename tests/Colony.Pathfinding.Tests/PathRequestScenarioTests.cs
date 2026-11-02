@@ -5,6 +5,7 @@ using Colony.Testing;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #5 (and the thread-count half of AC #1): the toggle and budget-exhaustion request scenarios in the determinism harness.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class PathRequestScenarioTests
 {
     [Theory]

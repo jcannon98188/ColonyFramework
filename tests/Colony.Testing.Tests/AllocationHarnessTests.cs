@@ -4,6 +4,7 @@ using Colony.Testing.Tests.Scenarios;
 namespace Colony.Testing.Tests;
 
 /// <summary>AC #3: the allocation harness fails a scenario when any Framework thread allocates in steady state and names the System running at the time.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class AllocationHarnessTests
 {
     private static readonly AllocationOptions Options = new() { Workers = 4, WarmupTicks = 5, MeasuredTicks = 5 };

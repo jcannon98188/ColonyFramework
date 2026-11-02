@@ -5,6 +5,7 @@ using Colony.Testing.Tests.Scenarios;
 namespace Colony.Testing.Tests;
 
 /// <summary>TASK-12's stencil oracle run through the harness: both stencil modes hash identically across thread counts and the golden file, and allocate nothing.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class FieldScenarioTests
 {
     private static readonly DeterminismOptions Options = new() { Ticks = 30, CheckpointEvery = 1 };

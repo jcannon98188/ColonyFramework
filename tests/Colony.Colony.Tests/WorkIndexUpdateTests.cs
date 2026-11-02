@@ -4,6 +4,7 @@ using Colony.Persistence;
 namespace Colony.Jobs.Tests;
 
 /// <summary>AC #1 (Reachable) and AC #2: the index follows the change feed in the Late Phase and is rebuilt on load, never saved or hashed.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class WorkIndexUpdateTests
 {
     [Fact]

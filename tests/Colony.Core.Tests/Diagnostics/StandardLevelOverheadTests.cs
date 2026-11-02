@@ -13,6 +13,7 @@ namespace Colony.Core.Tests.Diagnostics;
 /// percent-level timing gate is not stable while the whole solution's tests run in parallel.
 /// Run in Release for the recorded number: <c>dotnet test tests/Colony.Core.Tests -c Release -- --filter-method "*Standard_level_overhead*" --show-stdout All --show-test-results all</c>.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class StandardLevelOverheadTests
 {
     private const int Workers = 4;

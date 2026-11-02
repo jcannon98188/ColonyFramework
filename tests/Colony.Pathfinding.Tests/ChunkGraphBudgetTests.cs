@@ -10,6 +10,7 @@ namespace Colony.Pathfinding.Tests;
 /// <see cref="PathfindingOptions.MinimumChunkGraphChunks"/> resident chunks), its memory is in the Tick record,
 /// and the budget never changes a result.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ChunkGraphBudgetTests
 {
     [Fact]

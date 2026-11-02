@@ -11,6 +11,7 @@ public struct ItemDefinition
 }
 
 /// <summary>AC #4: Definitions load from the JSON source, are patched by a later Plugin, bake into blobs and are looked up by interned name without allocation during Ticks.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class DefinitionTests
 {
     private const string BaseItems = """

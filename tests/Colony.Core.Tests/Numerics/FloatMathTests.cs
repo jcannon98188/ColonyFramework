@@ -9,6 +9,7 @@ namespace Colony.Core.Tests.Numerics;
 /// on the same inputs, including NaN, infinities, signed zero, denormals and tails that are not a multiple of
 /// the logical width.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class FloatMathTests
 {
     private static readonly SimdPath[] AllPaths = [SimdPath.Scalar, SimdPath.Vector128, SimdPath.Vector256];

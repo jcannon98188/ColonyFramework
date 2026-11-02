@@ -9,6 +9,7 @@ namespace Colony.Testing.Tests;
 /// 5k food, 1% churn) hashes identically on 1, 2, 4 and N threads and against its committed golden
 /// hashes, allocates nothing in steady state on any thread, and the thread-keyed negative control fails.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ColonistScenarioTests
 {
     private static readonly DeterminismOptions Options = new() { Ticks = 60, CheckpointEvery = 1 };

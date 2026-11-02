@@ -7,6 +7,7 @@ namespace Colony.Core.Tests;
 /// localisation. The root equals <see cref="World.Hash"/>; two trees compare level by level and name the
 /// diverging chunk; building the tree is on demand and costs Ticks nothing.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class HashTreeTests
 {
     [Fact]

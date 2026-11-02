@@ -4,6 +4,7 @@ using Colony.Numerics;
 namespace Colony.Jobs.Tests;
 
 /// <summary>AC #4: the lexicographic priority-table chooser and the utility scoring helpers are allocation free and behave as specified.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class ChooserTests
 {
     private static EntityId Id(int index) => new(index, 1);

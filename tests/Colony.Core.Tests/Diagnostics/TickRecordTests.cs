@@ -6,6 +6,7 @@ namespace Colony.Core.Tests.Diagnostics;
 /// TASK-17 AC #1 and #6: <c>world.Diagnostics</c> hands out the latest N Tick records as structs and spans,
 /// without allocating, with a versioned layout.
 /// </summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class TickRecordTests
 {
     private const int Entities = 2_000;

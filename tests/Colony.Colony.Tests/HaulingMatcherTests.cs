@@ -3,6 +3,7 @@ using Colony.Fields;
 namespace Colony.Jobs.Tests;
 
 /// <summary>AC #3: the hauling matcher pairs supply and demand into haul work items deterministically.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class HaulingMatcherTests
 {
     private const int Wood = 1;

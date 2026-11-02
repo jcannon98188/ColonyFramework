@@ -3,6 +3,7 @@ using Colony.Fields;
 namespace Colony.Pathfinding.Tests;
 
 /// <summary>AC #1: movers inside the bound descend the Field one face move at a time; movers outside it reach the bound with HPA*.</summary>
+[Collection(Colony.TestSupport.AllocationSensitiveGroup.Name)]
 public sealed class FlowStepTests
 {
     private static readonly WorldSize Plane = new(128, 64, 1);
