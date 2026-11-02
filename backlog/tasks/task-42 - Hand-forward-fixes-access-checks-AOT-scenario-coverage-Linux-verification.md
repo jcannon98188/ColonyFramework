@@ -1,10 +1,11 @@
 ---
 id: TASK-42
 title: 'Hand-forward fixes: access checks, AOT scenario coverage, Linux verification'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:36'
-updated_date: '2026-11-02 02:55'
+updated_date: '2026-11-02 03:03'
 labels:
   - ready-for-agent
   - implementation
