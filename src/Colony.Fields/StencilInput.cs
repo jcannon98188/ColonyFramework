@@ -43,7 +43,7 @@ public readonly ref struct StencilInput<T>
     private readonly int _originZ;
     private readonly bool _checkBounds;
 
-    internal unsafe StencilInput(ChunkLayout layout, FieldStorage storage, ChunkCoord chunk, T boundary, bool aliasCentre)
+    internal unsafe StencilInput(ChunkLayout layout, FieldStorage storage, ChunkCoord chunk, T boundary, bool aliasCentre, void* scratch)
     {
         Chunk = chunk;
         Boundary = boundary;
@@ -92,7 +92,7 @@ public readonly ref struct StencilInput<T>
         }
 
         _centre = aliasCentre ? (T*)_pointers[CentreSlot] : null;
-        _halo = (T*)StencilScratch.Rent((nuint)HaloCells * (nuint)sizeof(T));
+        _halo = (T*)scratch; // at least HaloBytes, rented by the caller from the FieldSet's StencilScratchPool
         if (_checkBounds)
         {
             FillHaloChecked();
@@ -105,6 +105,12 @@ public readonly ref struct StencilInput<T>
 
     private const nint Outside = -1;
     private const nint Uniform = 0;
+
+    /// <summary>Scratch bytes the constructor needs for the halo.</summary>
+    internal static unsafe nuint HaloBytes => (nuint)HaloCells * (nuint)sizeof(T);
+
+    /// <summary>The gathered 18x18x18 halo (boundary baked in), for <see cref="StencilHalo{T}"/>; always present when the centre is not aliased.</summary>
+    internal unsafe T* HaloPointer => _halo;
 
     /// <summary>The chunk whose cells the kernel is computing.</summary>
     public ChunkCoord Chunk { get; }
@@ -253,34 +259,86 @@ public readonly ref struct StencilInput<T>
 }
 
 /// <summary>
-/// Per-thread native scratch for stencil halos (TASK-38). A job gathers its halo here before running the kernel;
-/// the block is thread-local only as scratch (results never depend on which worker ran the job), is reused by
-/// every job the thread runs afterwards, grows only when a wider cell type shows up, and lives as long as the
-/// thread, so steady-state Ticks allocate nothing.
+/// Native scratch for stencil halos, owned by one World's <see cref="FieldSet"/> (TASK-38, reworked in TASK-43).
+/// A job rents a slot before gathering its halo and returns it after the kernel; there are as many slots as the
+/// World has workers, so a rent always finds one free. Which slot a job gets depends on timing, but a slot is
+/// pure scratch (fully rewritten by every gather), so results never depend on it. Blocks grow only when a wider cell
+/// type shows up and are freed with the World, so steady-state Ticks allocate nothing and nothing outlives the World
+/// (the TASK-38 per-thread blocks leaked one block per worker thread of every disposed World).
 /// </summary>
-internal static unsafe class StencilScratch
+internal sealed unsafe class StencilScratchPool : IDisposable
 {
     private const int Alignment = 64;
 
-    [ThreadStatic]
-    private static void* _block;
+    private readonly nint[] _blocks;
+    private readonly nuint[] _bytes;
+    private readonly int[] _taken;
 
-    [ThreadStatic]
-    private static nuint _blockBytes;
-
-    public static void* Rent(nuint bytes)
+    public StencilScratchPool(int slots)
     {
-        if (_blockBytes < bytes)
+        ArgumentOutOfRangeException.ThrowIfLessThan(slots, 1);
+        _blocks = new nint[slots];
+        _bytes = new nuint[slots];
+        _taken = new int[slots];
+    }
+
+    /// <summary>Native blocks currently allocated; test seam.</summary>
+    public int LiveBlocks
+    {
+        get
         {
-            if (_block is not null)
+            int count = 0;
+            foreach (nint block in _blocks)
             {
-                NativeMemory.AlignedFree(_block);
+                count += block != 0 ? 1 : 0;
             }
 
-            _block = NativeMemory.AlignedAlloc(bytes, Alignment);
-            _blockBytes = bytes;
+            return count;
         }
+    }
 
-        return _block;
+    /// <summary>Takes a free slot holding at least <paramref name="bytes"/>; pass the returned slot to <see cref="Return"/>.</summary>
+    public int Rent(nuint bytes, out void* block)
+    {
+        var spin = default(SpinWait);
+        while (true)
+        {
+            for (int slot = 0; slot < _taken.Length; slot++)
+            {
+                if (Volatile.Read(ref _taken[slot]) == 0 && Interlocked.CompareExchange(ref _taken[slot], 1, 0) == 0)
+                {
+                    if (_bytes[slot] < bytes)
+                    {
+                        if (_blocks[slot] != 0)
+                        {
+                            NativeMemory.AlignedFree((void*)_blocks[slot]);
+                        }
+
+                        _blocks[slot] = (nint)NativeMemory.AlignedAlloc(bytes, Alignment);
+                        _bytes[slot] = bytes;
+                    }
+
+                    block = (void*)_blocks[slot];
+                    return slot;
+                }
+            }
+
+            spin.SpinOnce();
+        }
+    }
+
+    public void Return(int slot) => Volatile.Write(ref _taken[slot], 0);
+
+    public void Dispose()
+    {
+        for (int slot = 0; slot < _blocks.Length; slot++)
+        {
+            if (_blocks[slot] != 0)
+            {
+                NativeMemory.AlignedFree((void*)_blocks[slot]);
+                _blocks[slot] = 0;
+                _bytes[slot] = 0;
+            }
+        }
     }
 }

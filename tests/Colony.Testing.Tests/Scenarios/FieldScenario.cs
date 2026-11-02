@@ -59,20 +59,27 @@ public sealed class FieldScenario : Scenario
         }
     }
 
-    /// <summary>Six-neighbour integer diffusion: new = old + (sum(neighbours) - 6 old) / 8, exact in ints.</summary>
-    private static void Diffuse(in StencilInput<int> input, Span<int> output)
+    /// <summary>
+    /// Six-neighbour integer diffusion: new = old + (sum(neighbours) - 6 old) / 8, exact in ints. Row-span kernel
+    /// (TASK-43): five halo rows per output row, element <c>x + 1</c> of a halo row is local x.
+    /// </summary>
+    private static void Diffuse(in StencilHalo<int> halo)
     {
         for (int z = 0; z < FieldChunk.Size; z++)
         {
             for (int y = 0; y < FieldChunk.Size; y++)
             {
-                for (int x = 0; x < FieldChunk.Size; x++)
+                var row = halo.Row(y, z);
+                var north = halo.Row(y - 1, z);
+                var south = halo.Row(y + 1, z);
+                var below = halo.Row(y, z - 1);
+                var above = halo.Row(y, z + 1);
+                var output = halo.OutputRow(y, z);
+                for (int x = 0; x < output.Length; x++)
                 {
-                    int old = input.Read(x, y, z);
-                    long sum = (long)input.Read(x - 1, y, z) + input.Read(x + 1, y, z)
-                             + input.Read(x, y - 1, z) + input.Read(x, y + 1, z)
-                             + input.Read(x, y, z - 1) + input.Read(x, y, z + 1);
-                    output[FieldChunk.CellIndex(x, y, z)] = old + (int)((sum - (6L * old)) >> 3);
+                    int old = row[x + 1];
+                    long sum = (long)row[x] + row[x + 2] + north[x + 1] + south[x + 1] + below[x + 1] + above[x + 1];
+                    output[x] = old + (int)((sum - (6L * old)) >> 3);
                 }
             }
         }
@@ -81,33 +88,37 @@ public sealed class FieldScenario : Scenario
     /// <summary>
     /// An in-place 3D Life variant: a cell is born with 4..5 live neighbours of the 26 and survives with
     /// 3..6. In-place ordered mode means earlier cells of this chunk and lower-colour chunks are already updated.
+    /// Row-span kernel (TASK-43): the eight rows around the current one do not change while it is computed, so
+    /// their per-column sums are taken once per row; the current row is read live (its output aliases it), so
+    /// the -x neighbour is already updated exactly as in the per-cell formulation.
     /// </summary>
-    private static void LifeStep(in StencilInput<byte> input, Span<byte> output)
+    private static void LifeStep(in StencilHalo<byte> halo)
     {
+        Span<int> columns = stackalloc int[StencilHalo.Side];
         for (int z = 0; z < FieldChunk.Size; z++)
         {
             for (int y = 0; y < FieldChunk.Size; y++)
             {
-                for (int x = 0; x < FieldChunk.Size; x++)
+                var a0 = halo.Row(y - 1, z - 1);
+                var a1 = halo.Row(y, z - 1);
+                var a2 = halo.Row(y + 1, z - 1);
+                var b0 = halo.Row(y - 1, z);
+                var b2 = halo.Row(y + 1, z);
+                var c0 = halo.Row(y - 1, z + 1);
+                var c1 = halo.Row(y, z + 1);
+                var c2 = halo.Row(y + 1, z + 1);
+                for (int i = 0; i < columns.Length; i++)
                 {
-                    int alive = 0;
-                    for (int dz = -1; dz <= 1; dz++)
-                    {
-                        for (int dy = -1; dy <= 1; dy++)
-                        {
-                            for (int dx = -1; dx <= 1; dx++)
-                            {
-                                if ((dx | dy | dz) != 0)
-                                {
-                                    alive += input.Read(x + dx, y + dy, z + dz);
-                                }
-                            }
-                        }
-                    }
+                    columns[i] = a0[i] + a1[i] + a2[i] + b0[i] + b2[i] + c0[i] + c1[i] + c2[i];
+                }
 
-                    int index = FieldChunk.CellIndex(x, y, z);
-                    byte self = output[index];
-                    output[index] = self != 0 ? (byte)(alive is >= 3 and <= 6 ? 1 : 0) : (byte)(alive is 4 or 5 ? 1 : 0);
+                var current = halo.Row(y, z);
+                var output = halo.OutputRow(y, z);
+                for (int x = 0; x < output.Length; x++)
+                {
+                    int alive = columns[x] + columns[x + 1] + columns[x + 2] + current[x] + current[x + 2];
+                    byte self = current[x + 1];
+                    output[x] = self != 0 ? (byte)(alive is >= 3 and <= 6 ? 1 : 0) : (byte)(alive is 4 or 5 ? 1 : 0);
                 }
             }
         }

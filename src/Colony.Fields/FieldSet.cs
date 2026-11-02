@@ -301,6 +301,11 @@ public sealed class FieldSet : IWorldExtension
 
     private readonly List<FieldStorage> _scratch = [];
 
+    private StencilScratchPool? _stencilScratch;
+
+    /// <summary>Halo scratch for this World's stencil jobs: one slot per worker, freed with the set.</summary>
+    internal StencilScratchPool StencilScratch => _stencilScratch ??= new StencilScratchPool(Math.Max(1, World.WorkerCount));
+
     /// <summary>A second storage shaped like <paramref name="field"/>'s (a stencil back buffer); owned and disposed by this set, never hashed.</summary>
     internal FieldStorage CreateScratchStorage<T>(Field<T> field)
         where T : unmanaged
@@ -571,6 +576,8 @@ public sealed class FieldSet : IWorldExtension
         {
             storage.Dispose();
         }
+
+        _stencilScratch?.Dispose();
     }
 }
 
