@@ -53,8 +53,8 @@ Decided in "Decide package and assembly layout and public API shape". All packag
 Dependency rules, enforced by a CI dependency check:
 
 - `Core` depends only on the BCL.
-- `Fields`, `Persistence`, `Plugins` depend on `Core`.
-- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state).
+- `Fields` and `Persistence` depend on `Core`. `Plugins` depends on `Abstractions`, `Core`, `Fields` (Plugins register Fields) and `Persistence` (the C ABI loads and saves Worlds); ADR 0005.
+- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state). `Colony` also depends on `Pathfinding` for its reachability filters (ADR 0004).
 - `Diagnostics` plugs into `Core` through hook interfaces and struct callbacks; `Core` never references it.
 - Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery. Exceptions, decided at implementation: `Native` depends on `Plugins` (it hosts the C ABI, whose host lives in `Plugins`) and on whatever `Plugins` depends on; `Testing` may depend on `Core`, `Fields`, `Persistence` and `Plugins` (it exercises them); the `Colony` meta-package references `Core`, `Fields`, `Persistence`, `Pathfinding`, `Colony` and `ProcGen`, not `Plugins`, `Diagnostics` or `Testing`.
 - `Abstractions` depends only on the BCL. `Diagnostics` depends on `Core`, `Fields` and `Persistence` (it reads their counters and the replay log) and on nothing else; `Generators` depends only on Roslyn.

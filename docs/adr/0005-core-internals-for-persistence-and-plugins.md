@@ -1,7 +1,7 @@
 ---
 status: accepted
 ---
-# Core shares internals with Persistence and Plugins
+# Core shares internals with Persistence and Plugins; Plugins depends on Abstractions, Fields and Persistence
 
 Spec section 3 said `InternalsVisibleTo` is for tests only. Two Framework packages need more of Core than its public API offers, and `Colony.Core.csproj` has granted them internals since TASK-14 and TASK-28 without a recorded decision (code review finding 8). We keep both grants and record what they cover and how they are kept small.
 
@@ -22,7 +22,17 @@ Spec section 3 said `InternalsVisibleTo` is for tests only. Two Framework packag
 - Internals used across the seam stay `internal`, carry a doc comment that names their caller, and are additive: Core keeps working, and its own tests stay green, without either package.
 - Nothing in Persistence or Plugins may use the seam to change simulation results. Persistence restores state bit-exactly (load-then-continue is bit-identical, spec section 6). Plugins only registers and moves raw bytes through the same command and Resource paths C# Systems use.
 
+## Colony.Plugins depends on more than Core
+
+Spec section 3 listed `Plugins` as depending on `Core`. Since TASK-27/28 it references `Abstractions`, `Core`, `Fields` and `Persistence` (code review finding 9), and `tools/Colony.DependencyCheck` encodes exactly that set:
+
+- **`Abstractions`**: the contracts a Plugin compiles against (`PluginManifest`, `IDefinitionSource`, `ColonyApi`); that is the package's purpose.
+- **`Fields`**: Plugins register Fields through `PluginRegistration.Fields` (the Game's `FieldsBuilder`), and the generated `colony.h` covers Field registration and access.
+- **`Persistence`**: the C ABI's `world_load` / `world_save` entries load and save through `WorldPersistence`.
+
+All three edges point down the existing graph (none of these packages references `Plugins`; `Plugins` stays on the "never referenced" list), so there is no cycle, and a Game that does not use Plugins still never loads them. Splitting the C ABI into its own package was rejected for now: `Colony.Native` already is the separate shipping unit, and the managed host would only move, not shrink.
+
 ## Consequences
 
-- Spec section 3 now names these two grants next to "tests only".
+- Spec section 3 now names these two grants next to "tests only", and its dependency rules list the `Plugins` edges.
 - CONVENTIONS.md (the implementer notes) says the same.
