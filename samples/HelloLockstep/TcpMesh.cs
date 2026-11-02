@@ -126,6 +126,12 @@ public sealed class TcpMesh : IDisposable
         }
     }
 
+    /// <summary>
+    /// One destination's queue and sender thread. The sender thread owns the signal and disposes it when it stops;
+    /// every release (<see cref="Enqueue"/>, <see cref="Wake"/>) happens under <see cref="_lock"/> and checks
+    /// <see cref="_closed"/> first, so a mesh disposed while its sender is already stopping never touches a disposed
+    /// signal (TASK-44: <c>ObjectDisposedException</c> from <c>Wake</c> crashed the Linux test host).
+    /// </summary>
     private sealed class Outbox : IDisposable
     {
         private readonly TcpMesh _mesh;
@@ -133,6 +139,7 @@ public sealed class TcpMesh : IDisposable
         private readonly Queue<byte[]> _queue = new();
         private readonly SemaphoreSlim _signal = new(0);
         private readonly Lock _lock = new();
+        private bool _closed;
 
         public Outbox(TcpMesh mesh, int to)
         {
@@ -145,20 +152,47 @@ public sealed class TcpMesh : IDisposable
         {
             lock (_lock)
             {
+                if (_closed)
+                {
+                    return; // the mesh is shutting down: nothing will send it
+                }
+
                 if (_queue.Count >= MaxQueued)
                 {
                     _queue.Dequeue();
                 }
 
                 _queue.Enqueue(packet);
+                _signal.Release();
             }
-
-            _signal.Release();
         }
 
-        public void Wake() => _signal.Release();
+        /// <summary>Unblocks the sender thread so it sees the mesh's cancellation; a no-op once the sender has stopped.</summary>
+        public void Wake()
+        {
+            lock (_lock)
+            {
+                if (!_closed)
+                {
+                    _signal.Release();
+                }
+            }
+        }
 
-        public void Dispose() => _signal.Dispose();
+        /// <summary>Called by the sender thread only, as it stops.</summary>
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                if (_closed)
+                {
+                    return;
+                }
+
+                _closed = true;
+                _signal.Dispose();
+            }
+        }
 
         private void Run()
         {

@@ -59,7 +59,7 @@ public sealed class LoopbackLockstepTests
                 Workers = 1 + (s % 2),
                 AwaitJoinAtTick = joinSeat >= 0 && s == 0 ? JoinAt : -1,
             };
-            var t = new Thread(() => results[s] = PeerHost.Run(options)) { IsBackground = true };
+            var t = new Thread(() => results[s] = RunCaught(options)) { IsBackground = true };
             threads.Add(t);
         }
 
@@ -74,6 +74,21 @@ public sealed class LoopbackLockstepTests
         }
 
         return results;
+    }
+
+    /// <summary>An exception escaping a peer thread would kill the test host (TASK-44, Linux CI): report it as the peer's error instead.</summary>
+    private static PeerResult RunCaught(PeerOptions options)
+    {
+        try
+        {
+            return PeerHost.Run(options);
+        }
+#pragma warning disable CA1031 // Any failure of a peer thread becomes a failed assertion, never a crashed test host.
+        catch (Exception exception)
+#pragma warning restore CA1031
+        {
+            return new PeerResult { Seat = options.Seat, Error = exception.ToString() };
+        }
     }
 
     private static void AssertInSync(PeerResult[] results, int ticks)
@@ -165,7 +180,9 @@ public sealed class LoopbackLockstepTests
 
     private static Process Start(string dll, string args)
     {
-        var info = new ProcessStartInfo("dotnet", string.Create(CultureInfo.InvariantCulture, $"\"{dll}\" {args}"))
+        // The dotnet CLI that runs the tests exports its own path; a bare "dotnet" relies on PATH (TASK-44).
+        string host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } path && File.Exists(path) ? path : "dotnet";
+        var info = new ProcessStartInfo(host, string.Create(CultureInfo.InvariantCulture, $"\"{dll}\" {args}"))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

@@ -21,7 +21,17 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
     private bool _disposed;
 
     public CpuFieldStorage(int cellSize, int chunkCount, ReadOnlySpan<byte> initialValue)
-        : base(cellSize, chunkCount)
+        : this(cellSize, chunkCount, initialValue, ReadOnlySpan<byte>.Empty)
+    {
+    }
+
+    /// <summary>A storage whose cells have padding: bytes outside <paramref name="cellDataMask"/> are hashed as zero and ignored by comparisons, and uniform values are stored with them zeroed.</summary>
+    /// <param name="cellSize">Bytes per cell.</param>
+    /// <param name="chunkCount">Chunks of the Field.</param>
+    /// <param name="initialValue">The uniform value every chunk starts with.</param>
+    /// <param name="cellDataMask">See <see cref="FieldStorage.CellDataMask"/>.</param>
+    public CpuFieldStorage(int cellSize, int chunkCount, ReadOnlySpan<byte> initialValue, ReadOnlySpan<byte> cellDataMask)
+        : base(cellSize, chunkCount, cellDataMask)
     {
         if (initialValue.Length != cellSize)
         {
@@ -38,6 +48,8 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
         {
             initialValue.CopyTo(_uniform.AsSpan(ordinal * cellSize, cellSize));
         }
+
+        ValueLayout.ZeroPadding(CellDataMask, _uniform);
     }
 
     public override long CellBytesAllocated => _allocated;
@@ -77,7 +89,9 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
             throw new ArgumentException($"The value is {value.Length} bytes but a cell is {CellSize}.", nameof(value));
         }
 
-        value.CopyTo(_uniform.AsSpan(ordinal * CellSize, CellSize));
+        var uniform = _uniform.AsSpan(ordinal * CellSize, CellSize);
+        value.CopyTo(uniform);
+        ValueLayout.ZeroPadding(CellDataMask, uniform);
         _isUniform[ordinal] = true;
     }
 
@@ -102,13 +116,13 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
 
         if (!_isUniform[ordinal])
         {
-            return cells.SequenceEqual(new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes));
+            return ValueLayout.DataEqual(CellDataMask, cells, new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes));
         }
 
         var value = UniformValue(ordinal);
         for (int offset = 0; offset < cells.Length; offset += CellSize)
         {
-            if (!cells.Slice(offset, CellSize).SequenceEqual(value))
+            if (!ValueLayout.DataEqual(CellDataMask, cells.Slice(offset, CellSize), value))
             {
                 return false;
             }
@@ -121,12 +135,19 @@ public sealed unsafe class CpuFieldStorage : FieldStorage
     {
         if (_isUniform[ordinal])
         {
-            Expand(UniformValue(ordinal), _expanded);
+            Expand(UniformValue(ordinal), _expanded); // uniform values already have zeroed padding
             state.Append(_expanded);
+        }
+        else if (CellDataMask.IsEmpty)
+        {
+            state.Append(new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes));
         }
         else
         {
-            state.Append(new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes));
+            // Writers may leave anything in padding (spec section 6): hash a copy with it zeroed, never the block itself.
+            new ReadOnlySpan<byte>(_dense[ordinal], (int)_chunkBytes).CopyTo(_expanded);
+            ValueLayout.ZeroPadding(CellDataMask, _expanded);
+            state.Append(_expanded);
         }
     }
 

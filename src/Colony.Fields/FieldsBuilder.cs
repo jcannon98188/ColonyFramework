@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Colony.Hashing;
@@ -21,6 +22,7 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
     private readonly Dictionary<string, int> _byName = new(StringComparer.Ordinal);
     private readonly List<byte[]> _initialValues = [];
     private readonly List<Type> _cellTypes = [];
+    private readonly List<byte[]?> _dataMasks = [];
     private ChunkLayout? _layout;
     private bool _frozen;
     private ulong _layoutHash;
@@ -42,9 +44,10 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
     /// <summary>
     /// Registers a Field of cells <typeparamref name="T"/> under a stable <paramref name="name"/>; every
     /// chunk starts uniform with <paramref name="initialValue"/>. The layout hash covers name, size and
-    /// alignment, never the CLR type. Field ids are registration order.
+    /// alignment, never the CLR type. Field ids are registration order. Padding bytes of <typeparamref name="T"/>
+    /// (<see cref="ValueLayout.DataMaskOf{T}"/>) never reach the World hash, comparisons or saves (spec section 6).
     /// </summary>
-    public Field<T> AddField<T>(string name, T initialValue = default)
+    public Field<T> AddField<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicMethods)] T>(string name, T initialValue = default)
         where T : unmanaged
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -68,6 +71,7 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
         _byName.Add(name, id);
         _initialValues.Add(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in initialValue)).ToArray());
         _cellTypes.Add(typeof(T));
+        _dataMasks.Add(ValueLayout.DataMaskOf<T>());
         return new Field<T>(id);
     }
 
@@ -131,7 +135,7 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
     {
         ArgumentNullException.ThrowIfNull(world);
         Freeze();
-        return new FieldSet(world, _layout!, _fields, _cellTypes, _initialValues);
+        return new FieldSet(world, _layout!, _fields, _cellTypes, _initialValues, _dataMasks);
     }
 
     /// <summary>

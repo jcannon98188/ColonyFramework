@@ -62,7 +62,7 @@ public readonly ref struct FieldAccessor<T>
     /// <summary>Writes one cell, expanding a uniform chunk unless the value already equals the uniform value.</summary>
     public void Set(int ordinal, int cellIndex, T value)
     {
-        if (_storage.IsUniform(ordinal) && MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value)).SequenceEqual(_storage.UniformValue(ordinal)))
+        if (_storage.IsUniform(ordinal) && ValueLayout.DataEqual(_storage.CellDataMask, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value)), _storage.UniformValue(ordinal)))
         {
             return;
         }

@@ -45,8 +45,12 @@ public sealed class StreamingScenario : Scenario
     /// <summary>TASK-27 AC #2: resident-chunk budget (0 = none).</summary>
     public int ResidentChunkBudget { get; init; }
 
-    /// <summary>Milliseconds the chunk source sleeps per generated chunk: a slow loader whose stalls must not change the hashes.</summary>
-    public int SourceDelayMs { get; init; }
+    /// <summary>
+    /// A slow loader whose stalls must not change the hashes (TASK-44): every background generation waits until a
+    /// Tick has stalled on a load of this World, so at least one stall is certain whatever the machine's speed.
+    /// Generation on the World's own thread (synchronous loads, unloads, hashing) is never held.
+    /// </summary>
+    public bool HoldLoadsUntilStall { get; init; }
 
     /// <summary>The streaming totals of the last World this scenario populated (the stall count of a slow run).</summary>
     public StreamingCounters LastCounters { get; private set; }
@@ -102,7 +106,7 @@ public sealed class StreamingScenario : Scenario
     public override void Populate(World world)
     {
         ArgumentNullException.ThrowIfNull(world);
-        world.Fields().ChunkSource = new ChunkSource(world, Seed, SourceDelayMs);
+        UseChunkSource(world);
         var tilePos = world.Schema.Component<TilePos>();
         var creature = world.Schema.Component<Creature>();
         var pinned = world.Schema.Component<Pinned>();
@@ -118,7 +122,17 @@ public sealed class StreamingScenario : Scenario
     public override void OnLoaded(World world)
     {
         ArgumentNullException.ThrowIfNull(world);
-        world.Fields().ChunkSource = new ChunkSource(world, Seed, SourceDelayMs);
+        UseChunkSource(world);
+    }
+
+    private void UseChunkSource(World world)
+    {
+        var source = new ChunkSource(world, Seed, HoldLoadsUntilStall);
+        world.Fields().ChunkSource = source;
+        if (HoldLoadsUntilStall)
+        {
+            world.Residency().LoadStalled = _ => source.Release();
+        }
     }
 
     public override void Advance(World world)
@@ -234,17 +248,23 @@ public sealed class StreamingScenario : Scenario
         private const ulong Key = 0x4348_554E_4B53_5243UL; // "CHUNKSRC"
         private const int CreaturesPerChunk = 3;
 
+        /// <summary>Upper bound on a held load, so a run that never stalls fails its stall assertion instead of hanging.</summary>
+        private const long HoldLimitMs = 30_000;
+
         private readonly ulong _seed;
-        private readonly int _delayMs;
+        private readonly bool _hold;
+        private readonly int _owner;
+        private int _released;
         private readonly Field<int> _height;
         private readonly Field<byte> _soil;
         private readonly ComponentType _tilePos;
         private readonly ComponentType _creature;
 
-        public ChunkSource(World world, ulong seed, int delayMs)
+        public ChunkSource(World world, ulong seed, bool hold)
         {
             _seed = seed;
-            _delayMs = delayMs;
+            _hold = hold;
+            _owner = Environment.CurrentManagedThreadId;
             var fields = world.Fields();
             _height = fields.Field<int>("height");
             _soil = fields.Field<byte>("soil");
@@ -254,9 +274,14 @@ public sealed class StreamingScenario : Scenario
 
         public void GenerateCells(ChunkCoord coord, ChunkCellBuffer cells)
         {
-            if (_delayMs > 0)
+            if (_hold && Environment.CurrentManagedThreadId != _owner)
             {
-                Thread.Sleep(_delayMs); // a slow loader: its stalls are counted, the state is the same
+                // A background load: finish only once a Tick waits for one (its stalls are counted, the state is the same).
+                long deadline = Environment.TickCount64 + HoldLimitMs;
+                while (Volatile.Read(ref _released) == 0 && Environment.TickCount64 < deadline)
+                {
+                    Thread.Sleep(1);
+                }
             }
 
             var random = Stream(coord);
@@ -283,6 +308,9 @@ public sealed class StreamingScenario : Scenario
                 commands.Add(entity, creature, new Creature { Energy = random.Int32At(at + 3, 1, 12), Heading = i });
             }
         }
+
+        /// <summary>Lets every held and future background load finish (called on the Tick thread at the first stall).</summary>
+        public void Release() => Volatile.Write(ref _released, 1);
 
         private RandomSource Stream(ChunkCoord coord)
             => new RandomSource(_seed, Key).Derive((ulong)(uint)coord.X).Derive((ulong)(uint)coord.Y).Derive((ulong)(uint)coord.Z);

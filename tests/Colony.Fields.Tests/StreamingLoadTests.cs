@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Colony.Fields;
 using Colony.Persistence;
 
@@ -140,18 +139,16 @@ public sealed class StreamingLoadTests
         world.Tick(); // Tick 1: 16 loads requested; their workers block on the gate.
         Assert.Equal(16, residency.PendingLoadCount);
 
-        var release = new Thread(() =>
+        // TASK-44: release the gate from the stall itself, not from a timer that could fire before the Tick looks.
+        int stalledOn = -1;
+        residency.LoadStalled = ordinal =>
         {
-            Thread.Sleep(150);
+            stalledOn = ordinal;
             gate.Set();
-        });
-        release.Start();
-        var stopwatch = Stopwatch.StartNew();
+        };
         world.Tick(); // Tick 2: due now; the Tick waits for the workers.
-        stopwatch.Stop();
-        release.Join();
 
-        Assert.True(stopwatch.ElapsedMilliseconds >= 50, $"the Tick took {stopwatch.ElapsedMilliseconds} ms; it should have waited for the gate");
+        Assert.NotEqual(-1, stalledOn);
         Assert.Equal(new ResidencyCounts(9, 7, 8), residency.Counts);
         Assert.True(residency.Streaming.LoadStalls >= 1);
         Assert.Equal(residency.Streaming.LoadStalls, world.Diagnostics.Latest.Counters[ids.LoadStalls.Id]);
