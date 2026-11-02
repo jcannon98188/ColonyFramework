@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Lockstep multiplayer on Colony (TASK-36, docs/guides/lockstep-networking.md): two or three peers, one process
+    each or all in one process, talking over loopback TCP. The sockets live in this sample only; the Framework
+    ships the transport-free LockstepSession (Colony.Persistence).
+    Run one peer: see samples/README.md
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>Colony.Samples.Lockstep</RootNamespace>
+    <AssemblyName>HelloLockstep</AssemblyName>
+    <NoWarn>$(NoWarn);CA1051;CA1815</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

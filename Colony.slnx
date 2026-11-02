@@ -2,6 +2,8 @@
   <Folder Name="/samples/">
     <Project Path="samples/HelloColony/HelloColony.csproj" />
     <Project Path="samples/HelloColony.Tests/HelloColony.Tests.csproj" />
+    <Project Path="samples/HelloLockstep/HelloLockstep.csproj" />
+    <Project Path="samples/HelloLockstep.Tests/HelloLockstep.Tests.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Colony.Abstractions/Colony.Abstractions.csproj" />

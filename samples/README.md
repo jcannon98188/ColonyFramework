@@ -45,3 +45,15 @@ artifacts/publish/HelloColony/release_win-x64/HelloColony.exe --no-save
 `HelloColonyHostTests.The_native_aot_build_of_the_host_prints_the_same_hash_as_the_jit_run` runs the published
 executable and compares its hash with the in-process JIT run; it skips when nothing is published (CI publishes
 it before `dotnet test`). This host replaces `tests/Colony.Diagnostics.CountersHost` (TASK-18's interim host).
+
+## HelloLockstep: two or three peers over loopback sockets
+
+Lockstep multiplayer on `Colony.Persistence`'s transport-free `LockstepSession` (TASK-36; guide: `docs/guides/lockstep-networking.md`). The sockets live here only (`TcpMesh.cs`); `PeerHost.cs` is the Game loop. Founders start together, a third peer joins mid-run from a `JoinPackage` sent over the same sockets.
+
+```
+dotnet run -c Release --project samples/HelloLockstep -- --seat 0 --ports 5000,5001,5002 --active 0,1
+dotnet run -c Release --project samples/HelloLockstep -- --seat 1 --ports 5000,5001,5002 --active 0,1
+dotnet run -c Release --project samples/HelloLockstep -- --seat 2 --ports 5000,5001,5002 --join-from 0     # a few seconds later
+```
+
+Options: `--ticks N` (300), `--tick-ms N` (2, sleep per Tick so founders do not outrun a joiner), `--join-margin N` (60 Ticks), `--workers N`. Each peer prints `hash 0x...`; they must be equal. `HelloLockstep.Tests` runs it in-process and as separate processes.
