@@ -17,6 +17,10 @@ namespace Colony.Pathfinding;
 /// chunks compute a face from the lower-coordinate side, so the two ends of a transition always agree.
 /// Chunk data is rebuilt lazily when the region labels of the chunk or a face neighbour moved (lazy repair
 /// on read); nothing here is hashed or saved. Reads and repairs happen only under the service's search lock.
+/// Chunk data lives in slabs of the service's <see cref="ChunkGraphPool"/> (TASK-39): built on first read,
+/// evicted least recently read first past <see cref="PathfindingOptions.ChunkGraphMemoryBudgetBytes"/> and
+/// rebuilt (identically, the labels being the same) on the next read. Search scratch lives in
+/// <see cref="PathSearch"/>, keyed by (chunk, node index), so an eviction in the middle of a search loses nothing.
 /// </remarks>
 internal sealed class ChunkGraph
 {
@@ -25,6 +29,7 @@ internal sealed class ChunkGraph
     private const int FaceCells = FieldChunk.Size * FieldChunk.Size;
 
     private readonly RegionMap _map;
+    private readonly ChunkGraphPool _pool;
     private readonly ChunkNodes[] _chunks;
     private readonly int[] _faceKey = new int[FaceCells];
     private readonly int[] _facePatch = new int[FaceCells];
@@ -35,9 +40,10 @@ internal sealed class ChunkGraph
     private int[] _collect = new int[256];
     private int _collectCount;
 
-    public ChunkGraph(RegionMap map)
+    public ChunkGraph(RegionMap map, ChunkGraphPool pool)
     {
         _map = map;
+        _pool = pool;
         _chunks = new ChunkNodes[map.ChunkCount];
         for (int i = 0; i < _chunks.Length; i++)
         {
@@ -51,7 +57,7 @@ internal sealed class ChunkGraph
     public ChunkNodes Ensure(int ordinal)
     {
         var chunk = _chunks[ordinal];
-        bool stale = chunk.BuiltVersion[0] != _map.LabelVersionOf(ordinal);
+        bool stale = chunk.BuiltVersion[0] != _map.LabelVersionOf(ordinal) || (chunk.Count > 0 && chunk.Slab is null);
         for (int d = 0; d < 6 && !stale; d++)
         {
             int n = _map.NeighbourOf(ordinal, d);
@@ -61,6 +67,10 @@ internal sealed class ChunkGraph
         if (stale)
         {
             Rebuild(ordinal);
+        }
+        else if (chunk.Slab is not null)
+        {
+            _pool.Touch(chunk.Slab);
         }
 
         return chunk;
@@ -199,50 +209,55 @@ internal sealed class ChunkGraph
         // Merge collected (cell, face) pairs into nodes: one per cell, ascending cell, face bits OR'ed.
         var collected = _collect.AsSpan(0, _collectCount);
         collected.Sort();
-        chunk.EnsureNodes(ChunkNodes.InitialCapacity);
         int count = 0;
         for (int i = 0; i < collected.Length; i++)
         {
-            int cell = collected[i] >> 3;
-            int face = collected[i] & 7;
-            if (count > 0 && chunk.Cell[count - 1] == cell)
+            if (i == 0 || (collected[i] >> 3) != (collected[i - 1] >> 3))
             {
-                chunk.Faces[count - 1] |= (byte)(1 << face);
-                continue;
+                count++;
             }
-
-            chunk.EnsureNodes(count + 1);
-            chunk.Cell[count] = (ushort)cell;
-            chunk.Faces[count] = (byte)(1 << face);
-            count++;
         }
 
         chunk.Count = count;
         if (count == 0)
         {
+            if (chunk.Slab is not null)
+            {
+                _pool.Release(chunk.Slab);
+            }
+
             return;
         }
 
-        chunk.CellToNode ??= new ushort[FieldChunk.CellCount];
-        Array.Clear(chunk.CellToNode);
-        for (int i = 0; i < count; i++)
+        var slab = _pool.Acquire(chunk, count);
+        var cells = slab.Cell;
+        var faces = slab.Faces;
+        int node = 0;
+        for (int i = 0; i < collected.Length; i++)
         {
-            chunk.CellToNode[chunk.Cell[i]] = (ushort)(i + 1);
-        }
+            int cell = collected[i] >> 3;
+            int face = collected[i] & 7;
+            if (node > 0 && cells[node - 1] == cell)
+            {
+                faces[node - 1] |= (byte)(1 << face);
+                continue;
+            }
 
-        if (chunk.Dist.Length < count * count)
-        {
-            chunk.Dist = new int[Math.Max(ChunkNodes.InitialCapacity * ChunkNodes.InitialCapacity, (int)BitOperations.RoundUpToPowerOf2((uint)(count * count)))];
+            cells[node] = (ushort)cell;
+            faces[node] = (byte)(1 << face);
+            node++;
         }
 
         var passable = _map.PassableOf(ordinal);
         var up = _map.UpOf(ordinal);
+        var dist = slab.Dist;
         for (int i = 0; i < count; i++)
         {
-            Distances(passable, up, chunk.Cell[i], _bfsDist, _bfsQueue);
+            Distances(passable, up, cells[i], _bfsDist, _bfsQueue);
             for (int j = 0; j < count; j++)
             {
-                chunk.Dist[(i * count) + j] = _bfsDist[chunk.Cell[j]];
+                int d = _bfsDist[cells[j]];
+                dist[(i * count) + j] = d < 0 ? (ushort)0 : (ushort)d;
             }
         }
     }
@@ -413,42 +428,208 @@ internal sealed class ChunkGraph
     }
 
     /// <summary>
-    /// One chunk's transitions (nodes of the abstract graph) and the search scratch per node. Capacity for
-    /// <see cref="InitialCapacity"/> nodes (about 18 KB with the distance matrix) is reserved at the first build
-    /// so that door traffic reshaping entrances does not allocate in steady state; a chunk with more transitions
-    /// grows once and keeps the larger arrays.
+    /// One chunk's transitions (nodes of the abstract graph). The metadata (count, built versions) stays resident;
+    /// the node arrays live in a pool <see cref="ChunkGraphPool.Slab"/> while the chunk is resident.
     /// </summary>
     internal sealed class ChunkNodes
     {
-        public const int InitialCapacity = 64;
-
         public int Count;
-        public ushort[] Cell = [];
-        public byte[] Faces = [];
-        public int[] Dist = [];
-        public ushort[]? CellToNode;
         public int[] BuiltVersion = [-1, -1, -1, -1, -1, -1, -1];
+        public ChunkGraphPool.Slab? Slab;
 
-        // Search scratch, valid while Stamp[i] equals the running search's stamp.
-        public int[] Stamp = [];
-        public int[] G = [];
-        public long[] Parent = [];
-        public bool[] Closed = [];
+        /// <summary>Transition cells, ascending.</summary>
+        public ushort[] Cell => Slab!.Cell;
 
-        public void EnsureNodes(int count)
+        /// <summary>Per node, the faces (bit per direction) it crosses.</summary>
+        public byte[] Faces => Slab!.Faces;
+
+        /// <summary>In-chunk distances, row-major <c>Count x Count</c>; 0 where unreached (and on the diagonal).</summary>
+        public ushort[] Dist => Slab!.Dist;
+
+        /// <summary>The node at a cell, -1 when the cell is no transition.</summary>
+        public int NodeAt(int cell)
         {
-            if (Cell.Length >= count)
+            if (Count == 0)
             {
-                return;
+                return -1;
             }
 
-            int capacity = Math.Max(8, (int)BitOperations.RoundUpToPowerOf2((uint)count));
-            Array.Resize(ref Cell, capacity);
-            Array.Resize(ref Faces, capacity);
-            Array.Resize(ref Stamp, capacity);
-            Array.Resize(ref G, capacity);
-            Array.Resize(ref Parent, capacity);
-            Array.Resize(ref Closed, capacity);
+            int index = Array.BinarySearch(Slab!.Cell, 0, Count, (ushort)cell);
+            return index < 0 ? -1 : index;
+        }
+    }
+}
+
+/// <summary>
+/// The memory of the service's HPA* chunk graphs (TASK-39): slabs of node arrays shared by every class, in least
+/// recently read order. A chunk takes a free slab, a new one while the budget has room (or fewer than
+/// <see cref="PathfindingOptions.MinimumChunkGraphChunks"/> exist), or else the least recently read chunk's,
+/// which is evicted. Slabs are reused without allocating; a chunk with more transitions than its slab holds grows
+/// it once. Used under the service's search lock only.
+/// </summary>
+internal sealed class ChunkGraphPool(long budget)
+{
+    /// <summary>Nodes a slab holds at least; door traffic reshaping entrances stays within it.</summary>
+    public const int InitialCapacity = 64;
+
+    private Slab? _head;
+    private Slab? _tail;
+
+    public long Budget { get; } = budget;
+
+    public long Bytes { get; private set; }
+
+    public long Evictions { get; private set; }
+
+    public int SlabCount { get; private set; }
+
+    /// <summary>Bytes of a slab with room for <paramref name="capacity"/> nodes.</summary>
+    public static long BytesFor(int capacity) => (capacity * (2L + 1L)) + (2L * capacity * capacity);
+
+    /// <summary>A slab for <paramref name="owner"/> with room for <paramref name="count"/> nodes, most recently read.</summary>
+    public Slab Acquire(ChunkGraph.ChunkNodes owner, int count)
+    {
+        var slab = owner.Slab;
+        if (slab is null)
+        {
+            int capacity = Math.Max(InitialCapacity, (int)BitOperations.RoundUpToPowerOf2((uint)count));
+            if (_tail is { Owner: null })
+            {
+                slab = _tail; // a released slab
+            }
+            else if (SlabCount < PathfindingOptions.MinimumChunkGraphChunks || Bytes + BytesFor(capacity) <= Budget)
+            {
+                slab = new Slab();
+                SlabCount++;
+                Link(slab);
+            }
+            else
+            {
+                slab = _tail!;
+                Evict(slab);
+            }
+
+            slab.Owner = owner;
+            owner.Slab = slab;
+        }
+
+        if (slab.Capacity < count)
+        {
+            int capacity = Math.Max(InitialCapacity, (int)BitOperations.RoundUpToPowerOf2((uint)count));
+            Bytes += BytesFor(capacity) - BytesFor(slab.Capacity);
+            slab.Resize(capacity);
+        }
+
+        Touch(slab);
+
+        // Over budget (a slab grew, or the floor was passed earlier): drop the least recently read slabs.
+        while (Bytes > Budget && SlabCount > PathfindingOptions.MinimumChunkGraphChunks && _tail != slab)
+        {
+            var last = _tail!;
+            Evict(last);
+            Unlink(last);
+            SlabCount--;
+            Bytes -= BytesFor(last.Capacity);
+        }
+
+        return slab;
+    }
+
+    /// <summary>Gives a slab back (its chunk has no transitions any more); the next acquire reuses it first.</summary>
+    public void Release(Slab slab)
+    {
+        slab.Owner!.Slab = null;
+        slab.Owner = null;
+        Unlink(slab);
+        if (_tail is null)
+        {
+            _head = slab;
+        }
+        else
+        {
+            _tail.Next = slab;
+            slab.Prev = _tail;
+        }
+
+        _tail = slab;
+    }
+
+    /// <summary>Marks a slab most recently read.</summary>
+    public void Touch(Slab slab)
+    {
+        if (_head == slab)
+        {
+            return;
+        }
+
+        Unlink(slab);
+        Link(slab);
+    }
+
+    private void Evict(Slab slab)
+    {
+        if (slab.Owner is not null)
+        {
+            slab.Owner.Slab = null;
+            slab.Owner = null;
+            Evictions++;
+        }
+    }
+
+    private void Link(Slab slab)
+    {
+        slab.Prev = null;
+        slab.Next = _head;
+        if (_head is not null)
+        {
+            _head.Prev = slab;
+        }
+
+        _head = slab;
+        _tail ??= slab;
+    }
+
+    private void Unlink(Slab slab)
+    {
+        if (slab.Prev is not null)
+        {
+            slab.Prev.Next = slab.Next;
+        }
+        else if (_head == slab)
+        {
+            _head = slab.Next;
+        }
+
+        if (slab.Next is not null)
+        {
+            slab.Next.Prev = slab.Prev;
+        }
+        else if (_tail == slab)
+        {
+            _tail = slab.Prev;
+        }
+
+        slab.Prev = null;
+        slab.Next = null;
+    }
+
+    /// <summary>Node arrays of one resident chunk.</summary>
+    internal sealed class Slab
+    {
+        public ushort[] Cell = [];
+        public byte[] Faces = [];
+        public ushort[] Dist = [];
+        public ChunkGraph.ChunkNodes? Owner;
+        public Slab? Prev;
+        public Slab? Next;
+
+        public int Capacity => Cell.Length;
+
+        public void Resize(int capacity)
+        {
+            Cell = new ushort[capacity];
+            Faces = new byte[capacity];
+            Dist = new ushort[capacity * capacity];
         }
     }
 }

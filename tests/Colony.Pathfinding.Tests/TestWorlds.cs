@@ -44,11 +44,14 @@ internal static class TestWorlds
 internal static class PrototypeTerrainWorld
 {
     public static byte[] Create(WorldSize size, out World world, out MovementClass walker, int workers = 1, PathfindingOptions? options = null)
+        => Create(size, out world, out walker, out _, workers, options);
+
+    public static byte[] Create(WorldSize size, out World world, out MovementClass walker, out Field<byte> terrain, int workers = 1, PathfindingOptions? options = null)
     {
         var builder = new WorldBuilder();
         builder.DebugValidation(false);
         var fields = builder.AddFields(size);
-        var terrain = fields.AddField<byte>("terrain");
+        terrain = fields.AddField<byte>("terrain");
         walker = builder.AddPathfinding(fields, options).AddMovementClass(new MovementClassDefinition("walker", Passability.OfField(terrain, Scenarios.PrototypeTerrain.Walkable))
         {
             Vertical = Passability.OfField(terrain, Scenarios.PrototypeTerrain.Climbable),

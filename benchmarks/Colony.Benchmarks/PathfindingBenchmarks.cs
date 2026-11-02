@@ -10,6 +10,9 @@ namespace Colony.Benchmarks;
 /// big 512x512x64, over <see cref="PrototypeTerrain"/> (rooms, doors, rock, stairs, sealed pockets): the
 /// from-scratch rebuild a load performs, an incremental sync after one door toggle, and 1024 Reachable queries
 /// (constant time: the same cost on both sizes).
+/// TASK-39 ToggleDoorAndSync (1 / 8 workers, after the setup Ticks): BFS relabelling of every affected region
+/// 508 / 482 us small, 4,623 / 4,431 us big; union-find merge fast path and bounded split search 118 / 91 us
+/// small, 124 / 98 us big.
 /// </summary>
 public class PathfindingBenchmarks
 {
@@ -46,6 +49,12 @@ public class PathfindingBenchmarks
         PrototypeTerrain.Write(_world, _terrain, tiles);
         _service = _world.Pathfinding();
         _service.EnsureBuilt(_walker);
+
+        // Two Ticks move the change feed past the terrain written above. Without them every chunk carries the
+        // running version, so each Sync re-evaluates the whole World (host writes at the running version stay
+        // dirty until a Tick passes), which is what the TASK-19 numbers (13 ms small, 143 ms big) measured.
+        _world.Tick();
+        _world.Tick();
 
         int door = Array.FindIndex(tiles, static t => t is PrototypeTerrain.OpenDoor or PrototypeTerrain.ClosedDoor);
         _door = new TilePos(door % size.X, door / size.X % size.Y, door / (size.X * size.Y));
