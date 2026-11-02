@@ -308,7 +308,7 @@ struct colony_api {
     /* Records an Add (or overwrite) of size bytes; the only way to write a Component. */
     int (*commands_add)(colony_commands* commands, uint64_t entity, int32_t component, const void* value, int32_t size);
     int (*commands_remove)(colony_commands* commands, uint64_t entity, int32_t component);
-    /* Records an event of size bytes for queue (a System must list it in emits). */
+    /* Records an event of size bytes for queue. On a System's job buffer (colony_context.commands) the queue must be one the System listed in emits, or the call fails; a host buffer from world_create_commands may emit on any event queue. */
     int (*commands_emit)(colony_commands* commands, int32_t queue, const void* value, int32_t size);
     /* The real Entity id of a deferred handle after the buffer's playback. */
     int (*commands_resolve)(colony_commands* commands, uint64_t deferred, uint64_t* out_entity);
