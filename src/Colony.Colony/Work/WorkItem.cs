@@ -34,8 +34,8 @@ public readonly record struct WorkHit(EntityId Entity, TilePos Position, int Typ
 
 /// <summary>
 /// A filter over indexed work items, as a struct so queries from parallel Systems allocate nothing. The
-/// reachability filter of spec section 9.2 is a Game-side struct wrapping its pathfinding service:
-/// <c>Accepts =&gt; pathfinding.Reachable(from, position, movementClass)</c>.
+/// reachability filter of spec section 9.2 ships as <see cref="ReachableWorkFilter"/>; write your own struct to
+/// combine it with Game rules (zones, skills).
 /// </summary>
 public interface IWorkFilter
 {

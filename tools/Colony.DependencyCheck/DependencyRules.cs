@@ -32,7 +32,9 @@ public static class DependencyRules
         ["Colony.Native"] = ["Colony.Abstractions", "Colony.Core", "Colony.Fields", "Colony.Persistence", "Colony.Plugins"],
         // Pathfinding, Colony, ProcGen depend on Core and Fields (and Persistence only where they save state).
         ["Colony.Pathfinding"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
-        ["Colony.Colony"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
+        // Colony also takes Pathfinding: its work index and hauling matcher ship reachability filters over
+        // PathfindingService.Reachable (docs/adr/0004-colony-references-pathfinding.md, TASK-41). One way only.
+        ["Colony.Colony"] = ["Colony.Core", "Colony.Fields", "Colony.Pathfinding", "Colony.Persistence"],
         ["Colony.ProcGen"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
         // Diagnostics depends on Core, Fields and Persistence (it reads their counters and the replay log) and on nothing else.
         ["Colony.Diagnostics"] = ["Colony.Core", "Colony.Fields", "Colony.Persistence"],
