@@ -53,6 +53,17 @@ public sealed record PathfindingOptions
     /// </summary>
     public double FlowRebuildFraction { get; init; } = 0.25;
 
+    /// <summary>Chunks of the HPA* chunk graph kept resident whatever <see cref="ChunkGraphMemoryBudgetBytes"/> says (a search holds two at once).</summary>
+    public const int MinimumChunkGraphChunks = 4;
+
+    /// <summary>
+    /// Memory the HPA* chunk graphs of all classes may hold together (about 8.3 KB per chunk with transitions).
+    /// Chunks are built on first read; past the budget the least recently read are evicted and rebuilt when read
+    /// again, so the budget changes cost, never a result. <see cref="MinimumChunkGraphChunks"/> chunks stay
+    /// resident even when they exceed it (0 keeps only those).
+    /// </summary>
+    public long ChunkGraphMemoryBudgetBytes { get; init; } = 64L * 1024 * 1024;
+
     internal void Validate()
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(MaxMovementClasses, 1);
@@ -67,6 +78,7 @@ public sealed record PathfindingOptions
         ArgumentOutOfRangeException.ThrowIfLessThan(FlowStalenessTicks, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(FlowRebuildFraction, 0.0);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(FlowRebuildFraction, 1.0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(ChunkGraphMemoryBudgetBytes, 0);
     }
 }
 
@@ -79,18 +91,27 @@ public sealed record PathfindingOptions
 /// <param name="RepairBacklog">Dirty flow Field chunks left after the repair pass.</param>
 /// <param name="FlowFieldBytes">Memory the live flow Fields hold.</param>
 /// <param name="FlowFieldBudgetBytes">The configured flow Field memory budget.</param>
+/// <param name="ChunkGraphBytes">Memory the HPA* chunk graphs hold.</param>
+/// <param name="ChunkGraphBudgetBytes">The configured chunk graph memory budget.</param>
+/// <param name="ChunkGraphEvictions">Chunk graph chunks evicted to stay within the budget, since the World was created.</param>
 public readonly record struct PathfindingCounterIds(
     Colony.Diagnostics.CounterId QueueDepth,
     Colony.Diagnostics.CounterId WorkUnits,
     Colony.Diagnostics.CounterId RepairBacklog,
     Colony.Diagnostics.CounterId FlowFieldBytes,
-    Colony.Diagnostics.CounterId FlowFieldBudgetBytes)
+    Colony.Diagnostics.CounterId FlowFieldBudgetBytes,
+    Colony.Diagnostics.CounterId ChunkGraphBytes,
+    Colony.Diagnostics.CounterId ChunkGraphBudgetBytes,
+    Colony.Diagnostics.CounterId ChunkGraphEvictions)
 {
     public const string QueueDepthName = "pathfinding.queue-depth";
     public const string WorkUnitsName = "pathfinding.work-units";
     public const string RepairBacklogName = "pathfinding.repair-backlog";
     public const string FlowFieldBytesName = "pathfinding.flow-bytes";
     public const string FlowFieldBudgetBytesName = "pathfinding.flow-budget-bytes";
+    public const string ChunkGraphBytesName = "pathfinding.graph-bytes";
+    public const string ChunkGraphBudgetBytesName = "pathfinding.graph-budget-bytes";
+    public const string ChunkGraphEvictionsName = "pathfinding.graph-evictions";
 }
 
 /// <summary>
@@ -272,7 +293,10 @@ public static class PathfindingRegistration
             builder.AddCounter(PathfindingCounterIds.WorkUnitsName),
             builder.AddCounter(PathfindingCounterIds.RepairBacklogName),
             builder.AddCounter(PathfindingCounterIds.FlowFieldBytesName),
-            builder.AddCounter(PathfindingCounterIds.FlowFieldBudgetBytesName));
+            builder.AddCounter(PathfindingCounterIds.FlowFieldBudgetBytesName),
+            builder.AddCounter(PathfindingCounterIds.ChunkGraphBytesName),
+            builder.AddCounter(PathfindingCounterIds.ChunkGraphBudgetBytesName),
+            builder.AddCounter(PathfindingCounterIds.ChunkGraphEvictionsName));
         builder.AddSystem(PathfindingBuilder.DefineSystem());
         builder.AddSystem(PathfindingBuilder.DefineIntake(pathfinding.RequestQueue));
         builder.AddSystem(PathfindingBuilder.DefineDeliver(pathfinding.ResultQueue));

@@ -98,11 +98,3 @@ internal sealed class WorkTestWorld : IDisposable
 
     public void Dispose() => World.Dispose();
 }
-
-/// <summary>The Game-side adapter of spec 9.2 "reachability filters candidates": accepts items a walker standing at <see cref="From"/> can reach.</summary>
-internal readonly struct ReachableFrom(PathfindingService pathfinding, TilePos from, MovementClass movementClass) : IWorkFilter
-{
-    public TilePos From => from;
-
-    public bool Accepts(EntityId entity, in TilePos position, int type) => pathfinding.Reachable(from, position, movementClass);
-}

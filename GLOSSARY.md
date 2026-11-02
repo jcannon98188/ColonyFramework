@@ -61,7 +61,7 @@ An interchangeable implementation of GPU compute behind the Framework's GPU abst
 _Avoid_: Driver, renderer
 
 **Migration**:
-A piece of code that converts saved Component data from an older layout to the current one when a save is loaded.
+A piece of code that converts saved Component or Resource data from an older layout, or an extension's saved sections from an older format version, to the current one when a save is loaded.
 _Avoid_: Upgrade, patch, converter
 
 **Kernel**:

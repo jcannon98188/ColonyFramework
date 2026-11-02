@@ -27,6 +27,15 @@ internal sealed class PathSearch
     private int _openCount;
     private int _stamp;
     private long _seq;
+
+    // Per-node search state, dense per run: a chunk's nodes get a block at its first relax (TASK-39: the graph's
+    // node arrays may be evicted mid-search; node indices are stable because a rebuild is identical).
+    private int[] _chunkStamp = [];
+    private int[] _chunkBase = [];
+    private int[] _g = new int[1024];
+    private long[] _parent = new long[1024];
+    private bool[] _closed = new bool[1024];
+    private int _scratchCount;
     private TilePos[] _waypoints = new TilePos[64];
 
     /// <summary>Scratch for a local step after a run (reuses the start-chunk distance buffer).</summary>
@@ -102,6 +111,13 @@ internal sealed class PathSearch
 
         _stamp++;
         _openCount = 0;
+        _scratchCount = 0;
+        if (_chunkStamp.Length < map.ChunkCount)
+        {
+            _chunkStamp = new int[map.ChunkCount];
+            _chunkBase = new int[map.ChunkCount];
+        }
+
         var start = graph.Ensure(startOrdinal);
         for (int i = 0; i < start.Count; i++)
         {
@@ -117,7 +133,8 @@ internal sealed class PathSearch
             var entry = Pop();
             var chunk = graph.Ensure(entry.Ordinal);
             int node = entry.Node;
-            if (chunk.Stamp[node] != _stamp || chunk.Closed[node] || chunk.G[node] != entry.G)
+            int index = _chunkBase[entry.Ordinal] + node;
+            if (_closed[index] || _g[index] != entry.G)
             {
                 continue;
             }
@@ -127,7 +144,7 @@ internal sealed class PathSearch
                 break;
             }
 
-            chunk.Closed[node] = true;
+            _closed[index] = true;
             WorkUnits++;
             int g = entry.G;
             int cell = chunk.Cell[node];
@@ -164,7 +181,7 @@ internal sealed class PathSearch
                 }
 
                 var other = graph.Ensure(n);
-                int their = other.CellToNode![ChunkGraph.MirrorCell(cell, d)] - 1;
+                int their = other.NodeAt(ChunkGraph.MirrorCell(cell, d));
                 if (their >= 0)
                 {
                     Relax(graph, other, n, their, g + 1, Key(entry.Ordinal, node), to);
@@ -321,21 +338,32 @@ internal sealed class PathSearch
 
     private void Relax(ChunkGraph graph, ChunkGraph.ChunkNodes chunk, int ordinal, int node, int g, long parent, TilePos goal)
     {
-        if (chunk.Stamp[node] == _stamp)
+        if (_chunkStamp[ordinal] != _stamp)
         {
-            if (chunk.Closed[node] || chunk.G[node] <= g)
+            _chunkStamp[ordinal] = _stamp;
+            _chunkBase[ordinal] = _scratchCount;
+            int end = _scratchCount + chunk.Count;
+            if (end > _g.Length)
             {
-                return;
+                int capacity = Math.Max(end, _g.Length * 2);
+                Array.Resize(ref _g, capacity);
+                Array.Resize(ref _parent, capacity);
+                Array.Resize(ref _closed, capacity);
             }
-        }
-        else
-        {
-            chunk.Stamp[node] = _stamp;
-            chunk.Closed[node] = false;
+
+            _g.AsSpan(_scratchCount, chunk.Count).Fill(Infinity);
+            _closed.AsSpan(_scratchCount, chunk.Count).Clear();
+            _scratchCount = end;
         }
 
-        chunk.G[node] = g;
-        chunk.Parent[node] = parent;
+        int index = _chunkBase[ordinal] + node;
+        if (_closed[index] || _g[index] <= g)
+        {
+            return;
+        }
+
+        _g[index] = g;
+        _parent[index] = parent;
         var tile = graph.TileOf(ordinal, chunk.Cell[node]);
         int h = Math.Abs(tile.X - goal.X) + Math.Abs(tile.Y - goal.Y) + Math.Abs(tile.Z - goal.Z);
         Push(new OpenEntry(g + h, _seq++, ordinal, node, g));
@@ -345,7 +373,7 @@ internal sealed class PathSearch
     {
         // Count the chain first so the waypoints come out start to goal without a second buffer.
         int chain = 0;
-        for (long key = bestNode; key >= 0; key = ParentOf(graph, key))
+        for (long key = bestNode; key >= 0; key = ParentOf(key))
         {
             chain++;
         }
@@ -358,7 +386,7 @@ internal sealed class PathSearch
 
         _waypoints[0] = from;
         int index = chain;
-        for (long key = bestNode; key >= 0; key = ParentOf(graph, key))
+        for (long key = bestNode; key >= 0; key = ParentOf(key))
         {
             _waypoints[index--] = graph.TileOf(OrdinalOf(key), graph.Ensure(OrdinalOf(key)).Cell[NodeOf(key)]);
         }
@@ -382,7 +410,7 @@ internal sealed class PathSearch
         return w;
     }
 
-    private static long ParentOf(ChunkGraph graph, long key) => graph.Ensure(OrdinalOf(key)).Parent[NodeOf(key)];
+    private long ParentOf(long key) => _parent[_chunkBase[OrdinalOf(key)] + NodeOf(key)];
 
     private static long Key(int ordinal, int node) => ((long)ordinal << 16) | (uint)node;
 

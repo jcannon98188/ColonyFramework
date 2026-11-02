@@ -23,14 +23,14 @@ public sealed class WorkIndexUpdateTests
 
         int unfiltered = fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits);
         Assert.Equal(3, unfiltered);
-        int reachable = fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableFrom(fixture.Pathfinding, standing, fixture.Walker));
+        int reachable = fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableWorkFilter(fixture.Pathfinding, standing, fixture.Walker));
 
         Assert.Equal(1, reachable);
         Assert.Equal(ids[1], hits[0].Entity);
     }
 
     [Fact]
-    public void Opening_a_door_makes_items_behind_the_wall_reachable_from_the_next_Tick()
+    public void Opening_a_door_makes_items_behind_the_wall_reachable_from_the_next_Tick_and_closing_it_hides_them_again()
     {
         using var fixture = new WorkTestWorld(new WorldSize(64, 16, 1));
         fixture.WallColumn(20);
@@ -38,13 +38,18 @@ public sealed class WorkIndexUpdateTests
         var ids = fixture.SpawnItems([(new TilePos(22, 8, 0), WorkTestWorld.Mine)]);
         fixture.World.Tick();
         var hits = new WorkHit[4];
-        Assert.Equal(0, fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableFrom(fixture.Pathfinding, standing, fixture.Walker)));
+        Assert.Equal(0, fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableWorkFilter(fixture.Pathfinding, standing, fixture.Walker)));
 
         fixture.WallColumn(20, doorY: 3);
         fixture.World.Tick();
 
-        Assert.Equal(1, fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableFrom(fixture.Pathfinding, standing, fixture.Walker)));
+        Assert.Equal(1, fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableWorkFilter(fixture.Pathfinding, standing, fixture.Walker)));
         Assert.Equal(ids[0], hits[0].Entity);
+
+        fixture.WallColumn(20);
+        fixture.World.Tick();
+
+        Assert.Equal(0, fixture.WorkIndex.QueryNearest(standing, WorkTestWorld.Mine, 50, hits, new ReachableWorkFilter(fixture.Pathfinding, standing, fixture.Walker)));
     }
 
     [Fact]
