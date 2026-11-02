@@ -56,8 +56,12 @@ public static class TerrainPipeline
 
     /// <summary>Registers Fields, the TilePos Component and the generation pipeline on a fresh builder. Stages are added by <paramref name="stages"/>.</summary>
     public static Composition Compose(Action<Composition>? stages = null, bool standardStages = true)
+        => Compose(new WorldBuilder(), stages, standardStages);
+
+    /// <summary>As <see cref="Compose(Action{Composition}?, bool)"/>, on a builder the caller owns (a harness <see cref="Testing.Scenario"/>'s).</summary>
+    public static Composition Compose(WorldBuilder builder, Action<Composition>? stages = null, bool standardStages = true)
     {
-        var builder = new WorldBuilder();
+        ArgumentNullException.ThrowIfNull(builder);
         builder.AddComponent<TilePos>("tile.pos");
         var fields = builder.AddFields(Size);
         var height = fields.AddField<int>(HeightField);

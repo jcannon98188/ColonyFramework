@@ -19,6 +19,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Colony.Pathfinding.Tests" />
+    <!-- The AOT host links the flow-field scenario, whose tight budget is sized with FlowField.BytesFor (TASK-42 AC #3). -->
+    <InternalsVisibleTo Include="Colony.Testing.AotHost" />
   </ItemGroup>
 
 </Project>
