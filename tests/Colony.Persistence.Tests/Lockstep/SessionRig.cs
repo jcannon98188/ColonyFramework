@@ -1,4 +1,4 @@
-using Colony.Diagnostics;
+﻿using Colony.Diagnostics;
 using Colony.Persistence;
 using Colony.Testing;
 using Colony.Testing.Tests.Scenarios;
@@ -177,6 +177,7 @@ internal sealed class SessionPeer : IDisposable
     {
         Index = options.LocalPeer;
         Trail = options.HashTrail ?? new LockstepHashTrail();
+        var gate = options.Gate ?? new TickGate();
         var builder = new WorldBuilder();
         scenario.Compose(builder);
         World = builder.Build().CreateWorld(new WorldOptions
@@ -184,10 +185,11 @@ internal sealed class SessionPeer : IDisposable
             Seed = scenario.Seed,
             WorkerThreads = workers,
             InitialEntityCapacity = scenario.InitialEntityCapacity,
+            TickGate = gate,
             Diagnostics = new DiagnosticsOptions { HashTrail = true, Listener = Trail },
         });
         scenario.Populate(World);
-        Session = new LockstepSession(World, options with { HashTrail = Trail });
+        Session = new LockstepSession(World, options with { HashTrail = Trail, Gate = gate });
         Session.Desynced += (_, d) => Desyncs.Add(d);
         Session.DesyncLocalised += (_, d) => Localised.Add(d);
     }
