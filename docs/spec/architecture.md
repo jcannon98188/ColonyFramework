@@ -291,6 +291,15 @@ world.Save("colony.save", SaveOptions.Default);
 Console.WriteLine(world.Hash());               // identical on every machine
 ```
 
+The sketch as it compiles is `samples/HelloColony/Sketch.cs`; `SpecSketchDocTests` diffs the two line by line and fails on any drift beyond these exact deviations:
+
+- **Fields:** there is no `[Field]` attribute; `Heat` is a plain `public struct`, registered by name on the Fields builder: `builder.AddFields(new WorldSize(64, 64, 1)).AddField<Heat>("heat")` replaces `.AddField<Heat>()`.
+- **Phase in attributes:** `[System(NamedPhase.Simulate, Every = 1)]`, since an attribute argument must be a constant and `Phase` is not one.
+- **Systems:** the generator emits `ColonySystems.AddSystems(builder)`, a statement, so the chain breaks into `var builder = ...;`, `ColonySystems.AddSystems(builder);` and `var schema = builder.Build();` in place of `.AddSystems<ColonySystems>()`.
+- **Seed:** a World option, `schema.CreateWorld(new WorldOptions { Seed = 12345 })`, not `.Seed(12345)` on the builder (the seed is per World, the schema is shared).
+- **Creating Entities:** through a command buffer: `var commands = world.CreateCommandBuffer();`, `commands.Create(ComponentMask.Of(schema.Component<Hunger>()))` in the loop, then `world.Playback(commands);`. There is no `world.Create(new Hunger())`.
+- The compiled sketch also ends with `return world.Hash();` so the doc test can check the run.
+
 ## 12. GPU: deferred, with a seam
 
 The GPU work done during mapping (Backend abstraction, wgpu-native, Exact/Approximate Kernels, GPU Field and pathfinding prototypes) is retained as research. Findings: dense GPU-authoritative Fields won about 15x (2.1 ms vs about 32 ms); a CPU-authoritative mirror never wins (PCIe-bound); shared-goal flow Fields won only about 2x; per-unit GPU queries lost 17-20x to CPU HPA*; float Kernels differed up to 5 ULP between Vulkan and DX12 while integer Kernels were bit-identical.
