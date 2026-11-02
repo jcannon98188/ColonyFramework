@@ -74,6 +74,9 @@ public sealed class PathRequestScenario : Testing.Scenario
 
     public int ResultDelayTicks { get; init; } = 2;
 
+    /// <summary>The HPA* chunk graph budget; a tiny one keeps evicting and rebuilding chunks, which must not change any result.</summary>
+    public long ChunkGraphBudgetBytes { get; init; } = new PathfindingOptions().ChunkGraphMemoryBudgetBytes;
+
     public override int InitialEntityCapacity => Agents * 2;
 
     public MovementClass Walker => _state.Walker;
@@ -87,7 +90,7 @@ public sealed class PathRequestScenario : Testing.Scenario
         builder.AddComponent<PathAgent>("pathfinding.requester");
         var fields = builder.AddFields(Size);
         var terrain = fields.AddField<byte>("terrain");
-        var pathfinding = builder.AddPathfinding(fields, new PathfindingOptions { WorkBudgetPerTick = WorkBudgetPerTick, ResultDelayTicks = ResultDelayTicks });
+        var pathfinding = builder.AddPathfinding(fields, new PathfindingOptions { WorkBudgetPerTick = WorkBudgetPerTick, ResultDelayTicks = ResultDelayTicks, ChunkGraphMemoryBudgetBytes = ChunkGraphBudgetBytes });
         var walker = pathfinding.AddMovementClass(new MovementClassDefinition("walker", Passability.OfField(terrain, PrototypeTerrain.Walkable))
         {
             Vertical = Passability.OfField(terrain, PrototypeTerrain.Climbable),
