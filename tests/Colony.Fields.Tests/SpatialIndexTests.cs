@@ -47,6 +47,38 @@ public sealed class SpatialIndexTests
         Assert.Equal(0, index.QueryTile(new TilePos(21, 5, 3), hits));
     }
 
+    [Fact]
+    public void A_host_move_through_World_Get_between_ticks_is_indexed_at_the_next_tick()
+    {
+        var (schema, tilePos) = BuildSchema();
+        using var owner = new WorldOwner();
+        var (world, index, ids) = Arrange(tilePos, schema, new TilePos(20, 5, 3), new TilePos(21, 5, 3));
+        owner.World = world;
+        Span<SpatialHit> hits = stackalloc SpatialHit[4];
+
+        world.Get<TilePos>(ids[0], tilePos) = new TilePos(60, 40, 20); // another chunk, no command buffer
+        world.Tick();
+
+        Assert.Equal(0, index.QueryTile(new TilePos(20, 5, 3), hits));
+        Assert.Equal(1, index.QueryTile(new TilePos(60, 40, 20), hits));
+        Assert.Equal(ids[0], hits[0].Entity);
+
+        // A host write through a query column is stamped too.
+        foreach (var chunk in world.Query(tilePos))
+        {
+            var positions = chunk.Column<TilePos>(tilePos);
+            for (int i = 0; i < positions.Length; i++)
+            {
+                positions[i] = new TilePos(positions[i].X, positions[i].Y, 0);
+            }
+        }
+
+        world.Tick();
+        Assert.Equal(1, index.QueryTile(new TilePos(60, 40, 0), hits));
+        Assert.Equal(1, index.QueryTile(new TilePos(21, 5, 0), hits));
+        Assert.Equal(ids[1], hits[0].Entity);
+    }
+
     /// <summary>Spawns a fixed layout around (40, 24, 16) crossing chunk borders and returns the ids in creation order.</summary>
     private static (World World, SpatialIndex Index, EntityId[] Ids) Arrange(ComponentType tilePos, WorldSchema schema, params TilePos[] tiles)
     {

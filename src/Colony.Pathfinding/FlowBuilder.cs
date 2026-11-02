@@ -127,7 +127,7 @@ internal sealed class FlowBuilder
             }
 
             int slot = field.Bounds.SlotOf(goal.Chunk);
-            if (affected is not null && affected[slot] == 0)
+            if ((affected is not null && affected[slot] == 0) || field.IsUnloadedChunk(slot))
             {
                 continue;
             }
@@ -146,6 +146,11 @@ internal sealed class FlowBuilder
     /// <summary>Seeds the face cells of an affected chunk from finite neighbours in unaffected chunks (their value + 1).</summary>
     private void SeedFromOutside(FlowField field, int slot)
     {
+        if (field.IsUnloadedChunk(slot))
+        {
+            return; // the search never enters an Unloaded chunk: it stays unreached
+        }
+
         var dist = field.DistancesOf(slot);
         var passable = field.Map.PassableOf(field.OrdinalOf(slot));
         for (int d = 0; d < 6; d++)

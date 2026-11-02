@@ -235,6 +235,16 @@ internal sealed unsafe class Archetype
         }
     }
 
+    /// <summary>Records that the host wrote one Component column of one chunk (no-op when the archetype lacks it).</summary>
+    public void MarkColumnWritten(int chunk, int componentId, uint changeCounter)
+    {
+        int column = ColumnOf(componentId);
+        if (column >= 0)
+        {
+            _columnVersions[(chunk * Columns) + column] = changeCounter;
+        }
+    }
+
     /// <summary>True when any column in <paramref name="filter"/> changed after <paramref name="since"/>.</summary>
     public bool HasChangedSince(int chunk, ComponentMask filter, uint since)
     {
