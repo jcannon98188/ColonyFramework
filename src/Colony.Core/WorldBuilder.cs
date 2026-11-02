@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 
 namespace Colony;
 
@@ -672,6 +672,36 @@ public sealed class WorldBuilder
 
         var fields = System.Collections.Immutable.ImmutableArray<ComponentField>.Empty;
         return new ComponentType(AddComponentCore(name, size, alignment, ComponentLayout.ComputeHash(name, size, alignment, fields), flags, fields, 0, 0));
+    }
+
+    /// <summary>
+    /// Declares which bytes of a Component registered by layout hold data (spec section 6: the World hash excludes
+    /// padding). Every other byte is padding and is zeroed where a value enters the World, so a value recorded with
+    /// uninitialised padding (C struct on the stack) hashes like a clean one. Not part of the layout identity.
+    /// </summary>
+    internal void DeclareComponentData(ComponentType type, ReadOnlySpan<(int Offset, int Size)> ranges)
+    {
+        ThrowIfBuilt();
+        if ((uint)type.Id >= (uint)_components.Count)
+        {
+            throw new ArgumentException($"{type} is not registered in this builder.", nameof(type));
+        }
+
+        var descriptor = _components[type.Id];
+        if (descriptor.IsBuffer || descriptor.IsRelation)
+        {
+            throw new ArgumentException($"Component '{descriptor.Name}' is a buffer or Relation Component; its padding is the Framework's.", nameof(type));
+        }
+
+        foreach (var (offset, size) in ranges)
+        {
+            if (offset < 0 || size <= 0 || offset > descriptor.Size - size)
+            {
+                throw new ArgumentException($"Component '{descriptor.Name}': data range at {offset} of {size} bytes lies outside its {descriptor.Size} bytes.", nameof(ranges));
+            }
+        }
+
+        _components[type.Id] = descriptor with { DataRanges = [.. ranges] };
     }
 
     /// <summary>Registers a value Resource or event queue by name, size and alignment alone.</summary>

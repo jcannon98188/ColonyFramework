@@ -110,6 +110,13 @@ public sealed class WorldSchema
             hash = Hashing.Hash64.Combine(hash, inputPermissions.Hash);
         }
 
+        var padding = new byte[]?[_components.Length];
+        for (int i = 0; i < _components.Length; i++)
+        {
+            padding[i] = PaddingMaskOf(in _components[i]);
+        }
+
+        PaddingMasks = padding;
         Sizes = sizes;
         ResourceSizes = resourceSizes;
         NonFragmentingSlots = slots;
@@ -136,6 +143,33 @@ public sealed class WorldSchema
 
     /// <summary>Which source may issue which Input Command (TASK-35); unrestricted unless the builder or a Plugin declared permissions.</summary>
     public InputPermissions InputPermissions { get; }
+
+    /// <summary>
+    /// Per Component id: a mask of its bytes (0xFF data, 0x00 padding) when its layout leaves padding, from the
+    /// field layout or declared data ranges; null when every byte is data or the bytes are unknown.
+    /// </summary>
+    internal byte[]?[] PaddingMasks { get; }
+
+    private static byte[]? PaddingMaskOf(in ComponentDescriptor descriptor)
+    {
+        if (descriptor.IsBuffer || descriptor.IsRelation || (descriptor.Fields.IsDefaultOrEmpty && descriptor.DataRanges.IsDefaultOrEmpty))
+        {
+            return null;
+        }
+
+        var mask = new byte[descriptor.Size];
+        foreach (var field in descriptor.Fields)
+        {
+            mask.AsSpan(field.Offset, Math.Min(field.Size, descriptor.Size - field.Offset)).Fill(0xFF);
+        }
+
+        foreach (var (offset, size) in descriptor.DataRanges)
+        {
+            mask.AsSpan(offset, size).Fill(0xFF);
+        }
+
+        return mask.AsSpan().ContainsAnyExcept((byte)0xFF) ? mask : null;
+    }
 
     /// <summary>Component sizes by id.</summary>
     internal int[] Sizes { get; }

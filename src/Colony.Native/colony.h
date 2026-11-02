@@ -164,6 +164,13 @@ typedef struct colony_definition_field {
 } colony_definition_field;
 COLONY_STATIC_ASSERT(colony_definition_field_size, sizeof(colony_definition_field) == 16);
 
+/* One run of data bytes of a Component registered by layout (register_component_data); bytes outside every range are padding. */
+typedef struct colony_component_range {
+    int32_t offset;
+    int32_t size;
+} colony_component_range;
+COLONY_STATIC_ASSERT(colony_component_range_size, sizeof(colony_component_range) == 8);
+
 /* A Native System with its access declared in data. phase is "Streaming", "Input", "Begin", "Simulate" (the default when NULL), "Late", "End" or a Game Phase's name; reads are the Component ids whose columns for_each_chunk receives; with/without filter the query; emits are the event queues it may emit; after/before name Systems. */
 typedef struct colony_system_desc {
     const char* name;
@@ -321,8 +328,10 @@ struct colony_api {
     int (*random_i32)(const colony_random* random, uint64_t counter, int32_t min_inclusive, int32_t max_exclusive, int32_t* out_value);
     /* The message of the last failing call on this thread, UTF-8, NUL-terminated when it fits. */
     int (*last_error)(char* buffer, int32_t capacity, int32_t* out_length);
+    /* Declares the data bytes of a Component registered by layout; every other byte is padding and is zeroed where values enter the World (the World hash excludes padding). Without it a value's bytes are taken verbatim, so zero your padding. */
+    int (*register_component_data)(colony_registration* registration, int32_t component, const colony_component_range* ranges, int32_t count);
 };
-COLONY_STATIC_ASSERT(colony_api_size, sizeof(colony_api) == 512);
+COLONY_STATIC_ASSERT(colony_api_size, sizeof(colony_api) == 520);
 
 /* Index of every entry in the table (COLONY_API_COUNT entries), for conformance bookkeeping. */
 enum colony_api_index {
@@ -389,7 +398,8 @@ enum colony_api_index {
     COLONY_API_RANDOM_U32 = 60,
     COLONY_API_RANDOM_I32 = 61,
     COLONY_API_LAST_ERROR = 62,
-    COLONY_API_COUNT = 63
+    COLONY_API_REGISTER_COMPONENT_DATA = 63,
+    COLONY_API_COUNT = 64
 };
 
 /* Exported by the Framework library (Colony.Native). */

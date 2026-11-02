@@ -109,6 +109,32 @@ internal static unsafe class AbiEntries
     }
 
     [UnmanagedCallersOnly]
+    public static int RegisterComponentData(nint registration, int component, ColonyComponentRange* ranges, int count)
+    {
+        try
+        {
+            var r = Registration(registration);
+            if (count < 0 || (count > 0 && ranges == null))
+            {
+                return ColonyAbi.Invalid("ranges is null or count is negative.");
+            }
+
+            var list = new (int Offset, int Size)[count];
+            for (int i = 0; i < count; i++)
+            {
+                list[i] = (ranges[i].Offset, ranges[i].Size);
+            }
+
+            r.Registration.Builder.DeclareComponentData(new ComponentType(component), list);
+            return ColonyAbi.Ok;
+        }
+        catch (Exception e)
+        {
+            return ColonyAbi.Fail(e);
+        }
+    }
+
+    [UnmanagedCallersOnly]
     public static int RegisterResource(nint registration, byte* name, int size, int alignment, uint flags, int* outId)
     {
         try
