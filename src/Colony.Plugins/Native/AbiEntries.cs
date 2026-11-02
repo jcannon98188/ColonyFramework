@@ -641,7 +641,7 @@ internal static unsafe class AbiEntries
                 WorkerThreads = Math.Max(workers, 0),
                 InitialEntityCapacity = initialCapacity > 0 ? initialCapacity : WorldOptions.Default.InitialEntityCapacity,
             });
-            *outWorld = NativeHandles.GetOrAdd(world);
+            *outWorld = NativeHandles.GetOrAdd(world, world);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -661,7 +661,7 @@ internal static unsafe class AbiEntries
             }
 
             var world = WorldPersistence.Load(Utf8Strings.ReadRequired(path, "path"), Schema(schema).Schema);
-            *outWorld = NativeHandles.GetOrAdd(world);
+            *outWorld = NativeHandles.GetOrAdd(world, world);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -867,7 +867,8 @@ internal static unsafe class AbiEntries
                 return ColonyAbi.Invalid("out_commands is null.");
             }
 
-            *outCommands = NativeHandles.GetOrAdd(World(world).CreateCommandBuffer());
+            var owner = World(world);
+            *outCommands = NativeHandles.GetOrAdd(owner.CreateCommandBuffer(), owner);
             return ColonyAbi.Ok;
         }
         catch (Exception e)

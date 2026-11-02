@@ -87,8 +87,8 @@ internal sealed unsafe class NativeSystem
         JobIndex = context.JobIndex,
         JobCount = context.JobCount,
         Random = new ColonyRandom { Seed = context.Random.Seed, Key = context.Random.Key },
-        Commands = NativeHandles.GetOrAdd(context.Commands),
-        World = NativeHandles.GetOrAdd(context.World),
+        Commands = NativeHandles.GetOrAdd(context.Commands, context.World),
+        World = NativeHandles.GetOrAdd(context.World, context.World),
         System = Handle,
     };
 

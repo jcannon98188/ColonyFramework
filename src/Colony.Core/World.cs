@@ -29,6 +29,7 @@ public sealed partial class World : IDisposable
     private long _staleSkipped;
     private int _playbackOwner = -1;
     private bool _disposed;
+    private List<Action>? _onDispose;
     private readonly IWorldExtension[] _extensions;
     private TickRunner? _runner;
     private RandomSequence _sharedRandom;
@@ -390,6 +391,16 @@ public sealed partial class World : IDisposable
     /// caller is the host between Ticks: World API writes are then change-stamped (spec section 4.3).
     /// </summary>
     private int _engineDepth;
+
+    /// <summary>
+    /// Runs <paramref name="callback"/> first thing in <see cref="Dispose"/>: lets a package that keyed state by this
+    /// World (the C ABI's handle table) release it. Host side only, never from a Tick path.
+    /// </summary>
+    internal void OnDispose(Action callback)
+    {
+        ThrowIfDisposed();
+        (_onDispose ??= []).Add(callback);
+    }
 
     /// <summary>True while the World runs a Tick or a <see cref="RunParallel"/> batch.</summary>
     internal bool InEngine => _engineDepth != 0;
@@ -770,6 +781,14 @@ public sealed partial class World : IDisposable
         }
 
         _disposed = true;
+        if (_onDispose is { } callbacks)
+        {
+            foreach (var callback in callbacks)
+            {
+                callback();
+            }
+        }
+
         _runner?.Dispose();
         foreach (var extension in _extensions)
         {
