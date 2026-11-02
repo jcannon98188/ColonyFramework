@@ -15,10 +15,11 @@ public ref struct ChunkQuery
     private readonly ComponentMask _none;
     private readonly bool _validate;
     private readonly bool _ignoreEnableBits;
+    private readonly World? _host;
     private int _archetype;
     private int _chunk;
 
-    internal ChunkQuery(Archetype[] archetypes, int archetypeCount, ComponentMask all, ComponentMask none, bool validate, bool ignoreEnableBits)
+    internal ChunkQuery(Archetype[] archetypes, int archetypeCount, ComponentMask all, ComponentMask none, bool validate, bool ignoreEnableBits, World? host = null)
     {
         _archetypes = archetypes;
         _archetypeCount = archetypeCount;
@@ -26,13 +27,14 @@ public ref struct ChunkQuery
         _none = none;
         _validate = validate;
         _ignoreEnableBits = ignoreEnableBits;
+        _host = host;
         _archetype = -1;
         _chunk = -1;
     }
 
     public readonly ChunkQuery GetEnumerator() => this;
 
-    public readonly ChunkView Current => new(_archetypes[_archetype], _chunk, _validate);
+    public readonly ChunkView Current => new(_archetypes[_archetype], _chunk, _validate, _host);
 
     public bool MoveNext()
     {

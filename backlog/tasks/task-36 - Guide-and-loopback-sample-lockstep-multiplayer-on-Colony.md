@@ -1,9 +1,11 @@
 ---
 id: TASK-36
 title: 'Guide and loopback sample: lockstep multiplayer on Colony'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@jason'
 created_date: '2026-11-01 21:30'
+updated_date: '2026-11-02 02:22'
 labels:
   - ready-for-agent
   - documentation

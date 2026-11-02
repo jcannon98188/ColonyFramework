@@ -76,6 +76,7 @@ internal static unsafe class WorldLoader
             LoadWorldSection(reader, world, manifest);
             world.RebuildRelationIndex();
             world.LoadExtensions(name => ExtensionReader(reader, name, extensionPlans));
+            options.PrepareWorld?.Invoke(world);
 
             if (options.VerifyWorldHash && manifest.SchemaHash == schema.SchemaHash)
             {

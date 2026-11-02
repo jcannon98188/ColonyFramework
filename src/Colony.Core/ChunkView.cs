@@ -17,8 +17,9 @@ public readonly ref struct ChunkView
     private readonly bool _checkAccess;
     private readonly ComponentMask _access;
     private readonly string? _systemName;
+    private readonly World? _host;
 
-    internal ChunkView(Archetype archetype, int chunkIndex, bool validate)
+    internal ChunkView(Archetype archetype, int chunkIndex, bool validate, World? host = null)
     {
         _archetype = archetype;
         ChunkIndex = chunkIndex;
@@ -26,6 +27,7 @@ public readonly ref struct ChunkView
         Count = archetype.RowCount(chunkIndex);
         _version = archetype.Version(chunkIndex);
         _validate = validate;
+        _host = host;
     }
 
     /// <summary>A view for a System job that also checks every column taken against the System's declared access set (spec section 10.1, validation switches).</summary>
@@ -63,8 +65,21 @@ public readonly ref struct ChunkView
         }
     }
 
-    /// <summary>The Component column over the live rows.</summary>
+    /// <summary>
+    /// The Component column over the live rows. Taken by the host from <see cref="World.Query(ComponentMask, ComponentMask, bool)"/>
+    /// outside a Tick it counts as a write: the column is change-stamped (see <see cref="World.Get{T}"/>);
+    /// use <see cref="ReadColumn{T}"/> to read without stamping.
+    /// </summary>
     public Span<T> Column<T>(ComponentType type) where T : unmanaged
+    {
+        Validate();
+        int offset = Offset<T>(type);
+        StampHostWrite(type);
+        return Span<T>(offset, Count);
+    }
+
+    /// <summary>The Component column over the live rows, read only; never change-stamps.</summary>
+    public ReadOnlySpan<T> ReadColumn<T>(ComponentType type) where T : unmanaged
     {
         Validate();
         return Span<T>(Offset<T>(type), Count);
@@ -72,12 +87,23 @@ public readonly ref struct ChunkView
 
     /// <summary>
     /// The Component column padded to a multiple of 16 rows so SIMD loops need no scalar tail. Rows past
-    /// <see cref="Count"/> hold unspecified bytes: process them, never read them back as state.
+    /// <see cref="Count"/> hold unspecified bytes: process them, never read them back as state. Change-stamped
+    /// when the host takes it, like <see cref="Column{T}"/>.
     /// </summary>
     public Span<T> PaddedColumn<T>(ComponentType type) where T : unmanaged
     {
         Validate();
-        return Span<T>(Offset<T>(type), PaddedCount);
+        int offset = Offset<T>(type);
+        StampHostWrite(type);
+        return Span<T>(offset, PaddedCount);
+    }
+
+    private void StampHostWrite(ComponentType type)
+    {
+        if (_host is { InEngine: false } host)
+        {
+            host.StampHostColumn(_archetype, ChunkIndex, type.Id);
+        }
     }
 
     /// <summary>
@@ -104,6 +130,7 @@ public readonly ref struct ChunkView
             throw new ArgumentException($"Component '{descriptor.Name}' is not a buffer of {Unsafe.SizeOf<TElement>()} byte elements.", nameof(type));
         }
 
+        StampHostWrite(type);
         return new BufferAccessor<TElement>((byte*)_pointer + offset + (long)row * descriptor.Size, descriptor.InlineOffset, descriptor.InlineCapacity, _archetype.Heap);
     }
 

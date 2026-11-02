@@ -51,4 +51,13 @@ public sealed class LoadOptions
     /// not verified.
     /// </summary>
     public bool DropUnknownComponents { get; init; }
+
+    /// <summary>
+    /// Runs once on the loaded World after every section and extension is restored and before
+    /// <see cref="VerifyWorldHash"/> checks the hash (whether or not it does), then Load returns the World. Use it to
+    /// supply host-owned state the save does not hold but the hash depends on, such as a host-set
+    /// <c>FieldSet.ChunkSource</c>: never-generated Unloaded chunks are not saved and hash through the source.
+    /// If it throws, the World is disposed and the exception propagates.
+    /// </summary>
+    public Action<World>? PrepareWorld { get; init; }
 }
