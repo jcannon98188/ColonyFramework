@@ -314,7 +314,7 @@ public sealed class WorldBuilder
         }
 
         int size = Unsafe.SizeOf<T>();
-        int alignment = Unsafe.SizeOf<AlignmentProbe<T>>() - size;
+        int alignment = NaturalAlignment<T>.Value;
         ulong hash = ComponentLayout.ComputeHash(name, size, alignment, fields);
         int id = AddComponentCore(name, size, alignment, hash, flags, fields, elementSize: 0, inlineCapacity: 0);
         _byClrType.Add(typeof(T), id);
@@ -356,7 +356,7 @@ public sealed class WorldBuilder
         }
 
         int size = Unsafe.SizeOf<BufferComponent<TElement, TInline>>();
-        int alignment = Unsafe.SizeOf<AlignmentProbe<BufferComponent<TElement, TInline>>>() - size;
+        int alignment = NaturalAlignment<BufferComponent<TElement, TInline>>.Value;
         int inlineCapacity = inlineBytes / elementSize;
         ulong hash = ComponentLayout.ComputeHash(name, size, alignment, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
         hash = Hashing.Hash64.Combine(hash, BufferLayoutSeed);
@@ -420,7 +420,7 @@ public sealed class WorldBuilder
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ThrowIfBuilt();
         int size = Unsafe.SizeOf<RelationLink>();
-        int alignment = Unsafe.SizeOf<AlignmentProbe<RelationLink>>() - size;
+        int alignment = NaturalAlignment<RelationLink>.Value;
         ulong hash = ComponentLayout.ComputeHash(name, size, alignment, System.Collections.Immutable.ImmutableArray<ComponentField>.Empty);
         hash = Hashing.Hash64.Combine(hash, RelationLayoutSeed);
         hash = Hashing.Hash64.Combine(hash, (ulong)options);
@@ -550,7 +550,7 @@ public sealed class WorldBuilder
         }
 
         int size = Unsafe.SizeOf<T>();
-        var type = AddInputCommandCore(name, size, Unsafe.SizeOf<AlignmentProbe<T>>() - size);
+        var type = AddInputCommandCore(name, size, NaturalAlignment<T>.Value);
         _inputByClrType.Add(typeof(T), type.Id);
         return type;
     }
@@ -651,7 +651,7 @@ public sealed class WorldBuilder
         }
 
         int size = Unsafe.SizeOf<T>();
-        var type = AddResourceCore(name, size, Unsafe.SizeOf<AlignmentProbe<T>>() - size, kind, persistent);
+        var type = AddResourceCore(name, size, NaturalAlignment<T>.Value, kind, persistent);
         _resourceByClrType.Add(typeof(T), type.Id);
         return type;
     }
@@ -797,15 +797,5 @@ public sealed class WorldBuilder
         {
             throw new InvalidOperationException("The WorldBuilder has already been built; registration is closed.");
         }
-    }
-
-    /// <summary>The offset of <c>Value</c> equals the natural alignment of <typeparamref name="T"/>.</summary>
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct AlignmentProbe<T> where T : unmanaged
-    {
-#pragma warning disable CS0169, CA1823, IDE0051 // Fields are read by the layout only.
-        private byte _pad;
-        private T _value;
-#pragma warning restore CS0169, CA1823, IDE0051
     }
 }
