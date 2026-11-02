@@ -7,7 +7,10 @@ namespace Colony.Testing;
 /// or a worker thread allocates during the measured Ticks fails the scenario. To say where, the harness
 /// composes the scenario a second time with probe Systems between the waves of every Phase; each probe
 /// samples the Tick thread's and the workers' allocation counters, so an allocation is attributed to the
-/// wave (and so the System, when it ran alone) that was executing. The measurement loop allocates nothing.
+/// wave (and so the System, when it ran alone) that was executing. It also reads the World's own diagnostics
+/// allocation check (<see cref="Colony.Diagnostics.DiagnosticsOptions.AllocationCheck"/>, sampled at every job
+/// boundary) for the measured Ticks, which names the exact System even inside a shared wave
+/// (<see cref="AllocationResult.Systems"/>). The measurement loop allocates nothing.
 /// </summary>
 public static class AllocationHarness
 {
@@ -40,12 +43,50 @@ public static class AllocationHarness
 
         var mainBytes = new long[plan.SiteCount];
         var workerBytes = new long[plan.SiteCount];
+        var systemBytes = new long[schema.Systems.Length];
+        long diagnosticsBytes = 0;
         for (int i = 0; i < options.MeasuredTicks; i++)
         {
+            long recorded = world.Diagnostics.TicksRecorded;
             MeasureTick(scenario, world, options.HashEveryTick, probes, mainBytes, workerBytes);
+            diagnosticsBytes += ReadDiagnostics(world.Diagnostics, recorded, systemBytes);
         }
 
-        return new AllocationResult(scenario.Name, world.WorkerCount, options.MeasuredTicks, options.ToleranceBytes, plan.ToSites(mainBytes, workerBytes));
+        return new AllocationResult(scenario.Name, world.WorkerCount, options.MeasuredTicks, options.ToleranceBytes, plan.ToSites(mainBytes, workerBytes), diagnosticsBytes, Systems(schema, systemBytes));
+    }
+
+    /// <summary>Adds the diagnostics records of the Ticks published since <paramref name="recordedBefore"/>; returns their Tick totals.</summary>
+    private static long ReadDiagnostics(Colony.Diagnostics.WorldDiagnostics diagnostics, long recordedBefore, long[] systemBytes)
+    {
+        int ticks = (int)Math.Min(diagnostics.TicksRecorded - recordedBefore, diagnostics.Count);
+        long total = 0;
+        for (int ago = 0; ago < ticks; ago++)
+        {
+            var record = diagnostics.Record(ago);
+            total += record.Tick.AllocatedBytes;
+            var systems = record.Systems;
+            for (int s = 0; s < systems.Length && s < systemBytes.Length; s++)
+            {
+                systemBytes[s] += systems[s].AllocatedBytes;
+            }
+        }
+
+        return total;
+    }
+
+    private static List<SystemAllocation> Systems(WorldSchema schema, long[] systemBytes)
+    {
+        var result = new List<SystemAllocation>();
+        var systems = schema.Systems;
+        for (int s = 0; s < systemBytes.Length; s++)
+        {
+            if (systemBytes[s] > 0 && !systems[s].Name.StartsWith(ProbePrefix, StringComparison.Ordinal))
+            {
+                result.Add(new SystemAllocation(systems[s].Name, systems[s].Phase, systemBytes[s]));
+            }
+        }
+
+        return result;
     }
 
     /// <summary>One measured Tick: sites are [start..probe0], [probe k..probe k+1]..., [last probe..end], then the hash.</summary>

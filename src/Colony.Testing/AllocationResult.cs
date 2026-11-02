@@ -34,16 +34,27 @@ public sealed class AllocationSite
     public long TotalBytes => MainThreadBytes + WorkerBytes;
 }
 
+/// <summary>
+/// One System the World's diagnostics allocation check caught allocating during the measured Ticks
+/// (<see cref="Colony.Diagnostics.SystemRecord.AllocatedBytes"/>, summed): exact even when the System shares a wave.
+/// </summary>
+/// <param name="Name">The System name.</param>
+/// <param name="Phase">The Phase it runs in.</param>
+/// <param name="Bytes">Managed bytes it allocated, on any thread, over all measured Ticks.</param>
+public sealed record SystemAllocation(string Name, Phase Phase, long Bytes);
+
 /// <summary>What <see cref="AllocationHarness"/> measured over the steady-state Ticks of one scenario.</summary>
 public sealed class AllocationResult
 {
-    internal AllocationResult(string scenarioName, int workers, int measuredTicks, long tolerance, IReadOnlyList<AllocationSite> sites)
+    internal AllocationResult(string scenarioName, int workers, int measuredTicks, long tolerance, IReadOnlyList<AllocationSite> sites, long diagnosticsBytes, IReadOnlyList<SystemAllocation> systems)
     {
         ScenarioName = scenarioName;
         Workers = workers;
         MeasuredTicks = measuredTicks;
         ToleranceBytes = tolerance;
         Sites = sites;
+        DiagnosticsBytes = diagnosticsBytes;
+        Systems = systems;
         foreach (var site in sites)
         {
             MainThreadBytes += site.MainThreadBytes;
@@ -74,7 +85,18 @@ public sealed class AllocationResult
     /// <summary>The first stretch, in Tick order, that allocated anything.</summary>
     public AllocationSite? FirstOffender { get; }
 
-    public bool Passed => TotalBytes <= ToleranceBytes;
+    /// <summary>
+    /// Bytes the World's diagnostics allocation check recorded inside the measured Ticks (Systems and Tick-thread
+    /// code outside them; not the harness loop or <see cref="World.Hash"/>). A second, independent count of
+    /// <see cref="TotalBytes"/>.
+    /// </summary>
+    public long DiagnosticsBytes { get; }
+
+    /// <summary>Systems the diagnostics allocation check caught allocating, in System id order.</summary>
+    public IReadOnlyList<SystemAllocation> Systems { get; }
+
+    /// <summary>Both counts must stay within the tolerance.</summary>
+    public bool Passed => TotalBytes <= ToleranceBytes && DiagnosticsBytes <= ToleranceBytes;
 
     public void ThrowIfFailed()
     {
@@ -87,7 +109,12 @@ public sealed class AllocationResult
     public string Describe()
     {
         var text = new StringBuilder();
-        text.AppendLine(CultureInfo.InvariantCulture, $"Scenario '{ScenarioName}' on {Workers} workers over {MeasuredTicks} steady-state Ticks: {(Passed ? "PASSED" : "FAILED")} ({MainThreadBytes} bytes on the Tick thread, {WorkerBytes} on workers, tolerance {ToleranceBytes}).");
+        text.AppendLine(CultureInfo.InvariantCulture, $"Scenario '{ScenarioName}' on {Workers} workers over {MeasuredTicks} steady-state Ticks: {(Passed ? "PASSED" : "FAILED")} ({MainThreadBytes} bytes on the Tick thread, {WorkerBytes} on workers, {DiagnosticsBytes} seen by the diagnostics allocation check, tolerance {ToleranceBytes}).");
+        foreach (var system in Systems)
+        {
+            text.AppendLine(CultureInfo.InvariantCulture, $"  System {system.Name} (Phase {system.Phase.Name}) allocated {system.Bytes} bytes");
+        }
+
         if (FirstOffender is { } offender)
         {
             text.AppendLine(CultureInfo.InvariantCulture, $"  First allocation: {offender.Label} ({offender.MainThreadBytes} main / {offender.WorkerBytes} worker bytes)");
