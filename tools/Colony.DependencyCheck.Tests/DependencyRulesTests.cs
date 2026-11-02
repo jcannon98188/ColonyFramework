@@ -72,6 +72,38 @@ public sealed class DependencyRulesTests
     }
 
     [Fact]
+    public void Colony_may_reference_Pathfinding_for_its_reachability_filters()
+    {
+        // ADR 0004 (TASK-41): the work index and hauling matcher ship filters over Pathfinding.Reachable.
+        var projects = new[]
+        {
+            Src("Colony.Core"),
+            Src("Colony.Fields", SrcPath("Colony.Core")),
+            Src("Colony.Pathfinding", SrcPath("Colony.Core"), SrcPath("Colony.Fields")),
+            Src("Colony.Colony", SrcPath("Colony.Core"), SrcPath("Colony.Fields"), SrcPath("Colony.Pathfinding")),
+        };
+
+        Assert.Empty(DependencyRules.Check(projects));
+    }
+
+    [Fact]
+    public void Pathfinding_referencing_Colony_is_a_violation()
+    {
+        // ADR 0004: the edge points one way only; Pathfinding knows nothing of work items or hauling.
+        var projects = new[]
+        {
+            Src("Colony.Core"),
+            Src("Colony.Fields", SrcPath("Colony.Core")),
+            Src("Colony.Colony", SrcPath("Colony.Core"), SrcPath("Colony.Fields")),
+            Src("Colony.Pathfinding", SrcPath("Colony.Core"), SrcPath("Colony.Fields"), SrcPath("Colony.Colony")),
+        };
+
+        var violation = Assert.Single(DependencyRules.Check(projects));
+        Assert.Equal("Colony.Pathfinding", violation.Project);
+        Assert.Contains("Colony.Colony", violation.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Diagnostics_may_reference_Core_Fields_and_Persistence_and_nothing_else()
     {
         // TASK-29 / spec section 3: the inspection server reads Fields and the replay log; Plugin inspectors reach it through Core's schema.
