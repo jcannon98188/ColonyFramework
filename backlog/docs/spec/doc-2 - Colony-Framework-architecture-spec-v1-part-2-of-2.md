@@ -3,7 +3,7 @@ id: doc-2
 title: 'Colony Framework architecture spec (v1), part 2 of 2'
 type: specification
 created_date: '2026-10-31 01:46'
-updated_date: '2026-10-31 02:09'
+updated_date: '2026-11-02 04:22'
 tags:
   - architecture
   - spec
@@ -26,7 +26,8 @@ A CPU service providing:
 - **Layered repair:** per-chunk dirty marking, lazy repair on read, a per-Tick work budget with a staleness bound, and an up-front rebuild-vs-incremental threshold (prototype: CPU incremental repair can cost more than a rebuild).
 - **Queries:** `Reachable(from, to, movement class)` in constant time; approximate path cost; budgeted deferred path request/result; and a "next step toward goal" query.
 - **Request queue** processed in canonical order (priority class, then request ID) under a budget counted in work units (nodes expanded), results delivered N Ticks later; a missed deadline fails with a deterministic event. A request through an Unloaded chunk fails with "needs loading" carrying the chunk coordinate.
-- Tier 1 deterministic (integer costs, ties by neighbour index). Caches are not saved.
+- Flow Fields never cross an Unloaded chunk: such a Field reports `NeedsLoading` with the first missing chunk, and a step into or toward one returns `FlowStepStatus.NeedsLoading`.
+- Tier 1 deterministic (integer costs, ties by neighbour index). Caches are not saved, except the flow Field store (section 7.1).
 
 Games own unit movement; a path-follow helper is provided.
 
@@ -116,6 +117,15 @@ for (int tick = 0; tick < 1000; tick++) world.Tick();
 world.Save("colony.save", SaveOptions.Default);
 Console.WriteLine(world.Hash());               // identical on every machine
 ```
+
+The sketch as it compiles is `samples/HelloColony/Sketch.cs`; `SpecSketchDocTests` diffs the two line by line and fails on any drift beyond these exact deviations:
+
+- **Fields:** there is no `[Field]` attribute; `Heat` is a plain `public struct`, registered by name on the Fields builder: `builder.AddFields(new WorldSize(64, 64, 1)).AddField<Heat>("heat")` replaces `.AddField<Heat>()`.
+- **Phase in attributes:** `[System(NamedPhase.Simulate, Every = 1)]`, since an attribute argument must be a constant and `Phase` is not one.
+- **Systems:** the generator emits `ColonySystems.AddSystems(builder)`, a statement, so the chain breaks into `var builder = ...;`, `ColonySystems.AddSystems(builder);` and `var schema = builder.Build();` in place of `.AddSystems<ColonySystems>()`.
+- **Seed:** a World option, `schema.CreateWorld(new WorldOptions { Seed = 12345 })`, not `.Seed(12345)` on the builder (the seed is per World, the schema is shared).
+- **Creating Entities:** through a command buffer: `var commands = world.CreateCommandBuffer();`, `commands.Create(ComponentMask.Of(schema.Component<Hunger>()))` in the loop, then `world.Playback(commands);`. There is no `world.Create(new Hunger())`.
+- The compiled sketch also ends with `return world.Hash();` so the doc test can check the run.
 
 ## 12. GPU: deferred, with a seam
 
