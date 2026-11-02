@@ -5,9 +5,16 @@ using System.Net.Sockets;
 
 namespace Colony.Samples.Lockstep.Tests;
 
-/// <summary>TASK-36 AC #2 and #3: real peers over loopback sockets stay in sync, and a third peer joins mid-run.</summary>
+/// <summary>
+/// TASK-36 AC #2 and #3: real peers over loopback sockets stay in sync, and a third peer joins mid-run. No fixed
+/// sleeps decide the join: seat 0 holds at Tick <see cref="JoinAt"/> until the joiner's handshake arrives
+/// (<see cref="PeerOptions.AwaitJoinAtTick"/>), so a slow joiner under whole-solution load still joins mid-run
+/// (TASK-42).
+/// </summary>
 public sealed class LoopbackLockstepTests
 {
+    private const int JoinAt = 100;
+
     private static int[] FreePorts(int count)
     {
         var listeners = new List<TcpListener>();
@@ -50,19 +57,15 @@ public sealed class LoopbackLockstepTests
                 JoinMarginTicks = joinMargin,
                 TickMilliseconds = tickMs,
                 Workers = 1 + (s % 2),
+                AwaitJoinAtTick = joinSeat >= 0 && s == 0 ? JoinAt : -1,
             };
             var t = new Thread(() => results[s] = PeerHost.Run(options)) { IsBackground = true };
             threads.Add(t);
         }
 
-        for (int i = 0; i < threads.Count; i++)
+        foreach (var t in threads)
         {
-            if (i == joinSeat)
-            {
-                Thread.Sleep(800);
-            }
-
-            threads[i].Start();
+            t.Start();
         }
 
         foreach (var t in threads)
@@ -107,14 +110,14 @@ public sealed class LoopbackLockstepTests
         var results = RunInProcess(3, ticks: 300, active: [0, 1], joinSeat: 2);
 
         AssertInSync(results, 300);
-        Assert.True(results[2].StartTick > 0, "the joiner started from a join package, not from Tick 0");
+        Assert.True(results[2].StartTick >= JoinAt, "the joiner started from a join package taken mid-run, not from Tick 0");
         Assert.True(results[2].JoinTick > results[2].StartTick);
         Assert.Equal(results[0].FinalHash, results[2].FinalHash);
         Assert.Equal(results[0].FinalHash, results[1].FinalHash);
     }
 
     [Fact]
-    public void Separate_processes_stay_in_sync_and_one_joins_mid_run()
+    public async Task Separate_processes_stay_in_sync_and_one_joins_mid_run()
     {
         string dll = Path.Combine(AppContext.BaseDirectory, "HelloLockstep.dll");
         Assert.True(File.Exists(dll), dll);
@@ -123,18 +126,20 @@ public sealed class LoopbackLockstepTests
         var processes = new List<Process>();
         try
         {
-            processes.Add(Start(dll, $"--seat 0 --ports {portList} --active 0,1 --ticks 300"));
+            processes.Add(Start(dll, $"--seat 0 --ports {portList} --active 0,1 --ticks 300 --await-join {JoinAt}"));
             processes.Add(Start(dll, $"--seat 1 --ports {portList} --active 0,1 --ticks 300"));
-            Thread.Sleep(400);
             processes.Add(Start(dll, $"--seat 2 --ports {portList} --join-from 0 --ticks 300"));
+            var errors = processes.Select(p => p.StandardError.ReadToEndAsync()).ToList();
+            var outputs = processes.Select(p => p.StandardOutput.ReadToEndAsync()).ToList();
             var hashes = new List<string>();
             string joinerOutput = string.Empty;
-            foreach (var p in processes)
+            for (int i = 0; i < processes.Count; i++)
             {
-                string output = p.StandardOutput.ReadToEnd();
+                var p = processes[i];
+                Assert.True(p.WaitForExit(90_000), $"seat {i} did not exit");
+                string output = await outputs[i];
                 joinerOutput = output;
-                Assert.True(p.WaitForExit(60_000));
-                Assert.Equal(0, p.ExitCode);
+                Assert.True(p.ExitCode == 0, $"seat {i} exited {p.ExitCode}: {output} {await errors[i]}");
                 string line = output.Split('\n').Select(l => l.Trim()).Last(l => l.StartsWith("hash ", StringComparison.Ordinal));
                 hashes.Add(line);
             }

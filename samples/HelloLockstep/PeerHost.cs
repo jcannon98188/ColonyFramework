@@ -33,6 +33,17 @@ public sealed class PeerOptions
 
     public int CheckpointEvery { get; init; } = 10;
 
+    /// <summary>
+    /// A founder that serves join packages: at this Tick, stop ticking until a joiner has fetched a package and its
+    /// handshake has arrived (at most <see cref="AwaitJoinMilliseconds"/>), and ignore join requests that arrive
+    /// earlier (the joiner repeats them). The other founders stall behind it within the input delay, so nobody runs
+    /// past the joiner's join Tick however slowly it starts. -1 serves requests whenever they come and never waits.
+    /// </summary>
+    public int AwaitJoinAtTick { get; init; } = -1;
+
+    /// <summary>How long <see cref="AwaitJoinAtTick"/> waits for a joiner before ticking on without one.</summary>
+    public int AwaitJoinMilliseconds { get; init; } = 30_000;
+
     /// <summary>After the last Tick, keep exchanging messages this long so slower peers can still collect our frames.</summary>
     public int LingerMilliseconds { get; init; } = 400;
 
@@ -127,10 +138,24 @@ public static class PeerHost
             session.DesyncLocalised += (_, d) => options.Log?.WriteLine($"seat {options.Seat}: {d.Describe()}");
 
             long scripted = -1;
-            Pump(mesh, session, world, options);
+            int joiner = -1;
+            Stopwatch? awaiting = null;
+            joiner = Pump(mesh, session, world, options, joiner);
             while (world.CurrentTick < options.Ticks && !desynced && session.State != LockstepSessionState.Failed)
             {
-                Pump(mesh, session, world, options);
+                joiner = Pump(mesh, session, world, options, joiner);
+                if (options.AwaitJoinAtTick >= 0 && world.CurrentTick == options.AwaitJoinAtTick
+                    && !(joiner >= 0 && session.Peer(joiner).State == LockstepPeerState.Running))
+                {
+                    awaiting ??= Stopwatch.StartNew();
+                    if (awaiting.ElapsedMilliseconds < options.AwaitJoinMilliseconds)
+                    {
+                        Send(mesh, session, options);
+                        Thread.Sleep(1);
+                        continue;
+                    }
+                }
+
                 if (scripted < session.OpenInputTick && session.OpenInputTick < options.Ticks)
                 {
                     scripted = session.OpenInputTick;
@@ -157,7 +182,7 @@ public static class PeerHost
             var linger = Stopwatch.StartNew();
             while (linger.ElapsedMilliseconds < options.LingerMilliseconds)
             {
-                Pump(mesh, session, world, options);
+                joiner = Pump(mesh, session, world, options, joiner);
                 Send(mesh, session, options);
                 Thread.Sleep(2);
             }
@@ -220,8 +245,11 @@ public static class PeerHost
         }
     }
 
-    /// <summary>Hands every received packet to the session; answers join requests with a package captured between Ticks.</summary>
-    private static void Pump(TcpMesh mesh, LockstepSession session, World world, PeerOptions options)
+    /// <summary>
+    /// Hands every received packet to the session; answers join requests with a package captured between Ticks.
+    /// Returns the seat last served a package (or <paramref name="joiner"/> when none was).
+    /// </summary>
+    private static int Pump(TcpMesh mesh, LockstepSession session, World world, PeerOptions options, int joiner)
     {
         while (mesh.TryReceive(out byte kind, out byte[] payload))
         {
@@ -232,6 +260,12 @@ public static class PeerHost
                     break;
                 case TcpMesh.KindJoinRequest:
                     int requester = BinaryPrimitives.ReadInt32LittleEndian(payload);
+                    if (world.CurrentTick < options.AwaitJoinAtTick)
+                    {
+                        break; // too early: the joiner asks again every second
+                    }
+
+                    joiner = requester;
                     var package = JoinPackage.Capture(world);
                     foreach (var chunk in package.ToChunks(16 * 1024))
                     {
@@ -242,6 +276,8 @@ public static class PeerHost
                     break;
             }
         }
+
+        return joiner;
     }
 
     private static JoinPackage FetchJoinPackage(TcpMesh mesh, PeerOptions options, WorldSchema schema)

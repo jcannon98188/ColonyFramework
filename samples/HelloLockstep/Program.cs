@@ -2,7 +2,7 @@ using System.Globalization;
 using Colony.Samples.Lockstep;
 
 // One lockstep peer per process:
-//   HelloLockstep --seat 0 --ports 5000,5001,5002 --active 0,1 [--ticks 300] [--tick-ms 2] [--workers 1]
+//   HelloLockstep --seat 0 --ports 5000,5001,5002 --active 0,1 [--ticks 300] [--tick-ms 2] [--workers 1] [--await-join 100]
 //   HelloLockstep --seat 1 --ports 5000,5001,5002 --active 0,1
 //   HelloLockstep --seat 2 --ports 5000,5001,5002 --join-from 0 [--join-margin 60]
 // Prints "hash 0x..." (the World hash at the last Tick). Exit 0 in sync, 1 on a desync or failure, 2 on bad usage.
@@ -14,6 +14,7 @@ int joinFrom = -1;
 int joinMargin = 60;
 int tickMs = 2;
 int workers = 1;
+int awaitJoin = -1;
 try
 {
     for (int i = 0; i < args.Length; i += 2)
@@ -29,6 +30,7 @@ try
             case "--join-margin": joinMargin = int.Parse(value, CultureInfo.InvariantCulture); break;
             case "--tick-ms": tickMs = int.Parse(value, CultureInfo.InvariantCulture); break;
             case "--workers": workers = int.Parse(value, CultureInfo.InvariantCulture); break;
+            case "--await-join": awaitJoin = int.Parse(value, CultureInfo.InvariantCulture); break;
             default: throw new FormatException($"Unknown option {args[i]}.");
         }
     }
@@ -54,6 +56,7 @@ var result = PeerHost.Run(new PeerOptions
     JoinMarginTicks = joinMargin,
     TickMilliseconds = tickMs,
     Workers = workers,
+    AwaitJoinAtTick = awaitJoin,
     Log = Console.Out,
 });
 if (result.Error is not null)
