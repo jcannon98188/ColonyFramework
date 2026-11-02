@@ -1,8 +1,7 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
-using Colony.Persistence;
 
-namespace Colony.Testing;
+namespace Colony.Persistence;
 
 /// <summary>
 /// Builds one source's input frame in the wire form of <see cref="InputFrame"/> (spec section 7.4) without a
@@ -37,8 +36,20 @@ public sealed class InputFrameWriter
     public uint Add<T>(in T command) where T : unmanaged
     {
         var type = _schema.InputCommand<T>();
+        return Add(type, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in command)));
+    }
+
+    /// <summary>Appends a command from its wire bytes (exactly the registered size) with the next sequence; returns that sequence.</summary>
+    public uint Add(InputCommandType command, ReadOnlySpan<byte> payload)
+    {
+        var descriptor = _schema.DescribeInputCommand(command);
+        if (payload.Length != descriptor.Size)
+        {
+            throw new ArgumentException($"Input Command '{descriptor.Name}' is {descriptor.Size} bytes; the payload has {payload.Length}.", nameof(payload));
+        }
+
         uint sequence = NextSequence;
-        AddRaw(Source.Value, sequence, type.Id, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in command)));
+        AddEntry(Source.Value, sequence, command.Id, payload);
         NextSequence = sequence + 1;
         return sequence;
     }
@@ -53,8 +64,11 @@ public sealed class InputFrameWriter
         return frame;
     }
 
-    /// <summary>An entry with an explicit source and sequence (used to rewrite a received frame).</summary>
-    internal void AddRaw(uint source, uint sequence, int type, ReadOnlySpan<byte> payload)
+    /// <summary>
+    /// An entry with an explicit source, sequence and Input Command id, as <see cref="InputFrameView.Record"/> reads
+    /// them: for rewriting a received frame. The writer's own sequence count is not touched.
+    /// </summary>
+    public void AddEntry(uint source, uint sequence, int command, ReadOnlySpan<byte> payload)
     {
         int needed = _length + 16 + payload.Length;
         if (needed > _buffer.Length)
@@ -65,7 +79,7 @@ public sealed class InputFrameWriter
         var span = _buffer.AsSpan(_length);
         BinaryPrimitives.WriteUInt32LittleEndian(span, source);
         BinaryPrimitives.WriteUInt32LittleEndian(span[4..], sequence);
-        BinaryPrimitives.WriteInt32LittleEndian(span[8..], type);
+        BinaryPrimitives.WriteInt32LittleEndian(span[8..], command);
         BinaryPrimitives.WriteInt32LittleEndian(span[12..], payload.Length);
         payload.CopyTo(span[16..]);
         _length = needed;

@@ -20,6 +20,9 @@ internal sealed class ByteWriter
 
     public byte[] ToArray() => _buffer.AsSpan(0, _position).ToArray();
 
+    /// <summary>Starts over at position 0, keeping the buffer.</summary>
+    public void Reset() => _position = 0;
+
     public void WriteByte(byte value)
     {
         Ensure(1);

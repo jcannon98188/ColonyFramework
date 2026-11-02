@@ -52,8 +52,12 @@ public static class InputFrame
 
     /// <summary>Submits a frame whose Input Command ids are remapped through <paramref name="typeMap"/> (saved id to schema id); empty means identity.</summary>
     internal static int Submit(World world, ReadOnlySpan<byte> frame, long effectiveTick, ReadOnlySpan<int> typeMap)
+        => Submit(world, frame.ToArray(), effectiveTick, typeMap);
+
+    /// <summary>Submits a frame already held as an array (no copy).</summary>
+    internal static int Submit(World world, byte[] frame, long effectiveTick, ReadOnlySpan<int> typeMap)
     {
-        var view = new InputFrameView(frame.ToArray());
+        var view = new InputFrameView(frame);
         for (int i = 0; i < view.Count; i++)
         {
             var (source, sequence, type) = view.Record(i);

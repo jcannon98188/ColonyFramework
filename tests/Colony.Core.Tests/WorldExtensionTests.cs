@@ -11,12 +11,13 @@ public sealed class WorldExtensionTests
 {
     private sealed class CounterDefinition : WorldExtensionDefinition
     {
-        public CounterDefinition(ulong layoutHash)
+        public CounterDefinition(ulong layoutHash, string name = "counter")
         {
             LayoutHash = layoutHash;
+            Name = name;
         }
 
-        public override string Name => "counter";
+        public override string Name { get; }
 
         public override ulong LayoutHash { get; }
 
@@ -81,6 +82,19 @@ public sealed class WorldExtensionTests
         Assert.NotSame(a.Extension<Counter>(), b.Extension<Counter>());
         Assert.Same(a, a.Extension<Counter>().World);
         Assert.Same(a.Extension<Counter>(), a.Extension<Counter>());
+    }
+
+    [Theory]
+    [InlineData(WorldHashTree.TickGroup)]
+    [InlineData(WorldHashTree.ComponentsGroup)]
+    [InlineData(WorldHashTree.ResourcesGroup)]
+    [InlineData(WorldHashTree.TablesGroup)]
+    [InlineData(WorldHashTree.RandomGroup)]
+    public void An_extension_may_not_take_a_hash_tree_group_name_core_reserves(string name)
+    {
+        var e = Assert.Throws<ArgumentException>(() => new WorldBuilder().AddExtension(new CounterDefinition(1, name)));
+        Assert.Contains(name, e.Message, StringComparison.Ordinal);
+        Assert.Contains("hash tree", e.Message, StringComparison.Ordinal);
     }
 
     [Fact]

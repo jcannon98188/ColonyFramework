@@ -38,7 +38,7 @@ Decided in "Decide package and assembly layout and public API shape". All packag
 |---|---|
 | `Colony.Core` | Entity/Component storage, memory model, scheduler, command buffers, Resources, events, Relations, World/Tick API, math layer, fixed-point, RNG, hashing. One package on purpose: ECS, memory and scheduler are tightly coupled. |
 | `Colony.Fields` | Field chunks, spatial index, change feed, ChunkProvider, streaming residency manager. |
-| `Colony.Persistence` | Save/load container, migrations, replay log and verifier, Input Command ingestion and wire form. |
+| `Colony.Persistence` | Save/load container, migrations, replay log and verifier, Input Command ingestion and wire form, join package, transport-free lockstep session. |
 | `Colony.Pathfinding` | Region IDs, chunk graph and HPA*, flow Fields, request queue. |
 | `Colony.Colony` | Claims, work index, hauling matcher, priority-table and utility helpers. |
 | `Colony.ProcGen` | Stage pipeline, noise utilities, region/halo machinery; optional graph toolkit and WFC helper. |
@@ -171,6 +171,8 @@ A typed, schema-registered unmanaged struct. `world.Submit(command)` from any th
 ### 7.4 Networking enablers (not networking)
 
 The Framework implements no networking. It is built to support Game authors' lockstep networking: a stable serialisable wire form for per-Tick input frames (the replay format), remote players as source IDs, explicit future effective Ticks for input delay, the shared Tick gate, checkpoint hash exchange with the hash-trail finder for desync, join-in-progress via save plus input log, and build/Plugin identity in the header for peer matching. Not promised: rollback netcode, state replication.
+
+**Lockstep session (TASK-34).** `Colony.Persistence` ships `LockstepSession`, a transport-free state machine over those enablers: it consumes and produces lockstep messages as byte spans (input frames, cumulative acks and resend requests, scheduled checkpoint hashes, the handshake, post-desync diagnostics) and opens no sockets, starts no threads and reads no wall clock. The Game owns the transport and the loop: it hands received bytes to `Receive`, asks `NextMessage(peer)` for what to send each peer, and Ticks when `TryBeginTick` releases the shared Tick gate. Per-peer input delay is fixed or adaptive; a missing frame stalls at the gate; a checkpoint disagreement raises `Desynced` with the checkpoint Tick, then `DesyncLocalised` with the first diverging Tick, Phase and System from the exchanged hash trails and, when both peers kept the tree, the hash-tree localisation. Join-in-progress uses `JoinPackage` plus the frames the session retains. The Framework still ships no transport, no NAT traversal, no matchmaking, no encryption and no peer-drop policy.
 
 ## 8. Extension: Plugins, Definitions, C ABI
 

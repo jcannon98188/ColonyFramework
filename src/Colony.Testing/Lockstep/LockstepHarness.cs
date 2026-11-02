@@ -119,10 +119,10 @@ public static class LockstepHarness
         }
 
         var schema = a.World.Schema;
-        if (options.HashTrail && PeerHashTrail.Compare(a.Trail!, b.Trail!, schema) is { } where)
+        if (options.HashTrail && LockstepHashTrail.Compare(a.Trail!, b.Trail!, schema) is { } where)
         {
-            string? system = where.System >= 0 ? schema.Systems[where.System].Name : null;
-            return new LockstepDesync(detectedBy, other, checkpointTick, step, where.Tick, where.Phase, schema.Phases[where.Phase].Name, where.System, system);
+            string? system = where.SystemId >= 0 ? schema.Systems[where.SystemId].Name : null;
+            return new LockstepDesync(detectedBy, other, checkpointTick, step, where.Tick, where.PhaseId, schema.Phases[where.PhaseId].Name, where.SystemId, system);
         }
 
         return new LockstepDesync(detectedBy, other, checkpointTick, step, tick, -1, null, -1, null);
@@ -155,7 +155,7 @@ public static class LockstepHarness
             _options = options;
             _script = script;
             Workers = options.PeerWorkers[index % options.PeerWorkers.Count];
-            Trail = options.HashTrail ? new PeerHashTrail() : null;
+            Trail = options.HashTrail ? new LockstepHashTrail(Math.Max(1, options.Ticks)) : null;
             var builder = new WorldBuilder();
             scenario.Compose(builder);
             World = builder.Build().CreateWorld(new WorldOptions
@@ -201,7 +201,7 @@ public static class LockstepHarness
 
         public World World { get; }
 
-        public PeerHashTrail? Trail { get; }
+        public LockstepHashTrail? Trail { get; }
 
         public long TicksRun { get; private set; }
 

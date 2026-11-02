@@ -1,4 +1,5 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
+using Colony.Persistence;
 
 namespace Colony.Testing;
 
@@ -181,11 +182,11 @@ public sealed class LockstepFault
             var (source, sequence, type) = view.Record(i);
             if (i == Index)
             {
-                writer.AddRaw(source, sequence, _command!(schema).Id, _bytes);
+                writer.AddEntry(source, sequence, _command!(schema).Id, _bytes);
             }
             else
             {
-                writer.AddRaw(source, sequence, type, view.Payload(i));
+                writer.AddEntry(source, sequence, type, view.Payload(i));
             }
         }
 
