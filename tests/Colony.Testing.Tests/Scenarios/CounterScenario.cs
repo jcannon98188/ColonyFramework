@@ -11,7 +11,7 @@ public struct Counter
 /// The smallest scenario that evolves every Tick: 50k Entities (a dozen chunks, so jobs land on worker
 /// threads) whose counters advance by a per-Entity random step. Knobs make it misbehave on purpose, all
 /// numbered like the harness (Tick 1 is the first Advance; Core's <c>context.Tick</c> is one less):
-/// <see cref="DivergeFromTick"/> keys the step by the worker thread from that Tick on (the determinism
+/// <see cref="DivergeFromTick"/> keys the step by the worker count from that Tick on (the determinism
 /// negative control), <see cref="ThrowAtTick"/> throws from the System, <see cref="AllocateFromTick"/>
 /// allocates on whichever thread runs the chunk job.
 /// </summary>
@@ -55,7 +55,7 @@ public sealed class CounterScenario : Scenario
                 }
 
                 var random = context.Tick >= DivergeFromTick - 1
-                    ? context.Random.Derive((ulong)Environment.CurrentManagedThreadId)
+                    ? context.Random.Derive((ulong)context.World.WorkerCount)
                     : context.Random;
                 var values = chunk.Column<Counter>(counter);
                 var entities = chunk.Entities;

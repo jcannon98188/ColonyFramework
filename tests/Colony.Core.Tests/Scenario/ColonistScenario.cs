@@ -512,8 +512,8 @@ public static class ColonistScenario
             var targets = chunk.Column<ColonistTarget>(target);
             var hungers = chunk.Column<ColonistHunger>(hunger);
             var entities = chunk.Entities;
-            // Negative control (AC #7): keying the stream by the worker thread must break the cross-thread hash comparison.
-            var random = _sabotage ? context.Random.Derive((ulong)Environment.CurrentManagedThreadId) : context.Random;
+            // Negative control (AC #7): keying the stream by the worker count (not the thread id, which can coincide across runs on a small runner) must break the cross-thread hash comparison.
+            var random = _sabotage ? context.Random.Derive((ulong)context.World.WorkerCount) : context.Random;
             for (int i = 0; i < positions.Length; i++)
             {
                 if (hungers[i].Value >= HungryThreshold || positions[i].X != targets[i].X || positions[i].Y != targets[i].Y)

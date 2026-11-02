@@ -4,8 +4,8 @@ namespace Colony.Diagnostics.Tests;
 
 /// <summary>
 /// TASK-17 AC #5: with the hash trail on, two runs that diverge report the first differing Tick, Phase and
-/// System. The colonist scenario's sabotage switch keys the Wander System's RNG by thread, so a 1-thread
-/// and a 4-thread run part ways in Wander, Simulate Phase, the first Tick.
+/// System. The colonist scenario's sabotage switch keys the Wander System's RNG by worker count, so a 1-worker
+/// and a 4-worker run part ways in Wander, Simulate Phase, the first Tick.
 /// </summary>
 public sealed class HashTrailTests
 {
