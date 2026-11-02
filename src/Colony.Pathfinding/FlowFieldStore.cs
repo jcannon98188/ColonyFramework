@@ -116,6 +116,11 @@ internal sealed class FlowFieldStore
             if (field.Key == key && field.MovementClass == map.Class && field.RadiusChunks == radiusChunks && SameGoals(field.Goals, packed))
             {
                 field.LastUsedTick = tick;
+                if (!inTick)
+                {
+                    field.RefreshResidency(tick);
+                }
+
                 if (!inTick && field.IsDirty)
                 {
                     Repair(field);
@@ -139,7 +144,7 @@ internal sealed class FlowFieldStore
             Evict(LeastRecentlyUsed());
         }
 
-        var created = new FlowField(map, new FlowFieldId(_nextId++), key, canonical, radiusChunks, bounds, _sequence++, tick);
+        var created = new FlowField(map, new FlowFieldId(_nextId++), key, canonical, radiusChunks, bounds, _sequence++, tick, _service.ResidencyFunc);
         _fields.Add(created);
         _bytes += created.Bytes;
         _built++;
@@ -152,6 +157,11 @@ internal sealed class FlowFieldStore
     /// <summary>Brings a Field up to date now, whatever the budget: rebuild or incremental by the dirty fraction.</summary>
     public void Repair(FlowField field)
     {
+        if (!field.IsEvicted)
+        {
+            field.RefreshResidency(field.LastUsedTick);
+        }
+
         if (!field.IsDirty || field.IsEvicted)
         {
             return;
@@ -269,6 +279,12 @@ internal sealed class FlowFieldStore
             }
 
             _order[j] = i;
+        }
+
+        // Chunks that were loaded or unloaded since the last pass (the Streaming Phase runs first) are dirty too.
+        for (int i = 0; i < count; i++)
+        {
+            _fields[i].RefreshResidency(tick);
         }
 
         long budget = _options.FlowRepairBudgetPerTick;

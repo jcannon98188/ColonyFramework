@@ -45,6 +45,13 @@ public enum FlowStepStatus : byte
 
     /// <summary>The Field was evicted under the memory budget; ask the service for it again.</summary>
     Evicted,
+
+    /// <summary>
+    /// The tile lies in an Unloaded chunk, or no goal is reachable from it while the Field's search stops at an
+    /// Unloaded chunk of the bound: the answer may change once <see cref="FlowField.MissingChunk"/> is resident
+    /// (load it, e.g. with a focus point). The flow search never crosses an Unloaded chunk.
+    /// </summary>
+    NeedsLoading,
 }
 
 /// <summary>
@@ -75,11 +82,15 @@ public sealed class FlowField
     private readonly int[] _builtVersion;
     private readonly byte[] _dirty;
     private readonly TilePos[] _goals;
+    private readonly byte[] _unloaded;
+    private readonly Func<int, ChunkResidency> _residency;
     private int _used;
+    private int _missingSlot = -1;
 
-    internal FlowField(RegionMap map, FlowFieldId id, ulong key, TilePos[] goals, int radiusChunks, ChunkBox bounds, long sequence, long tick)
+    internal FlowField(RegionMap map, FlowFieldId id, ulong key, TilePos[] goals, int radiusChunks, ChunkBox bounds, long sequence, long tick, Func<int, ChunkResidency> residency)
     {
         _map = map;
+        _residency = residency;
         Id = id;
         Key = key;
         _goals = goals;
@@ -94,11 +105,13 @@ public sealed class FlowField
         _distance = new ushort[count][];
         _builtVersion = new int[count];
         _dirty = new byte[count];
+        _unloaded = new byte[count];
         var fields = map.Fields;
         for (int slot = 0; slot < count; slot++)
         {
             var chunk = bounds.ChunkAt(slot);
             _ordinals[slot] = fields.OrdinalOf(chunk);
+            _unloaded[slot] = residency(_ordinals[slot]) == ChunkResidency.Unloaded ? (byte)1 : (byte)0;
             _distance[slot] = new ushort[FieldChunk.CellCount];
             _neighbourSlots[(slot * 6) + 0] = SlotOrMinusOne(new ChunkCoord(chunk.X - 1, chunk.Y, chunk.Z));
             _neighbourSlots[(slot * 6) + 1] = SlotOrMinusOne(new ChunkCoord(chunk.X + 1, chunk.Y, chunk.Z));
@@ -138,6 +151,19 @@ public sealed class FlowField
 
     public bool IsDirty => DirtyChunkCount > 0;
 
+    /// <summary>
+    /// True when the search stopped at an Unloaded chunk of the bound: one holds a goal, or borders a tile the
+    /// search reached. Tiles whose answer depends on it step <see cref="FlowStepStatus.NeedsLoading"/>.
+    /// Brought up to date with residency whenever the Field is repaired (the Begin pass, a host request).
+    /// </summary>
+    public bool NeedsLoading => _missingSlot >= 0;
+
+    /// <summary>
+    /// The Unloaded chunk the Field needs when <see cref="NeedsLoading"/> (the first in the bound's slot order,
+    /// x fastest); <c>default</c> otherwise. The flow counterpart of the HPA* path's <c>MissingChunk</c>.
+    /// </summary>
+    public ChunkCoord MissingChunk => _missingSlot >= 0 ? Bounds.ChunkAt(_missingSlot) : default;
+
     /// <summary>The Tick at which the Field first became dirty since its last repair, -1 while clean.</summary>
     public long DirtySinceTick { get; private set; }
 
@@ -151,7 +177,7 @@ public sealed class FlowField
 
     /// <summary>The memory a Field over <paramref name="chunks"/> chunks with <paramref name="goals"/> goals holds.</summary>
     internal static long BytesFor(int chunks, int goals)
-        => ((long)chunks * ((FieldChunk.CellCount * sizeof(ushort)) + (6 * sizeof(int)) + sizeof(int) + sizeof(int) + 1 + 32)) + ((long)goals * 12) + 160;
+        => ((long)chunks * ((FieldChunk.CellCount * sizeof(ushort)) + (6 * sizeof(int)) + sizeof(int) + sizeof(int) + 1 + 1 + 32)) + ((long)goals * 12) + 160;
 
     /// <summary>Breadth-first distance in face moves from <paramref name="tile"/> to the nearest goal; -1 outside the bound, impassable, unreached or evicted.</summary>
     public int DistanceTo(TilePos tile)
@@ -186,6 +212,11 @@ public sealed class FlowField
         Volatile.Write(ref _used, 1);
         int slot = Bounds.SlotOf(from.Chunk);
         int cell = from.CellIndex;
+        if (_unloaded[slot] != 0 || _residency(_ordinals[slot]) == ChunkResidency.Unloaded)
+        {
+            return FlowStepStatus.NeedsLoading;
+        }
+
         if (!ChunkGraph.Bit(_map.PassableOf(_ordinals[slot]), cell))
         {
             return FlowStepStatus.Unreachable;
@@ -194,7 +225,7 @@ public sealed class FlowField
         ushort here = _distance[slot][cell];
         if (here == Unreached)
         {
-            return FlowStepStatus.Unreachable;
+            return NeedsLoading ? FlowStepStatus.NeedsLoading : FlowStepStatus.Unreachable;
         }
 
         if (here == 0)
@@ -208,7 +239,8 @@ public sealed class FlowField
         ushort bestDistance = here;
         for (int d = 0; d < 6; d++)
         {
-            if (TryNeighbour(slot, cell, d, out int nSlot, out int nCell))
+            // A chunk unloaded since the last repair is never stepped into (the snapshot catches up at the repair).
+            if (TryNeighbour(slot, cell, d, out int nSlot, out int nCell) && (nSlot == slot || _residency(_ordinals[nSlot]) != ChunkResidency.Unloaded))
             {
                 ushort candidate = _distance[nSlot][nCell];
                 if (candidate < bestDistance)
@@ -223,7 +255,7 @@ public sealed class FlowField
 
         if (best < 0)
         {
-            return FlowStepStatus.Unreachable;
+            return NeedsLoading ? FlowStepStatus.NeedsLoading : FlowStepStatus.Unreachable;
         }
 
         var origin = Bounds.ChunkAt(bestSlot).Origin;
@@ -264,7 +296,7 @@ public sealed class FlowField
                 break;
         }
 
-        if (nSlot < 0)
+        if (nSlot < 0 || _unloaded[nSlot] != 0)
         {
             return false;
         }
@@ -303,6 +335,23 @@ public sealed class FlowField
 
     internal bool IsDirtyChunk(int slot) => _dirty[slot] != 0;
 
+    /// <summary>Whether the chunk was Unloaded when the Field was last brought up to date with residency: the search leaves it out.</summary>
+    internal bool IsUnloadedChunk(int slot) => _unloaded[slot] != 0;
+
+    /// <summary>Marks dirty the chunks whose residency crossed Unloaded since the last call (load or unload).</summary>
+    internal void RefreshResidency(long tick)
+    {
+        for (int slot = 0; slot < _ordinals.Length; slot++)
+        {
+            byte now = _residency(_ordinals[slot]) == ChunkResidency.Unloaded ? (byte)1 : (byte)0;
+            if (now != _unloaded[slot])
+            {
+                _unloaded[slot] = now;
+                MarkDirty(slot, tick);
+            }
+        }
+    }
+
     internal int BuiltVersionOf(int slot) => _builtVersion[slot];
 
     /// <summary>Records that the chunk's passability changed; returns true when it was clean before.</summary>
@@ -333,6 +382,64 @@ public sealed class FlowField
 
         DirtyChunkCount = 0;
         DirtySinceTick = -1;
+        _missingSlot = FirstNeededUnloadedSlot();
+    }
+
+    /// <summary>
+    /// The lowest Unloaded slot that holds a goal or has a face neighbour tile the search reached; -1 when none.
+    /// Depends only on the distances, so a repair and a rebuild agree.
+    /// </summary>
+    private int FirstNeededUnloadedSlot()
+    {
+        for (int slot = 0; slot < _ordinals.Length; slot++)
+        {
+            if (_unloaded[slot] == 0)
+            {
+                continue;
+            }
+
+            foreach (var goal in _goals)
+            {
+                if (Bounds.Contains(goal.Chunk) && Bounds.SlotOf(goal.Chunk) == slot)
+                {
+                    return slot;
+                }
+            }
+
+            for (int d = 0; d < 6; d++)
+            {
+                if (_neighbourSlots[(slot * 6) + d] < 0)
+                {
+                    continue;
+                }
+
+                for (int cell = 0; cell < FieldChunk.CellCount; cell++)
+                {
+                    if (OnFace(cell, d) && TryNeighbour(slot, cell, d, out int nSlot, out int nCell) && _distance[nSlot][nCell] != Unreached)
+                    {
+                        return slot;
+                    }
+                }
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool OnFace(int cell, int direction)
+    {
+        int x = cell & FieldChunk.Mask;
+        int y = (cell >> FieldChunk.Shift) & FieldChunk.Mask;
+        int z = cell >> (2 * FieldChunk.Shift);
+        return direction switch
+        {
+            0 => x == 0,
+            1 => x == FieldChunk.Mask,
+            2 => y == 0,
+            3 => y == FieldChunk.Mask,
+            4 => z == 0,
+            _ => z == FieldChunk.Mask,
+        };
     }
 
     internal void Evict() => IsEvicted = true;
