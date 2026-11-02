@@ -62,7 +62,7 @@ internal sealed class SessionRig : IDisposable
                 peer.Step(Ticks);
             }
 
-            if (Peers.All(p => p.Session is null || p.TicksRun >= Ticks))
+            if (Peers.All(p => p.Session is null || p.World.CurrentTick >= Ticks))
             {
                 return true;
             }
@@ -174,24 +174,40 @@ internal sealed class SessionPeer : IDisposable
     private long _scripted = -1;
 
     public SessionPeer(InputScenario scenario, LockstepSessionOptions options, int workers)
+        : this(CreateWorld(scenario, options, workers, out var trail, out var gate), options with { HashTrail = trail, Gate = gate })
+    {
+    }
+
+    /// <summary>A peer over an existing World (a joiner's): the World must already use <paramref name="options"/>' gate and hash trail.</summary>
+    public SessionPeer(World world, LockstepSessionOptions options)
     {
         Index = options.LocalPeer;
-        Trail = options.HashTrail ?? new LockstepHashTrail();
-        var gate = options.Gate ?? new TickGate();
-        var builder = new WorldBuilder();
-        scenario.Compose(builder);
-        World = builder.Build().CreateWorld(new WorldOptions
-        {
-            Seed = scenario.Seed,
-            WorkerThreads = workers,
-            InitialEntityCapacity = scenario.InitialEntityCapacity,
-            TickGate = gate,
-            Diagnostics = new DiagnosticsOptions { HashTrail = true, Listener = Trail },
-        });
-        scenario.Populate(World);
-        Session = new LockstepSession(World, options with { HashTrail = Trail, Gate = gate });
+        World = world;
+        Trail = options.HashTrail!;
+        Session = new LockstepSession(World, options);
         Session.Desynced += (_, d) => Desyncs.Add(d);
         Session.DesyncLocalised += (_, d) => Localised.Add(d);
+    }
+
+    /// <summary>The World options a peer's World needs: the shared gate and the hash trail listener.</summary>
+    public static WorldOptions WorldOptions(int workers, LockstepHashTrail trail, TickGate gate, InputScenario? scenario = null) => new()
+    {
+        Seed = scenario?.Seed ?? InputScenario.DefaultSeed,
+        WorkerThreads = workers,
+        InitialEntityCapacity = scenario?.InitialEntityCapacity ?? 4096,
+        TickGate = gate,
+        Diagnostics = new DiagnosticsOptions { HashTrail = true, Listener = trail },
+    };
+
+    private static World CreateWorld(InputScenario scenario, LockstepSessionOptions options, int workers, out LockstepHashTrail trail, out TickGate gate)
+    {
+        trail = options.HashTrail ?? new LockstepHashTrail();
+        gate = options.Gate ?? new TickGate();
+        var builder = new WorldBuilder();
+        scenario.Compose(builder);
+        var world = builder.Build().CreateWorld(WorldOptions(workers, trail, gate, scenario));
+        scenario.Populate(world);
+        return world;
     }
 
     public int Index { get; }
@@ -218,7 +234,7 @@ internal sealed class SessionPeer : IDisposable
     /// <summary>Submits the script for every newly opened input Tick, then Ticks when the session allows it.</summary>
     public void Step(int ticks)
     {
-        if (Session is null || TicksRun >= ticks)
+        if (Session is null || World.CurrentTick >= ticks)
         {
             return;
         }

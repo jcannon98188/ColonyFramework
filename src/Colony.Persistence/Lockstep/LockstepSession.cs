@@ -685,8 +685,11 @@ public sealed class LockstepSession : IDisposable
             DetectDesync(slot, diagnosis.Tick, _ownHashes.Contains(diagnosis.Tick) ? ownAtTick : null, diagnosis.HasLocalHash ? diagnosis.LocalHash : 0);
         }
 
+        // Answer every peer's diagnosis with ours, so any pair of peers can localise the divergence between them:
+        // a peer that agrees with us (both diverged from a third) yields no divergence and refines nothing.
+        slot.SendDiagnosis = true;
         var desync = Desync!;
-        if (desync.Peer != slot.Index)
+        if (diagnosis.Tick != desync.Tick)
         {
             return;
         }
@@ -696,7 +699,6 @@ public sealed class LockstepSession : IDisposable
             desync.LocalHash = local;
         }
 
-        slot.SendDiagnosis = true;
         bool refined = false;
         if (_trail is not null && desync.Divergence is null && diagnosis.Trail.Count > 0 && LockstepHashTrail.Compare(_trail, diagnosis.Trail, _world.Schema) is { } where)
         {
@@ -706,7 +708,7 @@ public sealed class LockstepSession : IDisposable
             refined = true;
         }
 
-        if (diagnosis.Tree is { } tree && desync.Localisation is null && _ownTrees is not null && _ownTrees.TryGet(desync.Tick, out var ownTree) && tree.SchemaHash == ownTree.SchemaHash)
+        if (diagnosis.Tree is { } tree && desync.Localisation is null && _ownTrees is not null && _ownTrees.TryGet(desync.Tick, out var ownTree) && tree.SchemaHash == ownTree.SchemaHash && tree.WorldHash != ownTree.WorldHash)
         {
             desync.Localisation = WorldHashTree.Compare(ownTree, tree);
             refined = true;
