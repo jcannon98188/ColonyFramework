@@ -111,9 +111,11 @@ public sealed class PathfindingService : IWorldExtension
     /// goal over the goal chunks plus <paramref name="radiusChunks"/> (default <see cref="PathfindingOptions.DefaultFlowRadiusChunks"/>),
     /// built now when no Field with the same goals exists, evicting the least recently used Fields past
     /// <see cref="PathfindingOptions.FlowFieldMemoryBudgetBytes"/>. Goal order and duplicates do not matter.
-    /// Call it from serial code (host, Begin/End hooks); read the result from anywhere. Between Ticks a dirty
-    /// Field is repaired before it is returned (lazy repair on read); during a Tick the Begin repair pass and the
-    /// staleness bound apply.
+    /// Call it from serial code (host, Begin/End hooks); read the result from anywhere. Dirty Fields are repaired
+    /// by the Begin repair pass under the per-Tick budget and the staleness bound. Between Ticks an existing Field
+    /// is returned as it is, even dirty: host reads (renderers, inspectors) never change what the next Tick sees.
+    /// Creating a Field between Ticks, and <see cref="Repair"/>, do change simulation state (spec section 6): call
+    /// them identically on every peer and in replays (setup code, a Begin/End hook), never from presentation code.
     /// </summary>
     public FlowField FlowField(ReadOnlySpan<TilePos> goals, MovementClass movementClass, int radiusChunks = -1)
     {
@@ -143,7 +145,10 @@ public sealed class PathfindingService : IWorldExtension
         }
     }
 
-    /// <summary>Brings a flow Field up to date now whatever the budget (serial code only: host, Begin/End hooks).</summary>
+    /// <summary>
+    /// Brings a flow Field up to date now whatever the budget (serial code only: host, Begin/End hooks). This
+    /// changes what Systems read and how later repair passes spend their budget, so it is simulation input.
+    /// </summary>
     public void Repair(FlowField field)
     {
         ArgumentNullException.ThrowIfNull(field);
@@ -476,11 +481,16 @@ public sealed class PathfindingService : IWorldExtension
     /// <summary>Region data is derived from the Fields (spec section 6: caches are excluded from the hash); the pending request queue is state and is hashed.</summary>
     void IWorldExtension.Hash(ref Hash64State state) => Queue.Hash(ref state);
 
-    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set), the pathfinding summary of Unloaded chunks (spec section 5.3) and, once used, the request queue are.</summary>
+    /// <summary>Region data is not saved (spec section 9.1); the ids of the built classes (so loading rebuilds the same set), the pathfinding summary of Unloaded chunks (spec section 5.3), the flow Fields Systems can observe and, once used, the request queue are.</summary>
     void IWorldExtension.Save(ExtensionStateWriter writer)
     {
         ArgumentNullException.ThrowIfNull(writer);
         Queue.Save(writer);
+        lock (_flowLock)
+        {
+            _flows.Save(writer);
+        }
+
         Span<byte> built = stackalloc byte[(_maps.Length + 7) >> 3];
         built.Clear();
         for (int i = 0; i < _maps.Length; i++)
@@ -533,6 +543,15 @@ public sealed class PathfindingService : IWorldExtension
             if ((built[i >> 3] & (1 << (i & 7))) != 0)
             {
                 _ = reader.TryGetSection(SummarySectionName(i), out var summary) ? Build(i, summary, reader.ExtensionName) : Build(i);
+            }
+        }
+
+        if (reader.TryGetSection(FlowFieldStore.SectionName, out var flows))
+        {
+            string name = reader.ExtensionName;
+            lock (_flowLock)
+            {
+                _flows.Load(flows, id => (uint)id < (uint)_maps.Length && Volatile.Read(ref _maps[id]) is { } map ? map : throw new InvalidDataException($"Extension '{name}': a saved flow Field uses movement class {id}, which the save did not build."), name);
             }
         }
     }

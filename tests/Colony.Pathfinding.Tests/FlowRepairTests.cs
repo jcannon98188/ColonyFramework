@@ -38,7 +38,7 @@ public sealed class FlowRepairTests
     }
 
     [Fact]
-    public void Between_ticks_asking_for_a_dirty_field_repairs_it_on_read()
+    public void Between_ticks_asking_for_a_dirty_field_returns_it_dirty_and_an_explicit_repair_brings_it_up_to_date()
     {
         using var world = TestWorlds.Create(Plane, out var terrain, out var walker, out _);
         var service = world.Pathfinding();
@@ -50,8 +50,10 @@ public sealed class FlowRepairTests
         service.Sync();
         Assert.True(field.IsDirty);
         var again = service.FlowField(goals, walker, radiusChunks: 2);
-
         Assert.Same(field, again);
+        Assert.True(field.IsDirty, "a host read never repairs (it would change what the next Tick sees)");
+
+        service.Repair(field);
         Assert.False(field.IsDirty);
         AssertMatchesOracle(world, terrain, field);
     }

@@ -4,7 +4,7 @@ using Colony.Testing;
 
 namespace Colony.Pathfinding.Tests;
 
-/// <summary>AC #3: flow Field results are identical across thread counts and excluded from saves.</summary>
+/// <summary>AC #3: flow Field results are identical across thread counts; Fields are not hashed, and saved only so load-then-continue is exact (FlowDeterminismTests).</summary>
 public sealed class FlowFieldScenarioTests
 {
     [Theory]
@@ -63,7 +63,7 @@ public sealed class FlowFieldScenarioTests
     }
 
     [Fact]
-    public void Flow_fields_are_not_hashed_not_saved_and_a_load_starts_without_them()
+    public void Flow_fields_are_not_hashed_but_saved_so_a_load_continues_with_them()
     {
         var scenario = new FlowFieldScenario();
         var builder = new WorldBuilder();
@@ -84,12 +84,11 @@ public sealed class FlowFieldScenarioTests
         Assert.True(straight.Pathfinding().FlowFieldCount > 0);
         byte[] image = straight.SaveToBytes();
         var sections = WorldPersistence.SectionNames(image).ToArray();
-        Assert.DoesNotContain(sections, n => n.Contains("flow", StringComparison.OrdinalIgnoreCase));
-        Assert.Equal(["ext/pathfinding/built"], sections.Where(n => n.Contains("pathfinding", StringComparison.Ordinal)));
+        Assert.Equal(["ext/pathfinding/flows", "ext/pathfinding/built"], sections.Where(n => n.Contains("pathfinding", StringComparison.Ordinal)));
 
         using var resumed = WorldPersistence.Load(image, schema, new LoadOptions { WorldOptions = options });
         scenario.OnLoaded(resumed);
-        Assert.Equal(0, resumed.Pathfinding().FlowFieldCount);
+        Assert.Equal(straight.Pathfinding().FlowFieldCount, resumed.Pathfinding().FlowFieldCount);
         Assert.Equal(straight.Hash(), resumed.Hash());
         for (int t = 0; t < 15; t++)
         {
