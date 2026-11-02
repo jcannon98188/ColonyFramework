@@ -14,8 +14,11 @@ public sealed class ReplayOptions
     /// <summary>Embed a full save at the start Tick, so playback can start from the log alone. Off, the host must position the World itself.</summary>
     public bool EmbedStartSave { get; init; } = true;
 
-    /// <summary>Ticks per second the host runs at; informational, stored in the header for peer matching and tooling.</summary>
+    /// <summary>Ticks per second the host runs at; stored in the header and compared by <see cref="ReplayPlayer"/> when the player is given the host's identity.</summary>
     public uint TickRate { get; init; }
+
+    /// <summary>The Game build (version, commit, platform tag) stored in the header, as in <see cref="PeerIdentityOptions.Build"/>.</summary>
+    public string Build { get; init; } = "";
 
     /// <summary>Container options for the embedded saves and the log file.</summary>
     public SaveOptions SaveOptions { get; init; } = SaveOptions.Default;
@@ -24,6 +27,7 @@ public sealed class ReplayOptions
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(CheckpointEvery, 1, nameof(CheckpointEvery));
         ArgumentOutOfRangeException.ThrowIfNegative(FullSaveEvery, nameof(FullSaveEvery));
+        ArgumentNullException.ThrowIfNull(Build, nameof(Build));
     }
 }
 
