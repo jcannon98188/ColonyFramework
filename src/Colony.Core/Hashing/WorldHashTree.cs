@@ -170,6 +170,9 @@ public sealed class WorldHashTree
     /// <summary>The item under <see cref="ComponentsGroup"/> holding the Entity column of every chunk.</summary>
     public const string EntitiesItem = "(entities)";
 
+    /// <summary>The item under <see cref="ComponentsGroup"/> holding the Entity index: slot high water, every slot's generation and the free list (they decide future EntityIds).</summary>
+    public const string EntityIndexItem = "(entity index)";
+
     private static readonly string[] ReservedGroupNames = [TickGroup, ComponentsGroup, ResourcesGroup, TablesGroup, RandomGroup];
 
     /// <summary>The group names Core writes itself; a <see cref="WorldExtensionDefinition.Name"/> (which becomes the extension's group) may not be one of them.</summary>

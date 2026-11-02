@@ -8,13 +8,14 @@ public sealed partial class World
     private const ulong WorldHashSeed = 0x5748_5348UL;
 
     /// <summary>
-    /// The World hash (spec section 6): <see cref="Hash64"/> over the schema hash, the Tick, every
+    /// The World hash (spec section 6): <see cref="Hash64"/> over the schema hash, the Tick, the Entity index
+    /// (slot high water, every slot's generation and the free list in order: they decide future EntityIds), every
     /// archetype's chunks in archetype id then chunk order (the Entity column and each Component column
     /// over the live rows only, each with its enable bits), the non-fragmenting Components of every live
     /// Entity in slot order (buffer Components by length and elements, never by heap handle), the persistent
     /// Resources in id order, the string table and the blob store in id order, every extension's state in
     /// registration order (<see cref="IWorldExtension.Hash"/>), and the RNG state. Padding rows, change versions,
-    /// the asleep bit, transient Resources (including non-persistent event queues), the rebuildable relation
+    /// the asleep bit, the Phase epoch a slot was freed in (conflict diagnosis only), transient Resources (including non-persistent event queues), the rebuildable relation
     /// index and caches are excluded. Linear in the
     /// live data, so it is cheap enough to run every few Ticks in a test. Equal on 1 or N threads, JIT or
     /// Native AOT, for the same seed and inputs (Tier 1 determinism, ADR 0002).
@@ -25,6 +26,7 @@ public sealed partial class World
         var state = new Hash64State(WorldHashSeed);
         state.Append(Schema.SchemaHash);
         state.Append(CurrentTick);
+        AppendEntityIndex(ref state);
 
         for (int a = 0; a < _archetypeCount; a++)
         {
@@ -136,6 +138,10 @@ public sealed partial class World
 
         builder.EndItem();
 
+        var index = new Hash64State(WorldHashTree.NodeSeed);
+        AppendEntityIndex(ref index);
+        builder.AddItem(WorldHashTree.EntityIndexItem, index.Finish());
+
         for (int id = 0; id < Schema.ComponentCount; id++)
         {
             ref readonly var descriptor = ref Schema.Components[id];
@@ -223,6 +229,24 @@ public sealed partial class World
         builder.EndGroup();
 
         return builder.Build(CurrentTick, Schema.SchemaHash, Hash());
+    }
+
+    /// <summary>Slot high water, the generation of every slot below it and the free list in pop order.</summary>
+    private void AppendEntityIndex(ref Hash64State state)
+    {
+        int highWater = _entities.HighWater;
+        state.Append(highWater);
+        for (int i = 0; i < highWater; i++)
+        {
+            state.Append(_entities.GenerationAt(i));
+        }
+
+        var free = _entities.FreeSlots;
+        state.Append(free.Length);
+        for (int i = 0; i < free.Length; i++)
+        {
+            state.Append(free[i]);
+        }
     }
 
     private unsafe void AddNonFragmentingLeaves(HashTreeBuilder builder, in ComponentDescriptor descriptor, int slot)
