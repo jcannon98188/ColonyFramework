@@ -14,6 +14,8 @@ internal static class SymbolHelpers
     public const string WithAttributeName = "Colony.WithAttribute";
     public const string WithoutAttributeName = "Colony.WithoutAttribute";
     public const string ChangeFilterAttributeName = "Colony.ChangeFilterAttribute";
+    public const string ReadsResourcesAttributeName = "Colony.ReadsResourcesAttribute";
+    public const string WritesResourcesAttributeName = "Colony.WritesResourcesAttribute";
 
     /// <summary>Stable type names for the layout hash: no <c>global::</c>, keywords for the special types.</summary>
     public static readonly SymbolDisplayFormat StableNameFormat = new(

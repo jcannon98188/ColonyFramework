@@ -28,6 +28,7 @@ internal static class SystemParser
         int every = 1;
         int offset = -1;
         bool skipAsleep = false;
+        bool ignoreEnableBits = false;
         var after = ImmutableArray<string>.Empty;
         var before = ImmutableArray<string>.Empty;
 
@@ -59,6 +60,9 @@ internal static class SystemParser
                     break;
                 case "SkipAsleepChunks" when named.Value.Value is bool skip:
                     skipAsleep = skip;
+                    break;
+                case "IgnoreEnableBits" when named.Value.Value is bool ignore:
+                    ignoreEnableBits = ignore;
                     break;
                 case "After":
                     after = Strings(named.Value);
@@ -122,6 +126,9 @@ internal static class SystemParser
             Filter(method, SymbolHelpers.WithAttributeName, "With", systemName, diagnostics),
             Filter(method, SymbolHelpers.WithoutAttributeName, "Without", systemName, diagnostics),
             Filter(method, SymbolHelpers.ChangeFilterAttributeName, "ChangeFilter", systemName, diagnostics),
+            Resources(method, SymbolHelpers.ReadsResourcesAttributeName, "ReadsResources", systemName, diagnostics),
+            Resources(method, SymbolHelpers.WritesResourcesAttributeName, "WritesResources", systemName, diagnostics),
+            ignoreEnableBits,
             new EquatableArray<DiagnosticInfo>(diagnostics.ToImmutable()));
 
         return new SystemMethodModel(SymbolHelpers.Placement(owner, includeSelf: false), SymbolHelpers.Declaration(owner), SymbolHelpers.CodeName(owner), system);
@@ -197,6 +204,12 @@ internal static class SystemParser
     private static EquatableArray<ColumnModel> Filter(IMethodSymbol method, string attributeName, string shortName, string systemName, ImmutableArray<DiagnosticInfo>.Builder diagnostics) =>
         new(AccessTypes(method, attributeName, shortName, systemName, diagnostics)
             .Select(t => Column(SymbolHelpers.CodeName(t), t.Name, isWrite: false))
+            .ToImmutableArray());
+
+    /// <summary>Resource types of [ReadsResources]/[WritesResources]; local names get a <c>Resource</c> suffix so they never clash with Component locals.</summary>
+    private static EquatableArray<ColumnModel> Resources(IMethodSymbol method, string attributeName, string shortName, string systemName, ImmutableArray<DiagnosticInfo>.Builder diagnostics) =>
+        new(AccessTypes(method, attributeName, shortName, systemName, diagnostics)
+            .Select(t => new ColumnModel(SymbolHelpers.CodeName(t), t.Name, SymbolHelpers.CamelCase(t.Name) + "Resource", IsWrite: false))
             .ToImmutableArray());
 
     private static ImmutableArray<ParameterModel> ParseParameters(IMethodSymbol method, ImmutableArray<DiagnosticInfo>.Builder diagnostics)

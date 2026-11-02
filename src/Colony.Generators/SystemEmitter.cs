@@ -58,6 +58,15 @@ internal static class SystemEmitter
             w.Line($"global::Colony.ComponentType {type.LocalName} = builder.Component<{type.TypeCode}>();");
         }
 
+        var resources = system.AllResources().ToList();
+        var resourceLocals = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (int i = 0; i < resources.Count; i++)
+        {
+            string local = resources[i].LocalName + (resources.Count(r => r.LocalName == resources[i].LocalName) > 1 ? (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+            resourceLocals[resources[i].TypeCode] = local;
+            w.Line($"global::Colony.ResourceType {local} = builder.Resource<{resources[i].TypeCode}>();");
+        }
+
         w.Open("return new global::Colony.SystemDefinition");
         w.Line($"Name = {SymbolHelpers.Literal(system.SystemName)},");
         w.Line($"Phase = builder.PhaseNamed({SymbolHelpers.Literal(system.PhaseName)}),");
@@ -71,6 +80,21 @@ internal static class SystemEmitter
         w.Line($"Before = {StringArray(system.Before)},");
         w.Line($"ChangeFilter = {Mask(system.ChangeFilter)},");
         w.Line($"SkipAsleepChunks = {(system.SkipAsleepChunks ? "true" : "false")},");
+        if (system.ReadsResources.Count > 0)
+        {
+            w.Line($"ReadsResources = {ResourceMask(system.ReadsResources, resourceLocals)},");
+        }
+
+        if (system.WritesResources.Count > 0)
+        {
+            w.Line($"WritesResources = {ResourceMask(system.WritesResources, resourceLocals)},");
+        }
+
+        if (system.IgnoreEnableBits)
+        {
+            w.Line("IgnoreEnableBits = true,");
+        }
+
         w.Line(Entry(system));
         w.Close(";");
         w.Close();
@@ -153,7 +177,7 @@ internal static class SystemEmitter
         w.Line("_chunk = chunk;");
         foreach (var column in system.Columns)
         {
-            w.Line($"{column.PropertyName} = chunk.Column<{column.TypeCode}>({column.LocalName});");
+            w.Line($"{column.PropertyName} = chunk.{(column.IsWrite ? "Column" : "ReadColumn")}<{column.TypeCode}>({column.LocalName});");
         }
 
         w.Close();
@@ -235,6 +259,12 @@ internal static class SystemEmitter
         return list.Count == 0
             ? "global::Colony.ComponentMask.Empty"
             : $"global::Colony.ComponentMask.Of({string.Join(", ", list.Select(c => c.LocalName))})";
+    }
+
+    private static string ResourceMask(IEnumerable<ColumnModel> resources, Dictionary<string, string> locals)
+    {
+        var names = resources.Select(r => locals[r.TypeCode]).Distinct(StringComparer.Ordinal).ToList();
+        return $"global::Colony.ResourceMask.Of({string.Join(", ", names)})";
     }
 
     private static string StringArray(EquatableArray<string> values) =>

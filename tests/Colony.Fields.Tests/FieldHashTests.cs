@@ -67,6 +67,9 @@ public sealed class FieldHashTests
         var expected = new Hash64State(0x5748_5348UL);
         expected.Append(schema.SchemaHash);
         expected.Append(world.CurrentTick);
+        // The Entity index (review #6): high water 0, no generations, an empty free list.
+        expected.Append(0);
+        expected.Append(0);
         // No Entities, so the archetype and non-fragmenting sections are empty; the persistent Resources follow:
         // only the built-in StructuralFailure queue (id 0), empty, hashed as its record count. Then the string table
         // and the blob store (TASK-9), both empty, hashed as their counts. Then the extensions.

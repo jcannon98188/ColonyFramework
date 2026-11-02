@@ -6,12 +6,20 @@ namespace Colony.Persistence;
 /// throws <see cref="ReplayDivergenceException"/> on a mismatch. Attach it to a World positioned at a Tick of
 /// the log (<see cref="ReplayLog.CreateWorld"/> loads an embedded save), <see cref="SeekTo"/> a Tick, and
 /// <see cref="Fork"/> to continue with live input while recording. Do not submit live input while playing.
+/// Attaching compares the recording's identity with the World's (spec section 7.2, through the lockstep
+/// <see cref="PeerHandshake"/>): Framework and format versions, Plugin set (ids, versions, determinism, ABI,
+/// order), schema hash, seed, the extensions' content versions (the generation version), and the build, tick
+/// rate and settings when the host's <see cref="PeerIdentityOptions"/> are given. A log recorded with a
+/// non-deterministic Plugin is refused (spec section 6: it carries no guarantee).
 /// </summary>
 public sealed class ReplayPlayer
 {
     private readonly int[] _typeMap;
 
-    public ReplayPlayer(ReplayLog log, World world)
+    /// <param name="log">The recording.</param>
+    /// <param name="world">A World positioned at a Tick of the log.</param>
+    /// <param name="host">The playing host's build, tick rate and settings; null takes the recording's (only the World's own identity is compared).</param>
+    public ReplayPlayer(ReplayLog log, World world, PeerIdentityOptions? host = null)
     {
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(world);
@@ -52,6 +60,8 @@ public sealed class ReplayPlayer
                 + ". Differences (here = recording): " + string.Join("; ", differences) + ".");
         }
 
+        // The precise Input checks above speak first; the identity then covers everything else that would diverge.
+        VerifyIdentity(log, world, host);
         Verify();
     }
 
@@ -125,6 +135,49 @@ public sealed class ReplayPlayer
     /// </summary>
     public ReplayRecorder Fork(ReplayOptions? options = null)
         => new(World, options, Log.Prefix(World.CurrentTick));
+
+    private static void VerifyIdentity(ReplayLog log, World world, PeerIdentityOptions? host)
+    {
+        var recorded = log.Identity;
+        host ??= new PeerIdentityOptions { Build = recorded.Build, TickRate = recorded.TickRate, Settings = recorded.Settings };
+        var here = PeerIdentity.Of(world, host);
+        var problems = new List<string>();
+        foreach (var mismatch in PeerHandshake.Compare(here, recorded).Mismatches)
+        {
+            // Both sides report a non-deterministic Plugin; say it once, about the recording.
+            if (mismatch.Kind != HandshakeMismatchKind.NotDeterministic)
+            {
+                problems.Add(mismatch.Message);
+            }
+            else if (mismatch.Subject == "remote")
+            {
+                problems.Add($"The replay was recorded with non-deterministic Plugin(s) {mismatch.Remote}, so its checkpoints carry no guarantee.");
+            }
+        }
+
+        var current = ReplayData.ExtensionVersionsOf(world.Schema);
+        foreach (var saved in log.ExtensionVersions)
+        {
+            string? now = current.Find(c => c.Name == saved.Name).Version;
+            if (now != saved.Version)
+            {
+                problems.Add($"Extension '{saved.Name}' was recorded at content version {saved.Version} but the schema has {now ?? "none"}.");
+            }
+        }
+
+        foreach (var c in current)
+        {
+            if (!log.ExtensionVersions.Any(s => s.Name == c.Name))
+            {
+                problems.Add($"Extension '{c.Name}' has content version {c.Version}, which the recording does not have.");
+            }
+        }
+
+        if (problems.Count > 0)
+        {
+            throw new InvalidOperationException("The replay cannot be played on this World (local = this World, remote = the recording): " + string.Join(" ", problems));
+        }
+    }
 
     private void Verify()
     {

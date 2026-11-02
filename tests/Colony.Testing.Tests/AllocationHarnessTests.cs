@@ -82,6 +82,26 @@ public sealed class AllocationHarnessTests
 
         Assert.False(result.Passed);
         Assert.Equal(["Quiet", "Noisy"], result.FirstOffender!.Systems);
+
+        // The World's diagnostics allocation check samples at every job boundary, so it pins the exact System.
+        var system = Assert.Single(result.Systems);
+        Assert.Equal("Noisy", system.Name);
+        Assert.Equal(Phase.Simulate, system.Phase);
+        Assert.True(system.Bytes >= 16 * Options.MeasuredTicks, result.Describe());
+        Assert.Contains("Noisy", result.Describe(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_diagnostics_allocation_check_agrees_with_the_probes()
+    {
+        var clean = AllocationHarness.Run(new CounterScenario(), Options);
+        Assert.Equal(0, clean.DiagnosticsBytes);
+        Assert.Empty(clean.Systems);
+
+        var dirty = AllocationHarness.Run(new CounterScenario { AllocateFromTick = 1 }, Options);
+        Assert.Equal("Count", Assert.Single(dirty.Systems).Name);
+        Assert.True(dirty.DiagnosticsBytes > 0, dirty.Describe());
+        Assert.Equal(dirty.Systems[0].Bytes, dirty.FirstOffender!.TotalBytes);
     }
 
     [Fact]

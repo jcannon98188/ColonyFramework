@@ -1,4 +1,4 @@
-﻿namespace Colony;
+namespace Colony;
 
 /// <summary>
 /// What a <see cref="WorldSchema"/> knows about one registered Component: its stable name, its layout
@@ -32,4 +32,10 @@ public readonly record struct ComponentDescriptor(
 
     /// <summary>The fields of the layout (spec section 4.1); empty when the Component was registered by name only.</summary>
     public System.Collections.Immutable.ImmutableArray<ComponentField> Fields { get; init; } = System.Collections.Immutable.ImmutableArray<ComponentField>.Empty;
+
+    /// <summary>
+    /// Data byte ranges declared for a Component registered by layout alone (a Native Plugin's), used only to
+    /// zero padding where values enter the World (spec section 6); not part of the identity. Empty otherwise.
+    /// </summary>
+    internal System.Collections.Immutable.ImmutableArray<(int Offset, int Size)> DataRanges { get; init; } = [];
 }

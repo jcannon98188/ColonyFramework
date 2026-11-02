@@ -24,11 +24,22 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Colony\Colony.Colony.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Pathfinding\Colony.Pathfinding.csproj" />
+    <ProjectReference Include="..\..\src\Colony.ProcGen\Colony.ProcGen.csproj" />
     <Compile Include="..\Colony.Core.Tests\Scenario\ColonistScenario.cs" Link="Scenarios\ColonistScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\ColonistHarnessScenario.cs" Link="Scenarios\ColonistHarnessScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\FieldScenario.cs" Link="Scenarios\FieldScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\InputScenario.cs" Link="Scenarios\InputScenario.cs" />
     <Compile Include="..\Colony.Testing.Tests\Scenarios\StreamingScenario.cs" Link="Scenarios\StreamingScenario.cs" />
+    <!-- TASK-42 AC #3: the pathfinding, work index, generation and claims oracles. -->
+    <Compile Include="..\Colony.Pathfinding.Tests\Scenarios\PrototypeTerrain.cs" Link="Scenarios\PrototypeTerrain.cs" />
+    <Compile Include="..\Colony.Pathfinding.Tests\Scenarios\PathRequestScenario.cs" Link="Scenarios\PathRequestScenario.cs" />
+    <Compile Include="..\Colony.Pathfinding.Tests\Scenarios\FlowFieldScenario.cs" Link="Scenarios\FlowFieldScenario.cs" />
+    <Compile Include="..\Colony.Colony.Tests\Scenarios\ClaimScenario.cs" Link="Scenarios\ClaimScenario.cs" />
+    <Compile Include="..\Colony.Colony.Tests\Scenarios\WorkIndexScenario.cs" Link="Scenarios\WorkIndexScenario.cs" />
+    <Compile Include="..\Colony.ProcGen.Tests\Pipeline\TerrainPipeline.cs" Link="Scenarios\TerrainPipeline.cs" />
+    <Compile Include="..\Colony.ProcGen.Tests\Pipeline\GenerationScenario.cs" Link="Scenarios\GenerationScenario.cs" />
   </ItemGroup>
 
 </Project>

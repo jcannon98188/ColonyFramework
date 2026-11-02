@@ -101,9 +101,10 @@ public sealed class FlowUnloadedTests
         var field = service.FlowField([Goal], walker, radiusChunks: 3);
         Assert.Equal(FlowStepStatus.Step, field.TryStep(West, out _));
 
-        // Unloaded between Ticks: asking for the Field again repairs it before returning it.
+        // Unloaded between Ticks: an explicit repair brings the Field up to date with residency.
         Unload(world, Middle);
         Assert.Same(field, service.FlowField([Goal], walker, radiusChunks: 3));
+        service.Repair(field);
         Assert.True(field.NeedsLoading);
         Assert.Equal(Middle, field.MissingChunk);
         Assert.Equal(FlowStepStatus.NeedsLoading, field.TryStep(West, out _));

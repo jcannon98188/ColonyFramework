@@ -385,17 +385,7 @@ public sealed class DefinitionRegistry
             _byName.Clear();
         }
 
-        private static int AlignmentOf() => Unsafe.SizeOf<AlignmentProbe>() - Unsafe.SizeOf<T>();
-
-        /// <summary>The offset of the value equals the natural alignment of <typeparamref name="T"/>.</summary>
-        [StructLayout(LayoutKind.Sequential)]
-        private struct AlignmentProbe
-        {
-#pragma warning disable CS0169, CA1823, IDE0051 // Fields are read by the layout only.
-            private byte _pad;
-            private T _value;
-#pragma warning restore CS0169, CA1823, IDE0051
-        }
+        private static int AlignmentOf() => NaturalAlignment<T>.Value;
     }
 }
 

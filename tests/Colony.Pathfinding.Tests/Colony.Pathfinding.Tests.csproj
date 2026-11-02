@@ -1,11 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <!-- Zero-allocation gates: tiered recompilation inside a measured window allocates (see Colony.Core.Tests). -->
-    <TieredCompilation>false</TieredCompilation>
-    <TieredPGO>false</TieredPGO>
-  </PropertyGroup>
-
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.Pathfinding\Colony.Pathfinding.csproj" />
     <!-- The unreachable-target scenario runs through the determinism and allocation harnesses (spec section 10.3). -->

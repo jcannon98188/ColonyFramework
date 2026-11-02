@@ -14,6 +14,8 @@ internal sealed class ColonyEventSource : EventSource
 {
     public const string SourceName = "Colony-Diagnostics";
 
+    // The one instance (spec section 3 exception, ADR 0005): the runtime registers an EventSource name once per
+    // process. It only observes and never decides an outcome.
     public static ColonyEventSource Log { get; } = new();
 
     private readonly Lock _lock = new();

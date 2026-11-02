@@ -98,6 +98,7 @@ public sealed class CommandBuffer
         Unsafe.WriteUnaligned(p + 1, entity.Value);
         Unsafe.WriteUnaligned(p + 9, type.Id);
         Unsafe.WriteUnaligned(p + 13, value);
+        ZeroPadding(type, p + 13, size);
         Count++;
     }
 
@@ -125,6 +126,7 @@ public sealed class CommandBuffer
         Unsafe.WriteUnaligned(p + 1, entity.Value);
         Unsafe.WriteUnaligned(p + 9, type.Id);
         value.CopyTo(new Span<byte>(p + 13, size));
+        ZeroPadding(type, p + 13, size);
         Count++;
     }
 
@@ -217,7 +219,23 @@ public sealed class CommandBuffer
         Unsafe.WriteUnaligned(p + 1, entity.Value);
         Unsafe.WriteUnaligned(p + 9, type.Id);
         new ReadOnlySpan<byte>(value, size).CopyTo(new Span<byte>(p + 13, size));
+        ZeroPadding(type, p + 13, size);
         Count++;
+    }
+
+    /// <summary>Clears the padding bytes of a recorded value (spec section 6: padding never reaches the World hash).</summary>
+    private unsafe void ZeroPadding(ComponentType type, byte* value, int size)
+    {
+        if (_schema.PaddingMasks[type.Id] is not { } mask)
+        {
+            return;
+        }
+
+        var bytes = new Span<byte>(value, size);
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            bytes[i] &= mask[i];
+        }
     }
 
     /// <summary>Records an event of <paramref name="size"/> bytes for the event queue <paramref name="queue"/>.</summary>

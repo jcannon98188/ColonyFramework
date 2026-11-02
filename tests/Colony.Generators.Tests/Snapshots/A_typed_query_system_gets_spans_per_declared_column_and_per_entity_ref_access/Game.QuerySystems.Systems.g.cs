@@ -48,7 +48,7 @@ namespace Game
             {
                 _chunk = chunk;
                 Hunger = chunk.Column<global::Game.Hunger>(hungerType);
-                Position = chunk.Column<global::Game.Position>(positionType);
+                Position = chunk.ReadColumn<global::Game.Position>(positionType);
             }
 
             /// <summary>Binds the query to a chunk by schema lookup; the generated entry passes the Component types directly instead.</summary>

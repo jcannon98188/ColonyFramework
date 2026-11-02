@@ -302,10 +302,16 @@ public sealed class WorldSnapshot
     }
 }
 
-/// <summary>Temp file, flush to disk, rotate backups, rename into place (spec section 7.1).</summary>
-internal static class AtomicFile
+/// <summary>
+/// Temp file, flush to disk, rotate backups, replace into place (spec section 7.1). The save path names a complete
+/// file at every instant: older backups rotate first (the save itself is untouched), then one replace makes the
+/// current save the first backup and the new file the save (File.Replace: ReplaceFile on Windows, link + rename
+/// on Unix), and finally the directory entry is flushed so the rename survives power loss.
+/// </summary>
+internal static partial class AtomicFile
 {
-    public static void Write(string path, byte[] bytes, int backupGenerations)
+    /// <summary>Writes the save; <paramref name="step"/> is a fault-injection seam for tests, called after each step with its name.</summary>
+    public static void Write(string path, byte[] bytes, int backupGenerations, Action<string>? step = null)
     {
         string directory = Path.GetDirectoryName(Path.GetFullPath(path))!;
         Directory.CreateDirectory(directory);
@@ -316,6 +322,7 @@ internal static class AtomicFile
             stream.Flush(flushToDisk: true);
         }
 
+        step?.Invoke("temp-written");
         if (File.Exists(path) && backupGenerations > 0)
         {
             for (int generation = backupGenerations; generation >= 2; generation--)
@@ -327,11 +334,56 @@ internal static class AtomicFile
                 }
             }
 
-            File.Move(path, BackupPath(path, 1), overwrite: true);
+            step?.Invoke("rotated");
+            File.Replace(temp, path, BackupPath(path, 1), ignoreMetadataErrors: true);
+        }
+        else
+        {
+            File.Move(temp, path, overwrite: true);
         }
 
-        File.Move(temp, path, overwrite: true);
+        step?.Invoke("replaced");
+        FlushDirectory(directory);
+        step?.Invoke("synced");
     }
+
+    /// <summary>
+    /// fsync of the directory so the renames are durable (POSIX). Windows needs none: NTFS journals the rename, and
+    /// FlushFileBuffers on a directory handle needs backup privileges. Best effort: a missing libc leaves the rename
+    /// to the file system's own commit interval.
+    /// </summary>
+    private static void FlushDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            int fd = PosixOpen(directory, 0);
+            if (fd >= 0)
+            {
+                _ = PosixFsync(fd);
+                _ = PosixClose(fd);
+            }
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (EntryPointNotFoundException)
+        {
+        }
+    }
+
+    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "open", StringMarshalling = System.Runtime.InteropServices.StringMarshalling.Utf8)]
+    private static partial int PosixOpen(string path, int flags);
+
+    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "fsync")]
+    private static partial int PosixFsync(int fd);
+
+    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "close")]
+    private static partial int PosixClose(int fd);
 
     public static string BackupPath(string path, int generation) => path + ".bak" + generation.ToString(global::System.Globalization.CultureInfo.InvariantCulture);
 }

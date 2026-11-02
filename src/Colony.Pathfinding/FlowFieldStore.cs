@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Colony.Fields;
@@ -33,6 +34,9 @@ public readonly record struct FlowFieldCounters(
 /// </summary>
 internal sealed class FlowFieldStore
 {
+    /// <summary>Name of the saved section holding the Fields (absent when there are none).</summary>
+    internal const string SectionName = "flows";
+
     private const ulong KeySeed = 0x464C_4F57UL; // "FLOW"
     private const int StackGoals = 256;
 
@@ -96,7 +100,12 @@ internal sealed class FlowFieldStore
         return null;
     }
 
-    /// <summary>The Field of a goal set, built now when none exists (evicting the least recently used ones to make room); an existing one is touched and, between Ticks, repaired if dirty.</summary>
+    /// <summary>
+    /// The Field of a goal set, built now when none exists (evicting the least recently used ones to make room).
+    /// In a Tick an existing one is touched (recency). Between Ticks an existing one is returned as it is: a host
+    /// read (a renderer, an inspector) must not change what the next Tick sees (spec section 6), so it neither
+    /// repairs the Field nor touches its recency; <see cref="Repair"/> is the explicit, simulation-affecting call.
+    /// </summary>
     public FlowField GetOrCreate(ReadOnlySpan<TilePos> goals, RegionMap map, int radiusChunks, long tick, bool inTick)
     {
         Span<long> packed = goals.Length <= StackGoals ? stackalloc long[goals.Length] : new long[goals.Length];
@@ -108,22 +117,15 @@ internal sealed class FlowFieldStore
         packed.Sort();
         int unique = Unique(packed);
         packed = packed[..unique];
-        ulong key = Hash64.Combine(Hash64.Combine(KeySeed, (ulong)map.Class.Id), (ulong)radiusChunks);
-        key = Hash64.Combine(key, Hash64.Compute(MemoryMarshal.AsBytes(packed), KeySeed));
+        ulong key = KeyOf(packed, map.Class.Id, radiusChunks);
 
         foreach (var field in _fields)
         {
             if (field.Key == key && field.MovementClass == map.Class && field.RadiusChunks == radiusChunks && SameGoals(field.Goals, packed))
             {
-                field.LastUsedTick = tick;
-                if (!inTick)
+                if (inTick)
                 {
-                    field.RefreshResidency(tick);
-                }
-
-                if (!inTick && field.IsDirty)
-                {
-                    Repair(field);
+                    field.LastUsedTick = tick;
                 }
 
                 return field;
@@ -326,6 +328,216 @@ internal sealed class FlowFieldStore
         _fields.Clear();
         _bytes = 0;
     }
+
+    /// <summary>
+    /// Writes the Fields Systems can observe (spec section 6, load-then-continue): ids, goal sets, recency, the
+    /// parallel-read flags not folded yet, dirty and residency marks, and the old distances of dirty Fields.
+    /// Clean Fields are rebuilt on load (a repair matches a rebuild). Nothing when there are no Fields.
+    /// </summary>
+    public void Save(ExtensionStateWriter writer)
+    {
+        if (_fields.Count == 0)
+        {
+            return;
+        }
+
+        long size = 16;
+        foreach (var field in _fields)
+        {
+            size += 53 + (12L * field.Goals.Length) + (2L * field.ChunkCount);
+            if (field.IsDirty)
+            {
+                size += (long)field.ChunkCount * FieldChunk.CellCount * sizeof(ushort);
+            }
+        }
+
+        var span = new byte[size].AsSpan();
+        int at = 0;
+        WriteInt(span, ref at, _fields.Count);
+        WriteInt(span, ref at, _nextId);
+        WriteLong(span, ref at, _sequence);
+        foreach (var field in _fields)
+        {
+            WriteInt(span, ref at, field.Id.Id);
+            WriteInt(span, ref at, field.MovementClass.Id);
+            WriteInt(span, ref at, field.RadiusChunks);
+            WriteInt(span, ref at, field.Goals.Length);
+            foreach (var goal in field.Goals)
+            {
+                WriteInt(span, ref at, goal.X);
+                WriteInt(span, ref at, goal.Y);
+                WriteInt(span, ref at, goal.Z);
+            }
+
+            WriteLong(span, ref at, field.Sequence);
+            WriteLong(span, ref at, field.LastUsedTick);
+            span[at++] = field.Used ? (byte)1 : (byte)0;
+            WriteLong(span, ref at, field.DirtySinceTick);
+            WriteInt(span, ref at, field.MissingSlot);
+            WriteInt(span, ref at, field.ChunkCount);
+            field.DirtyMarks.CopyTo(span[at..]);
+            at += field.ChunkCount;
+            field.UnloadedMarks.CopyTo(span[at..]);
+            at += field.ChunkCount;
+            if (field.IsDirty)
+            {
+                for (int slot = 0; slot < field.ChunkCount; slot++)
+                {
+                    foreach (ushort d in field.DistancesOf(slot))
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(span[at..], d);
+                        at += 2;
+                    }
+                }
+            }
+        }
+
+        writer.WriteSection(SectionName, span[..at]);
+    }
+
+    /// <summary>Restores the Fields of a save over the rebuilt region maps (<paramref name="regions"/> resolves a class id).</summary>
+    public void Load(ReadOnlySpan<byte> payload, Func<int, RegionMap> regions, string extensionName)
+    {
+        Clear();
+        int at = 0;
+        int count = ReadInt(payload, ref at, extensionName);
+        _nextId = ReadInt(payload, ref at, extensionName);
+        _sequence = ReadLong(payload, ref at, extensionName);
+        if (count < 0)
+        {
+            throw Corrupt(extensionName, "a negative Field count");
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            int id = ReadInt(payload, ref at, extensionName);
+            var map = regions(ReadInt(payload, ref at, extensionName));
+            int radius = ReadInt(payload, ref at, extensionName);
+            int goalCount = ReadInt(payload, ref at, extensionName);
+            if (goalCount <= 0 || goalCount > (payload.Length - at) / 12)
+            {
+                throw Corrupt(extensionName, $"a bad goal count at Field {i}");
+            }
+
+            var goals = new TilePos[goalCount];
+            var packed = new long[goalCount];
+            for (int g = 0; g < goalCount; g++)
+            {
+                int x = ReadInt(payload, ref at, extensionName);
+                int y = ReadInt(payload, ref at, extensionName);
+                int z = ReadInt(payload, ref at, extensionName);
+                goals[g] = new TilePos(x, y, z);
+                packed[g] = Pack(goals[g]);
+            }
+
+            long sequence = ReadLong(payload, ref at, extensionName);
+            long lastUsed = ReadLong(payload, ref at, extensionName);
+            bool used = ReadByte(payload, ref at, extensionName) != 0;
+            long dirtySince = ReadLong(payload, ref at, extensionName);
+            int missingSlot = ReadInt(payload, ref at, extensionName);
+            int chunks = ReadInt(payload, ref at, extensionName);
+            var bounds = BoundsOf(goals, radius, map.Fields.Size);
+            if (chunks != bounds.ChunkCount || payload.Length - at < 2L * chunks)
+            {
+                throw Corrupt(extensionName, $"Field {i} spanning {chunks} chunks where its goals and radius give {bounds.ChunkCount}");
+            }
+
+            var dirty = payload.Slice(at, chunks);
+            at += chunks;
+            var unloaded = payload.Slice(at, chunks);
+            at += chunks;
+            var field = new FlowField(map, new FlowFieldId(id), KeyOf(packed, map.Class.Id, radius), goals, radius, bounds, sequence, lastUsed, _service.ResidencyFunc);
+            field.RestoreUnloaded(unloaded);
+            field.RestoreUsed(used);
+            if (dirty.ContainsAnyExcept((byte)0))
+            {
+                if (payload.Length - at < (long)chunks * FieldChunk.CellCount * sizeof(ushort))
+                {
+                    throw Corrupt(extensionName, $"truncated distances in Field {i}");
+                }
+
+                for (int slot = 0; slot < chunks; slot++)
+                {
+                    var distances = field.DistancesOf(slot);
+                    for (int c = 0; c < distances.Length; c++)
+                    {
+                        distances[c] = BinaryPrimitives.ReadUInt16LittleEndian(payload[at..]);
+                        at += 2;
+                    }
+                }
+
+                field.RestoreDirty(dirty, dirtySince, missingSlot);
+            }
+            else
+            {
+                _ = _builder.Rebuild(field);
+                field.MarkClean();
+            }
+
+            _fields.Add(field);
+            _bytes += field.Bytes;
+        }
+
+        if (at != payload.Length)
+        {
+            throw Corrupt(extensionName, $"{payload.Length - at} trailing bytes");
+        }
+    }
+
+    private static ulong KeyOf(ReadOnlySpan<long> packed, int classId, int radiusChunks)
+    {
+        ulong key = Hash64.Combine(Hash64.Combine(KeySeed, (ulong)classId), (ulong)radiusChunks);
+        return Hash64.Combine(key, Hash64.Compute(MemoryMarshal.AsBytes(packed), KeySeed));
+    }
+
+    private static void WriteInt(Span<byte> span, ref int at, int value)
+    {
+        BinaryPrimitives.WriteInt32LittleEndian(span[at..], value);
+        at += 4;
+    }
+
+    private static void WriteLong(Span<byte> span, ref int at, long value)
+    {
+        BinaryPrimitives.WriteInt64LittleEndian(span[at..], value);
+        at += 8;
+    }
+
+    private static int ReadInt(ReadOnlySpan<byte> payload, ref int at, string extensionName)
+    {
+        if (payload.Length - at < 4)
+        {
+            throw Corrupt(extensionName, "truncated data");
+        }
+
+        int value = BinaryPrimitives.ReadInt32LittleEndian(payload[at..]);
+        at += 4;
+        return value;
+    }
+
+    private static long ReadLong(ReadOnlySpan<byte> payload, ref int at, string extensionName)
+    {
+        if (payload.Length - at < 8)
+        {
+            throw Corrupt(extensionName, "truncated data");
+        }
+
+        long value = BinaryPrimitives.ReadInt64LittleEndian(payload[at..]);
+        at += 8;
+        return value;
+    }
+
+    private static byte ReadByte(ReadOnlySpan<byte> payload, ref int at, string extensionName)
+    {
+        if (payload.Length - at < 1)
+        {
+            throw Corrupt(extensionName, "truncated data");
+        }
+
+        return payload[at++];
+    }
+
+    private static InvalidDataException Corrupt(string extensionName, string what)
+        => new($"Extension '{extensionName}': section '{SectionName}' holds {what}.");
 
     private static bool Before(FlowField a, FlowField b)
         => a.LastUsedTick != b.LastUsedTick ? a.LastUsedTick > b.LastUsedTick : a.Sequence < b.Sequence;

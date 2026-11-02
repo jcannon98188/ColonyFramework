@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Colony.ProcGen\Colony.ProcGen.csproj" />
     <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
   </ItemGroup>
 
 </Project>

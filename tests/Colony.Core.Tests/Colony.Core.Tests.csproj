@@ -3,13 +3,6 @@
   <PropertyGroup>
     <!-- Alignment tests take the address of column spans. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!--
-      Zero-allocation tests measure GC.GetAllocatedBytesForCurrentThread over a window; tiered
-      recompilation (OSR, PGO instrumentation) during that window allocates and made them flake under
-      the parallel whole-solution run. Fully optimised code from the first call removes the noise.
-    -->
-    <TieredCompilation>false</TieredCompilation>
-    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>

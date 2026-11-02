@@ -68,7 +68,9 @@ public enum FlowStepStatus : byte
 /// (<see cref="DistanceTo"/>, <see cref="TryStep"/>) are allocation free and safe from parallel chunk jobs:
 /// the Field only changes at sync points on the Tick thread (the Begin repair pass, host repairs). Between a
 /// terrain change and the repair, reads see the old distances but never step into a tile that is impassable
-/// now. Nothing here is hashed or saved: a loaded World has no flow Fields until they are asked for again.
+/// now. A dirty Field's old distances are observable by Systems, so the store saves which Fields exist, their
+/// recency and dirty marks, and the distances of the dirty ones (a clean Field is rebuilt on load); none of
+/// it is hashed, since it only changes what Systems compute, and that is hashed.
 /// </remarks>
 public sealed class FlowField
 {
@@ -443,6 +445,37 @@ public sealed class FlowField
     }
 
     internal void Evict() => IsEvicted = true;
+
+    // ---- save/load (store-side) ----
+
+    internal bool Used => Volatile.Read(ref _used) != 0;
+
+    internal int MissingSlot => _missingSlot;
+
+    internal ReadOnlySpan<byte> DirtyMarks => _dirty;
+
+    internal ReadOnlySpan<byte> UnloadedMarks => _unloaded;
+
+    /// <summary>Load: residency as the saved Field last saw it, before the rebuild of a clean Field or the restore of a dirty one.</summary>
+    internal void RestoreUnloaded(ReadOnlySpan<byte> unloaded) => unloaded.CopyTo(_unloaded);
+
+    /// <summary>Load: a Field saved dirty keeps its old distances and marks; its clean chunks are up to date with the labels as rebuilt.</summary>
+    internal void RestoreDirty(ReadOnlySpan<byte> dirty, long dirtySinceTick, int missingSlot)
+    {
+        int count = 0;
+        for (int slot = 0; slot < _ordinals.Length; slot++)
+        {
+            _dirty[slot] = dirty[slot];
+            _builtVersion[slot] = dirty[slot] != 0 ? -1 : _map.LabelVersionOf(_ordinals[slot]);
+            count += dirty[slot] != 0 ? 1 : 0;
+        }
+
+        DirtyChunkCount = count;
+        DirtySinceTick = dirtySinceTick;
+        _missingSlot = missingSlot;
+    }
+
+    internal void RestoreUsed(bool used) => Volatile.Write(ref _used, used ? 1 : 0);
 
     /// <summary>Whether a parallel read touched the Field since the last call (clears the flag).</summary>
     internal bool ConsumeUsed() => Interlocked.Exchange(ref _used, 0) != 0;

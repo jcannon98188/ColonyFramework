@@ -6,6 +6,9 @@ namespace Colony.Persistence;
 /// <summary>An Input Command as the replay header lists it: the registered name, size and layout hash, in the recording schema's id order.</summary>
 public readonly record struct SavedInputCommand(string Name, int Size, ulong LayoutHash);
 
+/// <summary>The content version of one extension of the recording schema (<see cref="WorldExtensionDefinition.Version"/>, e.g. the generation version).</summary>
+public readonly record struct SavedExtensionVersion(string Name, string Version);
+
 /// <summary>
 /// The mutable contents of a replay log shared by the recorder, the log and the builder: header fields,
 /// frames (ascending Tick, one per non-empty Tick), checkpoint hashes (ascending Tick) and embedded full
@@ -13,19 +16,23 @@ public readonly record struct SavedInputCommand(string Name, int Size, ulong Lay
 /// </summary>
 internal sealed class ReplayData
 {
-    public ulong Seed { get; set; }
+    /// <summary>Versions, build, Plugin set, schema hash, seed and tick rate of the recording (spec section 7.2).</summary>
+    public PeerIdentity Identity { get; set; } = new();
 
-    public ulong SchemaHash { get; set; }
+    public ulong Seed => Identity.Seed;
+
+    public ulong SchemaHash => Identity.SchemaHash;
 
     public long StartTick { get; set; }
 
     public long EndTick { get; set; }
 
-    public uint TickRate { get; set; }
+    public uint TickRate => Identity.TickRate;
 
     public List<SavedInputCommand> Inputs { get; } = [];
 
-    public List<string> Plugins { get; } = [];
+    /// <summary>Content versions of the recording schema's extensions that have one (the generation version, spec section 9.3).</summary>
+    public List<SavedExtensionVersion> ExtensionVersions { get; } = [];
 
     public SavedInputPermissions InputPermissions { get; set; } = SavedInputPermissions.Unrestricted;
 
@@ -35,11 +42,25 @@ internal sealed class ReplayData
 
     public List<(long Tick, byte[] Save)> Saves { get; } = [];
 
+    public static List<SavedExtensionVersion> ExtensionVersionsOf(WorldSchema schema)
+    {
+        var list = new List<SavedExtensionVersion>();
+        foreach (var e in schema.Extensions)
+        {
+            if (e.Version is { } version)
+            {
+                list.Add(new SavedExtensionVersion(e.Name, version));
+            }
+        }
+
+        return list;
+    }
+
     public ReplayData Copy(long? upToTick = null)
     {
-        var copy = new ReplayData { Seed = Seed, SchemaHash = SchemaHash, StartTick = StartTick, EndTick = upToTick ?? EndTick, TickRate = TickRate, InputPermissions = InputPermissions };
+        var copy = new ReplayData { Identity = Identity, StartTick = StartTick, EndTick = upToTick ?? EndTick, InputPermissions = InputPermissions };
         copy.Inputs.AddRange(Inputs);
-        copy.Plugins.AddRange(Plugins);
+        copy.ExtensionVersions.AddRange(ExtensionVersions);
         foreach (var f in Frames)
         {
             // The frame of Tick t is applied by Tick t, so a log truncated at T holds frames below T.
@@ -127,11 +148,9 @@ internal sealed class ReplayData
         {
             var w = new ByteWriter(256);
             w.WriteInt32(ReplayLog.Version);
-            w.WriteUInt64(Seed);
-            w.WriteUInt64(SchemaHash);
+            Identity.Write(w);
             w.WriteInt64(StartTick);
             w.WriteInt64(EndTick);
-            w.WriteUInt32(TickRate);
             w.WriteInt32(Inputs.Count);
             foreach (var input in Inputs)
             {
@@ -140,10 +159,11 @@ internal sealed class ReplayData
                 w.WriteUInt64(input.LayoutHash);
             }
 
-            w.WriteInt32(Plugins.Count);
-            foreach (var plugin in Plugins)
+            w.WriteInt32(ExtensionVersions.Count);
+            foreach (var extension in ExtensionVersions)
             {
-                w.WriteString(plugin);
+                w.WriteString(extension.Name);
+                w.WriteString(extension.Version);
             }
 
             // The Input permission table (TASK-35) trails the header only when one was declared, so unrestricted
@@ -205,11 +225,9 @@ internal sealed class ReplayData
                 throw new SaveFormatException($"Replay log version {version} is not supported by this build (version {ReplayLog.Version}).");
             }
 
-            data.Seed = r.ReadUInt64();
-            data.SchemaHash = r.ReadUInt64();
+            data.Identity = PeerIdentity.Read(ref r);
             data.StartTick = r.ReadInt64();
             data.EndTick = r.ReadInt64();
-            data.TickRate = r.ReadUInt32();
             int inputs = r.ReadCount(1);
             for (int i = 0; i < inputs; i++)
             {
@@ -218,10 +236,11 @@ internal sealed class ReplayData
                 data.Inputs.Add(new SavedInputCommand(name, size, r.ReadUInt64()));
             }
 
-            int plugins = r.ReadCount(1);
-            for (int i = 0; i < plugins; i++)
+            int extensions = r.ReadCount(8);
+            for (int i = 0; i < extensions; i++)
             {
-                data.Plugins.Add(r.ReadString());
+                string name = r.ReadString();
+                data.ExtensionVersions.Add(new SavedExtensionVersion(name, r.ReadString()));
             }
 
             if (r.Remaining > 0)
@@ -289,15 +308,17 @@ internal sealed class ReplayData
 }
 
 /// <summary>
-/// A recorded replay (spec section 7.2): header (seed, schema hash, Input Command table, Tick range, tick
-/// rate, Plugin set), the canonical input frame of every non-empty Tick, periodic checkpoint World hashes
+/// A recorded replay (spec section 7.2): header (the recording's <see cref="PeerIdentity"/>: Framework and
+/// format versions, build, Plugin set, schema hash, seed, tick rate; the extensions' content versions such as the
+/// generation version; the Input Command table and the Tick range), the canonical input frame of every non-empty Tick, periodic checkpoint World hashes
 /// and optional embedded full saves. Stored in the save container with the <c>replay</c>, <c>frames</c>,
 /// <c>checkpoints</c> and <c>save/&lt;tick&gt;</c> sections. Produced by <see cref="ReplayRecorder.Finish"/>
 /// or <see cref="Open(ReadOnlyMemory{byte})"/>; played by <see cref="ReplayPlayer"/>. Immutable; edit a copy through <see cref="ToBuilder"/>.
 /// </summary>
 public sealed class ReplayLog
 {
-    public const int Version = 1;
+    /// <summary>Format version: 2 put the recording's <see cref="PeerIdentity"/> and extension versions in the header (v1 logs are refused; v1 was never released).</summary>
+    public const int Version = 2;
     internal const string HeaderSection = "replay";
     internal const string FramesSection = "frames";
     internal const string CheckpointsSection = "checkpoints";
@@ -315,7 +336,7 @@ public sealed class ReplayLog
         _checkpointTicks = data.Checkpoints.Select(static c => c.Tick).ToArray();
         _saveTicks = data.Saves.Select(static s => s.Tick).ToArray();
         InputCommands = [.. data.Inputs];
-        Plugins = [.. data.Plugins];
+        ExtensionVersions = [.. data.ExtensionVersions];
     }
 
     public static ReplayLog Open(ReadOnlyMemory<byte> image) => new(ReplayData.Decode(new SaveContainer.Reader(image)));
@@ -350,8 +371,17 @@ public sealed class ReplayLog
 
     public ImmutableArray<SavedInputCommand> InputCommands { get; }
 
-    /// <summary>The Plugin set of the recording; empty until the Plugins package exists.</summary>
-    public ImmutableArray<string> Plugins { get; }
+    /// <summary>Who recorded the log: Framework and format versions, build, Plugin set, schema hash, seed and tick rate.</summary>
+    public PeerIdentity Identity => _data.Identity;
+
+    /// <summary>The Plugin set of the recording, in load order.</summary>
+    public ImmutableArray<PeerPlugin> Plugins => _data.Identity.Plugins;
+
+    /// <summary>False when the recording ran a Plugin that declared itself non-deterministic: its checkpoints carry no guarantee and <see cref="ReplayPlayer"/> refuses it.</summary>
+    public bool IsDeterministic => _data.Identity.IsDeterministic;
+
+    /// <summary>Content versions of the recording schema's extensions (the generation version, spec section 9.3).</summary>
+    public ImmutableArray<SavedExtensionVersion> ExtensionVersions { get; }
 
     /// <summary>The Input Command permission table of the recording schema (TASK-35); denied commands stay in the frames.</summary>
     public SavedInputPermissions InputPermissions => _data.InputPermissions;

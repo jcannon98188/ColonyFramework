@@ -49,9 +49,9 @@ namespace Game
             public MoveQuery(in global::Colony.ChunkView chunk, global::Colony.ComponentType positionType, global::Colony.ComponentType hungerType, global::Colony.ComponentType foodType)
             {
                 _chunk = chunk;
-                Position = chunk.Column<global::Game.Position>(positionType);
+                Position = chunk.ReadColumn<global::Game.Position>(positionType);
                 Hunger = chunk.Column<global::Game.Hunger>(hungerType);
-                Food = chunk.Column<global::Game.Food>(foodType);
+                Food = chunk.ReadColumn<global::Game.Food>(foodType);
             }
 
             /// <summary>Binds the query to a chunk by schema lookup; the generated entry passes the Component types directly instead.</summary>

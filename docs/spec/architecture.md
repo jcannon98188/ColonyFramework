@@ -53,13 +53,13 @@ Decided in "Decide package and assembly layout and public API shape". All packag
 Dependency rules, enforced by a CI dependency check:
 
 - `Core` depends only on the BCL.
-- `Fields`, `Persistence`, `Plugins` depend on `Core`.
-- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state).
+- `Fields` and `Persistence` depend on `Core`. `Plugins` depends on `Abstractions`, `Core`, `Fields` (Plugins register Fields) and `Persistence` (the C ABI loads and saves Worlds); ADR 0005.
+- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state). `Colony` also depends on `Pathfinding` for its reachability filters (ADR 0004).
 - `Diagnostics` plugs into `Core` through hook interfaces and struct callbacks; `Core` never references it.
 - Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery. Exceptions, decided at implementation: `Native` depends on `Plugins` (it hosts the C ABI, whose host lives in `Plugins`) and on whatever `Plugins` depends on; `Testing` may depend on `Core`, `Fields`, `Persistence` and `Plugins` (it exercises them); the `Colony` meta-package references `Core`, `Fields`, `Persistence`, `Pathfinding`, `Colony` and `ProcGen`, not `Plugins`, `Diagnostics` or `Testing`.
 - `Abstractions` depends only on the BCL. `Diagnostics` depends on `Core`, `Fields` and `Persistence` (it reads their counters and the replay log) and on nothing else; `Generators` depends only on Roslyn.
 
-Public vs internal: the public API is safe by default (typed handles, ref structs, Span views, generated typed queries). `unsafe` appears only in `internal` code, plus a small documented `[Experimental]` `Colony.Unsafe` namespace (raw chunk pointers for custom SIMD). `InternalsVisibleTo` is for tests only. No runtime reflection anywhere; no static state or singletons, so many Worlds can coexist in a process.
+Public vs internal: the public API is safe by default (typed handles, ref structs, Span views, generated typed queries). `unsafe` appears only in `internal` code, plus a small documented `[Experimental]` `Colony.Unsafe` namespace (raw chunk pointers for custom SIMD). `InternalsVisibleTo` is for tests only, with two exceptions recorded in ADR 0005: `Core` grants `Persistence` (exact save and restore of chunk memory, the Entity index, Resources and tables) and `Plugins` (layout-only registration and raw-byte access for the C ABI host). No runtime reflection anywhere; no static state or singletons, so many Worlds can coexist in a process. Three process-wide exceptions hold no simulation state and never decide an outcome (ADR 0005): the C ABI handle table (C code holds plain integers; World-owned handles are released when their World is disposed), the C ABI's per-thread last-error message (`colony_last_error`, C convention), and the `Colony-Diagnostics` EventSource (`EventSource` instances are process-wide by design). Read-only caches of immutable data are not state.
 
 ## 4. Core: data model, memory, scheduling
 
@@ -151,7 +151,7 @@ Fields sit behind a Field accessor and interface so storage can change without t
 
 ### 7.1 Save/load ("Decide save/load and versioning")
 
-- A save is a snapshot of canonical chunk memory (little-endian, CPU-independent layout) in a single sectioned container: header, manifest (schema, Plugin set, Tick, World hash, seed), table of contents, one section per Field chunk and per archetype. Rebuildable state (spatial index, Relation index, change versions, caches, work index, region caches) is not saved.
+- A save is a snapshot of canonical chunk memory (little-endian, CPU-independent layout) in a single sectioned container: header, manifest (schema, Plugin set, Tick, World hash, seed), table of contents, one section per Field chunk and per archetype. Rebuildable state (spatial index, Relation index, change versions, caches, work index, region caches) is not saved. The exception is the flow Field store: which Fields exist, their recency and their pending repairs decide what later Ticks compute (a starved repair budget leaves a Field stale; LRU eviction depends on recency), so it is saved, not hashed, and a load continues with the same dirty Fields and eviction order (clean Fields are rebuilt). For the same reason host reads between Ticks are pure: `PathfindingService.FlowField(goals, movementClass)` there returns the Field as it is, without repair or a recency touch; `Repair` is the explicit, simulation-affecting call.
 - **Schema and migration:** the save embeds a schema table. Matching layout hashes bulk-copy; mismatches run registered per-Component migrations N to N+1 (chained). No migration means a clear failure. Framework Components have Framework migrations from 1.0; none promised during 0.x.
 - **Resource and extension migrations:** every persisted shape is migratable the same way. Persistent Resources (values and event queues) are keyed by name and layout hash like Components; a value migrates once, a queue record by record, and a Resource's kind (value or queue) cannot change. Each extension (Fields, pathfinding, residency, generation, ...) stamps its sections with a format version recorded in the manifest; an older save is brought forward by registered per-extension migrations N to N+1 (chained, rewriting the sections before the extension loads them), a newer save is refused naming the extension and both versions. An extension's layout hash (what state exists) must still match; a format migration changes only how that state is written, so a state-preserving one keeps the World hash verifiable. A missing step fails naming the Component, Resource or extension and the layout or version it stopped at.
 - **Plugin set** is in the manifest; a missing Plugin fails by default, with an opt-in "drop unknown Components" mode.
@@ -290,6 +290,15 @@ for (int tick = 0; tick < 1000; tick++) world.Tick();
 world.Save("colony.save", SaveOptions.Default);
 Console.WriteLine(world.Hash());               // identical on every machine
 ```
+
+The sketch as it compiles is `samples/HelloColony/Sketch.cs`; `SpecSketchDocTests` diffs the two line by line and fails on any drift beyond these exact deviations:
+
+- **Fields:** there is no `[Field]` attribute; `Heat` is a plain `public struct`, registered by name on the Fields builder: `builder.AddFields(new WorldSize(64, 64, 1)).AddField<Heat>("heat")` replaces `.AddField<Heat>()`.
+- **Phase in attributes:** `[System(NamedPhase.Simulate, Every = 1)]`, since an attribute argument must be a constant and `Phase` is not one.
+- **Systems:** the generator emits `ColonySystems.AddSystems(builder)`, a statement, so the chain breaks into `var builder = ...;`, `ColonySystems.AddSystems(builder);` and `var schema = builder.Build();` in place of `.AddSystems<ColonySystems>()`.
+- **Seed:** a World option, `schema.CreateWorld(new WorldOptions { Seed = 12345 })`, not `.Seed(12345)` on the builder (the seed is per World, the schema is shared).
+- **Creating Entities:** through a command buffer: `var commands = world.CreateCommandBuffer();`, `commands.Create(ComponentMask.Of(schema.Component<Hunger>()))` in the loop, then `world.Playback(commands);`. There is no `world.Create(new Hunger())`.
+- The compiled sketch also ends with `return world.Hash();` so the doc test can check the run.
 
 ## 12. GPU: deferred, with a seam
 

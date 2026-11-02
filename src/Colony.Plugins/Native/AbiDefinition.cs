@@ -81,6 +81,8 @@ internal static unsafe class AbiDefinition
             [("uint32_t", "source"), ("uint32_t", "sequence"), ("int32_t", "type"), ("int32_t", "size"), ("const void*", "payload"), ("colony_random", "random")]),
         new("colony_definition_field", sizeof(ColonyDefinitionField), "One field of a Definition type registered by layout: the JSON name, a COLONY_FIELD_* kind and the byte offset.",
             [("const char*", "name"), ("int32_t", "kind"), ("int32_t", "offset")]),
+        new("colony_component_range", sizeof(ColonyComponentRange), "One run of data bytes of a Component registered by layout (register_component_data); bytes outside every range are padding.",
+            [("int32_t", "offset"), ("int32_t", "size")]),
         new("colony_system_desc", sizeof(ColonySystemDesc), "A Native System with its access declared in data. phase is \"Streaming\", \"Input\", \"Begin\", \"Simulate\" (the default when NULL), \"Late\", \"End\" or a Game Phase's name; reads are the Component ids whose columns for_each_chunk receives; with/without filter the query; emits are the event queues it may emit; after/before name Systems.",
             [("const char*", "name"), ("const char*", "phase"), ("const int32_t*", "reads"), ("int32_t", "reads_count"), ("const int32_t*", "with"), ("int32_t", "with_count"),
              ("const int32_t*", "without"), ("int32_t", "without_count"), ("const int32_t*", "reads_resources"), ("int32_t", "reads_resources_count"), ("const int32_t*", "emits"), ("int32_t", "emits_count"),
@@ -160,7 +162,7 @@ internal static unsafe class AbiDefinition
         E("commands_destroy_entity", nameof(AbiEntries.CommandsDestroyEntity), (nint)(delegate* unmanaged<nint, ulong, int>)&AbiEntries.CommandsDestroyEntity, null, "colony_commands* commands", "uint64_t entity"),
         E("commands_add", nameof(AbiEntries.CommandsAdd), (nint)(delegate* unmanaged<nint, ulong, int, void*, int, int>)&AbiEntries.CommandsAdd, "Records an Add (or overwrite) of size bytes; the only way to write a Component.", "colony_commands* commands", "uint64_t entity", "int32_t component", "const void* value", "int32_t size"),
         E("commands_remove", nameof(AbiEntries.CommandsRemove), (nint)(delegate* unmanaged<nint, ulong, int, int>)&AbiEntries.CommandsRemove, null, "colony_commands* commands", "uint64_t entity", "int32_t component"),
-        E("commands_emit", nameof(AbiEntries.CommandsEmit), (nint)(delegate* unmanaged<nint, int, void*, int, int>)&AbiEntries.CommandsEmit, "Records an event of size bytes for queue (a System must list it in emits).", "colony_commands* commands", "int32_t queue", "const void* value", "int32_t size"),
+        E("commands_emit", nameof(AbiEntries.CommandsEmit), (nint)(delegate* unmanaged<nint, int, void*, int, int>)&AbiEntries.CommandsEmit, "Records an event of size bytes for queue. On a System's job buffer (colony_context.commands) the queue must be one the System listed in emits, or the call fails; a host buffer from world_create_commands may emit on any event queue.", "colony_commands* commands", "int32_t queue", "const void* value", "int32_t size"),
         E("commands_resolve", nameof(AbiEntries.CommandsResolve), (nint)(delegate* unmanaged<nint, ulong, ulong*, int>)&AbiEntries.CommandsResolve, "The real Entity id of a deferred handle after the buffer's playback.", "colony_commands* commands", "uint64_t deferred", "uint64_t* out_entity"),
         // context
         E("context_events", nameof(AbiEntries.ContextEvents), (nint)(delegate* unmanaged<ColonyContext*, int, void**, int*, int>)&AbiEntries.ContextEvents, "The pending events of a queue the System listed in reads_resources or emits.", "const colony_context* context", "int32_t queue", "const void** out_data", "int32_t* out_count"),
@@ -173,6 +175,8 @@ internal static unsafe class AbiDefinition
         E("random_i32", nameof(AbiEntries.RandomI32), (nint)(delegate* unmanaged<ColonyRandom*, ulong, int, int, int*, int>)&AbiEntries.RandomI32, "A draw in [min_inclusive, max_exclusive).", "const colony_random* random", "uint64_t counter", "int32_t min_inclusive", "int32_t max_exclusive", "int32_t* out_value"),
         // errors
         E("last_error", nameof(AbiEntries.LastError), (nint)(delegate* unmanaged<byte*, int, int*, int>)&AbiEntries.LastError, "The message of the last failing call on this thread, UTF-8, NUL-terminated when it fits.", "char* buffer", "int32_t capacity", "int32_t* out_length"),
+        // registration (appended: order is ABI)
+        E("register_component_data", nameof(AbiEntries.RegisterComponentData), (nint)(delegate* unmanaged<nint, int, ColonyComponentRange*, int, int>)&AbiEntries.RegisterComponentData, "Declares the data bytes of a Component registered by layout; every other byte is padding and is zeroed where values enter the World (the World hash excludes padding). Without it a value's bytes are taken verbatim, so zero your padding.", "colony_registration* registration", "int32_t component", "const colony_component_range* ranges", "int32_t count"),
     ];
 
     private static AbiEntry E(string name, string methodName, nint address, string? summary, params string[] parameters)

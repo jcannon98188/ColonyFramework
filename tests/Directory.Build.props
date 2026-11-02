@@ -6,6 +6,14 @@
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
     <IsTestProject>true</IsTestProject>
+    <!--
+      Zero-allocation gates measure GC.GetAllocatedBytesForCurrentThread over a window; tiered recompilation
+      (OSR, PGO instrumentation) inside that window allocates and made them flake under the parallel
+      whole-solution run. Every test project runs fully optimised code from the first call (TASK-42; it used to
+      be set per project and Colony.Testing.Tests, Fields, Generated and ProcGen lacked it).
+    -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
 </Project>

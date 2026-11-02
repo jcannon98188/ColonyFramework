@@ -16,6 +16,7 @@ public readonly ref struct ChunkView
     private readonly bool _validate;
     private readonly bool _checkAccess;
     private readonly ComponentMask _access;
+    private readonly ComponentMask _writes;
     private readonly string? _systemName;
     private readonly World? _host;
 
@@ -30,12 +31,18 @@ public readonly ref struct ChunkView
         _host = host;
     }
 
-    /// <summary>A view for a System job that also checks every column taken against the System's declared access set (spec section 10.1, validation switches).</summary>
-    internal ChunkView(Archetype archetype, int chunkIndex, bool validate, ComponentMask access, string systemName)
+    /// <summary>
+    /// A view for a System job that also checks every column taken against the System's declared access set (spec
+    /// section 10.1, validation switches): <paramref name="access"/> (Reads and Writes) for reads,
+    /// <paramref name="writes"/> for writable columns and enable bits. Buffer accessors are checked against
+    /// <paramref name="access"/> only, since they also serve reads (TASK-42).
+    /// </summary>
+    internal ChunkView(Archetype archetype, int chunkIndex, bool validate, ComponentMask access, ComponentMask writes, string systemName)
         : this(archetype, chunkIndex, validate)
     {
         _checkAccess = true;
         _access = access;
+        _writes = writes;
         _systemName = systemName;
     }
 
@@ -73,7 +80,7 @@ public readonly ref struct ChunkView
     public Span<T> Column<T>(ComponentType type) where T : unmanaged
     {
         Validate();
-        int offset = Offset<T>(type);
+        int offset = Offset<T>(type, write: true);
         StampHostWrite(type);
         return Span<T>(offset, Count);
     }
@@ -82,7 +89,7 @@ public readonly ref struct ChunkView
     public ReadOnlySpan<T> ReadColumn<T>(ComponentType type) where T : unmanaged
     {
         Validate();
-        return Span<T>(Offset<T>(type), Count);
+        return Span<T>(Offset<T>(type, write: false), Count);
     }
 
     /// <summary>
@@ -93,14 +100,14 @@ public readonly ref struct ChunkView
     public Span<T> PaddedColumn<T>(ComponentType type) where T : unmanaged
     {
         Validate();
-        int offset = Offset<T>(type);
+        int offset = Offset<T>(type, write: true);
         StampHostWrite(type);
         return Span<T>(offset, PaddedCount);
     }
 
     private void StampHostWrite(ComponentType type)
     {
-        if (_host is { InEngine: false } host)
+        if (_host is { InTickOrBatch: false } host)
         {
             host.StampHostColumn(_archetype, ChunkIndex, type.Id);
         }
@@ -155,6 +162,7 @@ public readonly ref struct ChunkView
             throw new ArgumentOutOfRangeException(nameof(row));
         }
 
+        CheckWrite(type, "flips the enable bit of");
         _archetype.SetEnabled(ChunkIndex, Column(type), row, enabled);
     }
 
@@ -228,11 +236,16 @@ public readonly ref struct ChunkView
         return (byte*)_pointer + offset;
     }
 
-    private int Offset<T>(ComponentType type) where T : unmanaged
+    private int Offset<T>(ComponentType type, bool write) where T : unmanaged
     {
         if (_checkAccess && !_access.Contains(type))
         {
             throw new InvalidOperationException($"System '{_systemName}' takes the column of {type}, which it declares in neither Reads nor Writes.");
+        }
+
+        if (write)
+        {
+            CheckWrite(type, "takes the writable column of");
         }
 
         int offset = _archetype.OffsetOf(type.Id);
@@ -247,6 +260,15 @@ public readonly ref struct ChunkView
         }
 
         return offset;
+    }
+
+    private void CheckWrite(ComponentType type, string what)
+    {
+        if (_checkAccess && !_writes.Contains(type))
+        {
+            string declared = _access.Contains(type) ? "declares only in Reads (use ReadColumn to read it)" : "declares in neither Reads nor Writes";
+            throw new InvalidOperationException($"System '{_systemName}' {what} {type}, which it {declared}.");
+        }
     }
 
     private void Validate()

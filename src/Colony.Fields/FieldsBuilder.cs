@@ -134,7 +134,10 @@ public sealed class FieldsBuilder : WorldExtensionDefinition
         return new FieldSet(world, _layout!, _fields, _cellTypes, _initialValues);
     }
 
-    /// <summary>The offset of the value equals the natural alignment of <typeparamref name="T"/>.</summary>
+    /// <summary>
+    /// The offset of the value equals the natural alignment of <typeparamref name="T"/>. A copy of Core's internal
+    /// <c>NaturalAlignment</c>: Fields has no access to Core internals (ADR 0005).
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct AlignmentProbe<T>
         where T : unmanaged

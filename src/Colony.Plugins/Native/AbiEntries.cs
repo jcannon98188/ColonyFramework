@@ -109,6 +109,32 @@ internal static unsafe class AbiEntries
     }
 
     [UnmanagedCallersOnly]
+    public static int RegisterComponentData(nint registration, int component, ColonyComponentRange* ranges, int count)
+    {
+        try
+        {
+            var r = Registration(registration);
+            if (count < 0 || (count > 0 && ranges == null))
+            {
+                return ColonyAbi.Invalid("ranges is null or count is negative.");
+            }
+
+            var list = new (int Offset, int Size)[count];
+            for (int i = 0; i < count; i++)
+            {
+                list[i] = (ranges[i].Offset, ranges[i].Size);
+            }
+
+            r.Registration.Builder.DeclareComponentData(new ComponentType(component), list);
+            return ColonyAbi.Ok;
+        }
+        catch (Exception e)
+        {
+            return ColonyAbi.Fail(e);
+        }
+    }
+
+    [UnmanagedCallersOnly]
     public static int RegisterResource(nint registration, byte* name, int size, int alignment, uint flags, int* outId)
     {
         try
@@ -615,7 +641,7 @@ internal static unsafe class AbiEntries
                 WorkerThreads = Math.Max(workers, 0),
                 InitialEntityCapacity = initialCapacity > 0 ? initialCapacity : WorldOptions.Default.InitialEntityCapacity,
             });
-            *outWorld = NativeHandles.GetOrAdd(world);
+            *outWorld = NativeHandles.GetOrAdd(world, world);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -635,7 +661,7 @@ internal static unsafe class AbiEntries
             }
 
             var world = WorldPersistence.Load(Utf8Strings.ReadRequired(path, "path"), Schema(schema).Schema);
-            *outWorld = NativeHandles.GetOrAdd(world);
+            *outWorld = NativeHandles.GetOrAdd(world, world);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -841,7 +867,8 @@ internal static unsafe class AbiEntries
                 return ColonyAbi.Invalid("out_commands is null.");
             }
 
-            *outCommands = NativeHandles.GetOrAdd(World(world).CreateCommandBuffer());
+            var owner = World(world);
+            *outCommands = NativeHandles.GetOrAdd(owner.CreateCommandBuffer(), owner);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -1027,7 +1054,10 @@ internal static unsafe class AbiEntries
         try
         {
             var buffer = Commands(commands);
-            buffer.EmitRaw(Resource(buffer.World.Schema, queue), (byte*)value, size);
+            var schema = buffer.World.Schema;
+            var type = Resource(schema, queue);
+            CheckDeclaredEmit(buffer, schema, type);
+            buffer.EmitRaw(type, (byte*)value, size);
             return ColonyAbi.Ok;
         }
         catch (Exception e)
@@ -1221,6 +1251,26 @@ internal static unsafe class AbiEntries
     private static NativeSchema Schema(nint handle) => NativeHandles.Get<NativeSchema>(handle, "colony_schema");
 
     private static World World(nint handle) => NativeHandles.Get<World>(handle, "colony_world");
+
+    /// <summary>
+    /// A System's job command buffer emits only on the queues the System declared in <c>emits</c>
+    /// (<see cref="SystemDefinition.WritesResources"/>), as <see cref="SystemContext.Emit{T}"/> requires of C# Systems
+    /// (TASK-42). A host buffer (<see cref="CommandBuffer.OwnerSystemId"/> -1) belongs to no System and is not checked.
+    /// </summary>
+    private static void CheckDeclaredEmit(CommandBuffer buffer, WorldSchema schema, ResourceType queue)
+    {
+        int owner = buffer.OwnerSystemId;
+        if (owner < 0)
+        {
+            return;
+        }
+
+        var definition = schema.Schedule.Definitions[owner];
+        if (!definition.WritesResources.Contains(queue))
+        {
+            throw new InvalidOperationException($"System '{definition.Name}' emits {schema.DescribeResource(queue).Name} without declaring it in emits.");
+        }
+    }
 
     private static CommandBuffer Commands(nint handle) => NativeHandles.Get<CommandBuffer>(handle, "colony_commands");
 

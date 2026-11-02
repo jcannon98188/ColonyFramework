@@ -303,12 +303,22 @@ internal sealed class ClaimResolver : IIndexedJob
         public bool Granted;
     }
 
-    /// <summary>Total order inside a bucket: target slot, then priority key (ascending), then claimant id.</summary>
+    /// <summary>
+    /// Total order inside a bucket: target slot, then target generation (a slot reused within the round keeps
+    /// one contiguous group per Entity, which <see cref="Execute"/> relies on), then priority key (ascending),
+    /// then claimant id.
+    /// </summary>
     private readonly struct PendingComparer : IComparer<Pending>
     {
         public int Compare(Pending x, Pending y)
         {
             int c = x.Target.Index.CompareTo(y.Target.Index);
+            if (c != 0)
+            {
+                return c;
+            }
+
+            c = x.Target.Generation.CompareTo(y.Target.Generation);
             if (c != 0)
             {
                 return c;

@@ -161,6 +161,11 @@ static int plugin_register(void* user_data, colony_registration* r)
     int32_t found;
     CHECK(CALL(REGISTER_COMPONENT, register_component, r, "native.position", (int32_t)sizeof(position), 4, 0, &g_ids.position));
     CHECK(CALL(REGISTER_COMPONENT, register_component, r, "native.velocity", (int32_t)sizeof(velocity), 4, 0, &g_ids.velocity));
+    {
+        /* position has no padding: declaring its data bytes changes nothing but documents the call. */
+        const colony_component_range position_data[2] = { { 0, 4 }, { 4, 4 } };
+        CHECK(CALL(REGISTER_COMPONENT_DATA, register_component_data, r, g_ids.position, position_data, 2));
+    }
     CHECK(CALL(REGISTER_RESOURCE, register_resource, r, "native.config", (int32_t)sizeof(config), 4, 0, &g_ids.config));
     CHECK(CALL(REGISTER_EVENT, register_event, r, "native.moved", (int32_t)sizeof(moved), 8, 0, &g_ids.moved));
     CHECK(CALL(REGISTER_EVENT, register_event, r, "native.summary", (int32_t)sizeof(summary), 4, COLONY_EVENT_PERSISTENT, &g_ids.summary));

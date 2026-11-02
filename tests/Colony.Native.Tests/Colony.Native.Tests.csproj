@@ -9,8 +9,6 @@
 
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <TieredCompilation>false</TieredCompilation>
-    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>

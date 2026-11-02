@@ -425,7 +425,7 @@ public sealed class ChunkResidencyManager : IWorldExtension
 
     internal void CollectMovers(in SystemContext context, in ChunkView chunk)
     {
-        var positions = chunk.Column<TilePos>(_tilePos);
+        var positions = chunk.ReadColumn<TilePos>(_tilePos);
         var ids = chunk.Entities;
         var movers = _movers[context.JobIndex];
         foreach (int row in chunk.EnabledRows(_tilePos))

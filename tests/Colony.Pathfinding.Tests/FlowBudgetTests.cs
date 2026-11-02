@@ -28,7 +28,7 @@ public sealed class FlowBudgetTests
     }
 
     [Fact]
-    public void Past_the_memory_budget_the_least_recently_used_field_is_evicted_first()
+    public void Past_the_memory_budget_the_least_recently_used_field_is_evicted_first_and_host_reads_do_not_count_as_use()
     {
         // Three chunks per Field (radius 1 on a 1-high plane row), budget for two of them.
         long one = FlowField.BytesFor(3, 1);
@@ -39,24 +39,24 @@ public sealed class FlowBudgetTests
         world.Tick();
         var second = service.FlowField([new(60, 5, 0)], walker, radiusChunks: 1);
         world.Tick();
-        _ = service.FlowField([new(20, 5, 0)], walker, radiusChunks: 1); // touch the first: now the second is the oldest
+        Assert.Same(first, service.FlowField([new(20, 5, 0)], walker, radiusChunks: 1)); // a host read between Ticks: not a use
         world.Tick();
         var third = service.FlowField([new(100, 5, 0)], walker, radiusChunks: 1);
 
-        Assert.True(second.IsEvicted);
-        Assert.False(first.IsEvicted);
+        Assert.True(first.IsEvicted);
+        Assert.False(second.IsEvicted);
         Assert.False(third.IsEvicted);
-        Assert.Null(service.FlowField(second.Id));
-        Assert.Equal(FlowStepStatus.Evicted, second.TryStep(new TilePos(60, 5, 0), out _));
-        Assert.Equal(-1, second.DistanceTo(new TilePos(60, 5, 0)));
+        Assert.Null(service.FlowField(first.Id));
+        Assert.Equal(FlowStepStatus.Evicted, first.TryStep(new TilePos(20, 5, 0), out _));
+        Assert.Equal(-1, first.DistanceTo(new TilePos(20, 5, 0)));
         Assert.Equal(2, service.FlowFieldCount);
         Assert.True(service.FlowFieldBytes <= 2 * one);
         Assert.Equal(1, service.FlowCounters.Evicted);
 
-        // Asking again rebuilds it (and evicts the first, the oldest now).
-        var again = service.FlowField([new(60, 5, 0)], walker, radiusChunks: 1);
-        Assert.NotSame(second, again);
-        Assert.True(first.IsEvicted);
+        // Asking again rebuilds it (and evicts the second, the oldest now).
+        var again = service.FlowField([new(20, 5, 0)], walker, radiusChunks: 1);
+        Assert.NotSame(first, again);
+        Assert.True(second.IsEvicted);
     }
 
     [Fact]

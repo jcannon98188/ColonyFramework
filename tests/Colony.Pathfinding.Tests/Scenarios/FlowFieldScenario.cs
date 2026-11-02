@@ -54,6 +54,9 @@ public sealed class FlowFieldScenario : Testing.Scenario
     /// <summary>Budget for one Field fewer than <see cref="GoalSets"/>, so the least recently used one is evicted and rebuilt every Tick.</summary>
     public bool TightBudget { get; init; }
 
+    /// <summary>Per-Tick flow repair budget in work units; null keeps the default. A starved budget defers repairs, so Systems read dirty Fields.</summary>
+    public long? RepairBudgetPerTick { get; init; }
+
     public override int InitialEntityCapacity => Agents * 2;
 
     public MovementClass Walker => _state.Walker;
@@ -72,6 +75,10 @@ public sealed class FlowFieldScenario : Testing.Scenario
         var options = TightBudget
             ? new PathfindingOptions { FlowFieldMemoryBudgetBytes = (GoalSets - 1) * FlowField.BytesFor(widest, GoalsPerSet) }
             : new PathfindingOptions();
+        if (RepairBudgetPerTick is { } repairBudget)
+        {
+            options = options with { FlowRepairBudgetPerTick = repairBudget };
+        }
         var pathfinding = builder.AddPathfinding(fields, options);
         var walker = pathfinding.AddMovementClass(new MovementClassDefinition("walker", Passability.OfField(terrain, PrototypeTerrain.Walkable))
         {
@@ -117,6 +124,9 @@ public sealed class FlowFieldScenario : Testing.Scenario
         world.ResetScratch();
         world.Pathfinding().EnsureBuilt(_state.Walker);
     }
+
+    /// <summary>The goals of one goal set (what a renderer would ask the service for between Ticks).</summary>
+    public ReadOnlySpan<TilePos> GoalsOf(int set) => _state.GoalsOf(set);
 
     /// <summary>Totals over every agent.</summary>
     public (long Steps, long Reached, long Lost) Totals(World world)
@@ -194,6 +204,8 @@ public sealed class FlowFieldScenario : Testing.Scenario
                 }
             }
         }
+
+        public ReadOnlySpan<TilePos> GoalsOf(int set) => _goals[set];
 
         public TilePos TileAt(int index)
         {

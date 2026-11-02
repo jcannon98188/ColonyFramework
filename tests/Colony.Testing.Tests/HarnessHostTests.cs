@@ -75,5 +75,8 @@ public sealed class HarnessHostTests
 
         long? streaming = PublishedHost.CompareWithJit(exe, new StreamingScenario(), Options, out _, out _);
         Assert.True(streaming is null, $"streaming: AOT diverged from JIT at Tick {streaming}");
+
+        long? restricted = PublishedHost.CompareWithJit(exe, new InputScenario { Restricted = true }, Options, out _, out _);
+        Assert.True(restricted is null, $"inputs-restricted: AOT diverged from JIT at Tick {restricted}");
     }
 }

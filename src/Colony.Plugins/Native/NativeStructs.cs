@@ -97,6 +97,14 @@ internal unsafe struct ColonyInput
     public ColonyRandom Random;
 }
 
+/// <summary><c>colony_component_range</c>: one run of data bytes of a Component registered by layout.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct ColonyComponentRange
+{
+    public int Offset;
+    public int Size;
+}
+
 /// <summary><c>colony_definition_field</c>: one field of a Definition type registered by layout.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct ColonyDefinitionField
