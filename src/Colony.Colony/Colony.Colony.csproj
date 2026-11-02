@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Colony: the colony-sim building blocks of spec section 9.2. TASK-22 ships Claims (a built-in
+    Relation with capacity, two-phase propose/resolve), decision scheduling (hashed cadence, per-System budget)
+    and the replaceable anti-thrash policy; TASK-23 ships the work index (per work type, per Fields chunk),
+    the hauling matcher and the priority-table and utility chooser helpers.
+    Depends on Colony.Core, Colony.Fields and Colony.Pathfinding (spec section 3 allows Core, Fields and
+    Persistence; ADR 0004 adds Pathfinding for the shipped reachability filters, TASK-41); enforced by
+    tools/Colony.DependencyCheck. Namespace is Colony.Jobs: a Colony.Colony namespace would shadow the
+    root Colony namespace inside every file of the package.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework colony-sim building blocks: Claims, decision scheduling, anti-thrash policies, work index, hauling matcher and chooser helpers.</Description>
+    <RootNamespace>Colony.Jobs</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+    <ProjectReference Include="..\Colony.Pathfinding\Colony.Pathfinding.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Colony.Tests" />
+  </ItemGroup>
+
+</Project>

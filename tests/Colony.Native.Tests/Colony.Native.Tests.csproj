@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    C ABI conformance (spec sections 8 and 10.3; TASK-28): the committed colony.h against the ABI definition,
+    the C conformance host (Conformance/conformance.c, compiled on the fly with the machine's C compiler and loaded
+    in-process on JIT; run as a standalone executable against the published Native AOT Colony.Native), and the
+    determinism harness over a Native Plugin System and its C# twin.
+  -->
+
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Native\Colony.Native.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Plugins\Colony.Plugins.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+    <ProjectReference Include="..\..\src\Colony.Testing\Colony.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The C sources are located by source path (CallerFilePath), not copied. -->
+    <None Include="Conformance\**" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Fields\Colony.Fields.csproj" />
+    <!-- Save/load round trips of streaming state (TASK-27). -->
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

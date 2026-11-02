@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Plugins\Colony.Plugins.csproj" />
+    <!-- The Plugin set and System overrides travel in the save manifest (AC #3, #5). -->
+    <ProjectReference Include="..\..\src\Colony.Persistence\Colony.Persistence.csproj" />
+  </ItemGroup>
+
+</Project>

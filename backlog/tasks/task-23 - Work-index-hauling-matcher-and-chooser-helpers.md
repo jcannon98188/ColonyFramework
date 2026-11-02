@@ -1,9 +1,11 @@
 ---
 id: TASK-23
 title: 'Work index, hauling matcher and chooser helpers'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-11-01 16:27'
 labels:
   - ready-for-agent
   - implementation
@@ -30,8 +32,20 @@ Spec section 9.2: a per-work-type, per-chunk work index of available work items 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Nearest N available work items of given types within a radius return in deterministic order and respect Reachable for the requesting movement class
-- [ ] #2 The work index updates in the Late Phase from the change feed and is rebuilt on load (not saved)
-- [ ] #3 The hauling matcher produces haul work items from supply and demand deterministically
-- [ ] #4 Priority-table and utility helpers are allocation-free and covered by unit tests
+- [x] #1 Nearest N available work items of given types within a radius return in deterministic order and respect Reachable for the requesting movement class
+- [x] #2 The work index updates in the Late Phase from the change feed and is rebuilt on load (not saved)
+- [x] #3 The hauling matcher produces haul work items from supply and demand deterministically
+- [x] #4 Priority-table and utility helpers are allocation-free and covered by unit tests
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Work index mirrors SpatialIndex (intrusive per-slot lists, bucket = chunk x work type), Late System update, unhashed/unsaved, rebuilt on load. Reachability is a seam (IWorkFilter/IHaulFilter) because Colony.Colony may not reference Colony.Pathfinding; adapter over Reachable is test-side only. Hauling matcher greedy O(demands x supplies). Follow-ups: ready-made reachability adapter needs a dependency-table decision or glue package; bucketed supply scan optimisation; no AOT scenario.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Work index with reachability filter seam, hauling matcher and chooser/utility helpers merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,0 +1,54 @@
+<Project>
+
+  <!--
+    Shared build settings for every project in the solution (spec sections 3 and 14).
+    Subdirectories (src/, tests/, tools/) layer their own Directory.Build.props on top of this one.
+    prototypes/ has its own Directory.Build.props that does NOT import this file; prototypes are
+    never built by the solution.
+  -->
+
+  <PropertyGroup Label="Versioning">
+    <!-- Lockstep SemVer 0.x across all packages (spec section 3). -->
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <Authors>Colony Framework contributors</Authors>
+    <Company>Colony Framework</Company>
+    <Product>Colony Framework</Product>
+    <Copyright>Copyright (c) Colony Framework contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/jcannon98188/ColonyFramework</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Language">
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <!-- unsafe is opt-in per project; spec section 3 confines it to internal Framework code. -->
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Diagnostics">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningLevel>9999</WarningLevel>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>Recommended</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <CodeAnalysisTreatWarningsAsErrors>true</CodeAnalysisTreatWarningsAsErrors>
+    <!-- CS1591: missing XML doc comment. Public API is documented when it exists; stubs are not. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- COL1001-COL1007 (determinism, spec section 6) and COL2001-COL2007 (generator shapes and access sets, spec section 11) are errors even if an .editorconfig lowers
+         them to warnings. Opt out per site with [Colony.AllowNonDeterministic("why")] or #pragma warning disable. -->
+    <WarningsAsErrors>$(WarningsAsErrors);COL1001;COL1002;COL1003;COL1004;COL1005;COL1006;COL1007;COL2001;COL2002;COL2003;COL2004;COL2005;COL2006;COL2007</WarningsAsErrors>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Repo layout">
+    <ColonyRepoRoot>$(MSBuildThisFileDirectory)</ColonyRepoRoot>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+  </PropertyGroup>
+
+</Project>

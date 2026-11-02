@@ -61,7 +61,7 @@ An interchangeable implementation of GPU compute behind the Framework's GPU abst
 _Avoid_: Driver, renderer
 
 **Migration**:
-A piece of code that converts saved Component data from an older layout to the current one when a save is loaded.
+A piece of code that converts saved Component or Resource data from an older layout, or an extension's saved sections from an older format version, to the current one when a save is loaded.
 _Avoid_: Upgrade, patch, converter
 
 **Kernel**:
@@ -91,3 +91,7 @@ _Avoid_: Loading state, LOD
 **Pinned Entity**:
 An Entity that stays loaded and simulated regardless of which chunks are resident.
 _Avoid_: Persistent, global entity
+
+**Lockstep session**:
+The transport-free state machine (`LockstepSession`) that exchanges input frames, acks and checkpoint hashes between peers as bytes, so every peer runs the same Ticks with the same Input Commands; the Game supplies the transport.
+_Avoid_: Netcode, network layer, connection

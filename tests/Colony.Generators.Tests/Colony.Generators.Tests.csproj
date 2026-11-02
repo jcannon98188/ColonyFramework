@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Analyzer tests compile small C# snippets in-process with Roslyn and run the Colony analyzers over them
+    (AnalyzerHarness). No Microsoft.CodeAnalysis.*.Testing packages: they download reference assemblies at test
+    time; the harness references the test host's own runtime assemblies instead.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Generators\Colony.Generators.csproj" />
+    <!-- Only to prove the real marker attributes match the names the analyzers key on. -->
+    <ProjectReference Include="..\..\src\Colony.Core\Colony.Core.csproj" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Generator snapshots are compared as text by GeneratorHarness, never compiled. -->
+    <Compile Remove="Snapshots\**" />
+    <None Include="Snapshots\**" />
+  </ItemGroup>
+
+</Project>

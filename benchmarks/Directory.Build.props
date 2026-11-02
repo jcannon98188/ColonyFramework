@@ -1,0 +1,21 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!--
+    Benchmarks (spec section 10.3 and 14): BenchmarkDotNet micro-benchmarks and the custom Tick harness.
+    Never referenced by src/, never shipped. They link the shared scenario sources from tests/ (the colonist
+    oracle, the Field scenario), which are public types with public-field Components, so the same analyzer
+    suppressions as the test projects apply here (see the root Directory.Build.targets).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>Colony.Benchmarks</RootNamespace>
+    <!-- CA1515 (make types internal): BenchmarkDotNet needs public benchmark classes and the linked scenarios are public.
+         CA1051/CA1815: linked test Components are plain public-field structs. -->
+    <NoWarn>$(NoWarn);CA1515;CA1051;CA1815</NoWarn>
+  </PropertyGroup>
+
+</Project>

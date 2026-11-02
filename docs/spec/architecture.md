@@ -38,7 +38,7 @@ Decided in "Decide package and assembly layout and public API shape". All packag
 |---|---|
 | `Colony.Core` | Entity/Component storage, memory model, scheduler, command buffers, Resources, events, Relations, World/Tick API, math layer, fixed-point, RNG, hashing. One package on purpose: ECS, memory and scheduler are tightly coupled. |
 | `Colony.Fields` | Field chunks, spatial index, change feed, ChunkProvider, streaming residency manager. |
-| `Colony.Persistence` | Save/load container, migrations, replay log and verifier, Input Command ingestion and wire form. |
+| `Colony.Persistence` | Save/load container, migrations, replay log and verifier, Input Command ingestion and wire form, join package, transport-free lockstep session. |
 | `Colony.Pathfinding` | Region IDs, chunk graph and HPA*, flow Fields, request queue. |
 | `Colony.Colony` | Claims, work index, hauling matcher, priority-table and utility helpers. |
 | `Colony.ProcGen` | Stage pipeline, noise utilities, region/halo machinery; optional graph toolkit and WFC helper. |
@@ -53,12 +53,13 @@ Decided in "Decide package and assembly layout and public API shape". All packag
 Dependency rules, enforced by a CI dependency check:
 
 - `Core` depends only on the BCL.
-- `Fields`, `Persistence`, `Plugins` depend on `Core`.
-- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state).
+- `Fields` and `Persistence` depend on `Core`. `Plugins` depends on `Abstractions`, `Core`, `Fields` (Plugins register Fields) and `Persistence` (the C ABI loads and saves Worlds); ADR 0005.
+- `Pathfinding`, `Colony`, `ProcGen` depend on `Core` and `Fields` (and `Persistence` only where they save state). `Colony` also depends on `Pathfinding` for its reachability filters (ADR 0004).
 - `Diagnostics` plugs into `Core` through hook interfaces and struct callbacks; `Core` never references it.
-- Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery.
+- Nothing depends on `Diagnostics`, `Testing` or `Plugins`, so a Game can run without the Plugin machinery. Exceptions, decided at implementation: `Native` depends on `Plugins` (it hosts the C ABI, whose host lives in `Plugins`) and on whatever `Plugins` depends on; `Testing` may depend on `Core`, `Fields`, `Persistence` and `Plugins` (it exercises them); the `Colony` meta-package references `Core`, `Fields`, `Persistence`, `Pathfinding`, `Colony` and `ProcGen`, not `Plugins`, `Diagnostics` or `Testing`.
+- `Abstractions` depends only on the BCL. `Diagnostics` depends on `Core`, `Fields` and `Persistence` (it reads their counters and the replay log) and on nothing else; `Generators` depends only on Roslyn.
 
-Public vs internal: the public API is safe by default (typed handles, ref structs, Span views, generated typed queries). `unsafe` appears only in `internal` code, plus a small documented `[Experimental]` `Colony.Unsafe` namespace (raw chunk pointers for custom SIMD). `InternalsVisibleTo` is for tests only. No runtime reflection anywhere; no static state or singletons, so many Worlds can coexist in a process.
+Public vs internal: the public API is safe by default (typed handles, ref structs, Span views, generated typed queries). `unsafe` appears only in `internal` code, plus a small documented `[Experimental]` `Colony.Unsafe` namespace (raw chunk pointers for custom SIMD). `InternalsVisibleTo` is for tests only, with two exceptions recorded in ADR 0005: `Core` grants `Persistence` (exact save and restore of chunk memory, the Entity index, Resources and tables) and `Plugins` (layout-only registration and raw-byte access for the C ABI host). No runtime reflection anywhere; no static state or singletons, so many Worlds can coexist in a process. Three process-wide exceptions hold no simulation state and never decide an outcome (ADR 0005): the C ABI handle table (C code holds plain integers; World-owned handles are released when their World is disposed), the C ABI's per-thread last-error message (`colony_last_error`, C convention), and the `Colony-Diagnostics` EventSource (`EventSource` instances are process-wide by design). Read-only caches of immutable data are not state.
 
 ## 4. Core: data model, memory, scheduling
 
@@ -115,9 +116,10 @@ Systems order within a Phase by After/Before constraints (stable topological sor
 - **Field chunks** are 16x16x16 tiles (build-time constant), row-major cells inside the chunk (SIMD along x), whole chunks iterated and saved in Morton order of chunk coordinate. Uniform chunks hold a single value with no allocation.
 - A Field is a named grid of one unmanaged cell struct with a stable name and layout hash. Multi-property tiles are several Fields. Fields are CPU-authoritative in v1.
 - **Stencils:** double-buffered by default; in-place ordered mode for cellular automata using fixed chunk colouring. Both are deterministic regardless of thread count.
+- **Halo kernels:** the fast stencil path hands a kernel the whole 18x18x18 halo (`StencilHalo<T>`: `Row(y, z)` in, `OutputRow(y, z)` out, clipped to the World on edge chunks, `Boundary` written to storage-only cells; in place, output aliases input so a kernel sees its own earlier writes) through `StencilHaloKernel<T>` overloads of `Stencil.DoubleBuffered` / `Stencil.InPlace`; the per-cell `Read` kernel stays for reach beyond one cell. Halo scratch is a `StencilScratchPool` owned by the World's Field set (one slot per worker, freed on dispose), never thread-static.
 - **Grid Entities** carry a `TilePos` (3 ints) with optional fixed-point sub-tile offset (no floats).
 - **Spatial index:** per-chunk Entity buckets updated incrementally; queries by tile, box, radius and nearest-k with predicate; results ordered by distance then Entity ID.
-- **Change tracking:** per-chunk per-Field change versions plus a World change feed of changed chunks per Tick in deterministic order. Region upkeep, the work index and renderers subscribe.
+- **Change tracking:** per-chunk per-Field change versions plus a World change feed of changed chunks per Tick in deterministic order. Region upkeep, the work index and renderers subscribe. Host writes between Ticks are stamped too (`World.Get`, `GetBuffer`, `ChunkView.Column`), so those subscribers see them next Tick; `GetReadOnly` and `ReadColumn` never stamp and are the clean read paths.
 
 ### 5.2 Field interface and the future GPU seam
 
@@ -143,32 +145,39 @@ Fields sit behind a Field accessor and interface so storage can change without t
 - **RNG:** counter-based (Philox-like), addressed by (World seed, stream key, counter). No global `Random`.
 - **Analyzers** ban `Math`/`MathF` transcendentals, `Vector<T>`, `DateTime`/`Stopwatch`, `Guid.NewGuid`, reference-type `GetHashCode`, unordered managed collections and `System.Random` in Systems. All orderings end with an Entity ID tiebreak.
 - **Plugins** declare Deterministic (default) or NonDeterministic; any NonDeterministic Plugin makes the World report non-deterministic and drops the replay guarantee.
-- **World hash:** from chunk hashes (Field chunks in Morton order, cells in storage order; archetype chunks by archetype ID then chunk order), covering Component columns, Fields, Resources and RNG state; excluding padding, change versions and caches. Cheap enough to run every N Ticks.
+- **World hash:** from chunk hashes (Field chunks in Morton order, cells in storage order; archetype chunks by archetype ID then chunk order), covering Component columns, the Entity index (slot high-water mark, generations, free list in pop order), Fields, Resources and RNG state; excluding padding, change versions and caches. Cheap enough to run every N Ticks.
 - Load-then-continue is bit-identical to never saving.
 
 ## 7. Persistence, input, replay
 
 ### 7.1 Save/load ("Decide save/load and versioning")
 
-- A save is a snapshot of canonical chunk memory (little-endian, CPU-independent layout) in a single sectioned container: header, manifest (schema, Plugin set, Tick, World hash, seed), table of contents, one section per Field chunk and per archetype. Rebuildable state (spatial index, Relation index, change versions, caches, work index, region caches) is not saved.
+- A save is a snapshot of canonical chunk memory (little-endian, CPU-independent layout) in a single sectioned container: header, manifest (schema, Plugin set, Tick, World hash, seed), table of contents, one section per Field chunk and per archetype. Rebuildable state (spatial index, Relation index, change versions, caches, work index, region caches) is not saved. The exception is the flow Field store: which Fields exist, their recency and their pending repairs decide what later Ticks compute (a starved repair budget leaves a Field stale; LRU eviction depends on recency), so it is saved, not hashed, and a load continues with the same dirty Fields and eviction order (clean Fields are rebuilt). For the same reason host reads between Ticks are pure: `PathfindingService.FlowField(goals, movementClass)` there returns the Field as it is, without repair or a recency touch; `Repair` is the explicit, simulation-affecting call.
 - **Schema and migration:** the save embeds a schema table. Matching layout hashes bulk-copy; mismatches run registered per-Component migrations N to N+1 (chained). No migration means a clear failure. Framework Components have Framework migrations from 1.0; none promised during 0.x.
+- **Resource and extension migrations:** every persisted shape is migratable the same way. Persistent Resources (values and event queues) are keyed by name and layout hash like Components; a value migrates once, a queue record by record, and a Resource's kind (value or queue) cannot change. Each extension (Fields, pathfinding, residency, generation, ...) stamps its sections with a format version recorded in the manifest; an older save is brought forward by registered per-extension migrations N to N+1 (chained, rewriting the sections before the extension loads them), a newer save is refused naming the extension and both versions. An extension's layout hash (what state exists) must still match; a format migration changes only how that state is written, so a state-preserving one keeps the World hash verifiable. A missing step fails naming the Component, Resource or extension and the layout or version it stopped at.
 - **Plugin set** is in the manifest; a missing Plugin fails by default, with an opt-in "drop unknown Components" mode.
 - **Integrity:** per-section xxHash; World hash verified on load by default. Compression per section (LZ4-class, optional Zstd). Atomic write (temp file, fsync, rename) with backup generations.
 - **Timing:** saves at Tick boundaries, synchronous or background via copy-on-write snapshot. Delta saves are optional in v1 (format admits them).
 - **Managed Plugin state:** Plugins register serialize/restore callbacks or declare it derivable. Resources are unmanaged structs.
-- **API:** host-side `world.Save(destination, options)` and `World.Load(source, options, plugins)`; Load builds a fresh World.
+- **API:** host-side `world.Save(destination, options)` and `World.Load(source, options, plugins)`; Load builds a fresh World. `LoadOptions.PrepareWorld` runs after extensions load and before hash verification, so a Game can attach a host-owned chunk source there and a streamed save still verifies.
 
 ### 7.2 Replay log ("Decide input and command ingestion, and the replay log")
 
-Header (versions, Plugin set, generation version, seed or starting-save reference, tick rate), canonical input list per non-empty Tick, periodic checkpoint World hashes, optional full-save checkpoints. Same sectioned container as saves. Modes: record, playback with hash verification, seek via checkpoints, fork to live input. No outputs recorded.
+Header (the lockstep peer identity: format versions, build, Plugin set, schema hash, seed, tick rate; plus extension content versions, checked on playback with the same handshake comparison; a log from a NonDeterministic Plugin is refused), canonical input list per non-empty Tick, periodic checkpoint World hashes, optional full-save checkpoints. Same sectioned container as saves. Modes: record, playback with hash verification, seek via checkpoints, fork to live input. No outputs recorded.
 
 ### 7.3 Input Commands
 
 A typed, schema-registered unmanaged struct. `world.Submit(command)` from any thread, stamped with an effective Tick (next boundary by default). At each Tick boundary a canonical list is built, sorted by (effective Tick, source ID, per-source sequence). Handler Systems run in the Input Phase and write through command buffers. Rejection is deterministic and yields a `CommandRejected{source, seq, reason}` event; rejected commands stay in the log. Handlers use counter-based RNG keyed by (source, sequence, use index). Native and script Plugins submit through the same entry.
 
+**Per-source permissions.** Declared at build time by the Game and Plugins: a default access, per-source and per-command rules, and (source, command) grants, resolved pair first, then Deny over Allow, then the default. A contradictory declaration fails the build naming both owners. The table is part of the schema hash (only when restricted, so unrestricted schemas hash as before), is saved in manifests and replay headers and compared by the handshake. A denied command stays in the canonical list and replay frame, is hidden from handlers and yields `CommandRejected` with the PermissionDenied reason at the Tick boundary. Debug commands are denied by default and granted to the debug source.
+
 ### 7.4 Networking enablers (not networking)
 
 The Framework implements no networking. It is built to support Game authors' lockstep networking: a stable serialisable wire form for per-Tick input frames (the replay format), remote players as source IDs, explicit future effective Ticks for input delay, the shared Tick gate, checkpoint hash exchange with the hash-trail finder for desync, join-in-progress via save plus input log, and build/Plugin identity in the header for peer matching. Not promised: rollback netcode, state replication.
+
+**Join, handshake, test network, hash tree.** `PeerIdentity` (format versions, build, Plugins in load order, schema hash, seed, tick rate, session settings) encodes to bytes and `PeerHandshake.Compare` names every mismatch from each side. `JoinPackage` captures the latest save plus the log frames, checkpoints and pending commands since; it splits into self-verifying chunks that reassemble in any order, and `Join` loads with hash verification and plays forward to the end Tick checking every checkpoint (the host forwards later submissions with their explicit sequence). `Colony.Testing` ships a seeded `TestNetwork` (latency, jitter, reordering, loss, duplication; same sends and seed give the same deliveries), a `LockstepHarness` with fault injection (lost, replaced or wrong frames) and desync reporting. `world.HashTree()` gives a tree whose root equals the World hash (groups: tick, components, resources, tables, one per extension, random; leaves are chunks) so two peers compare only diverging groups and items; those group names are reserved and an extension may not use them. Diagnostics writes `.tree` files, serves a `hashtree` operation and compares live servers (`hashtree` and `desync` CLI commands).
+
+**Lockstep session (TASK-34).** `Colony.Persistence` ships `LockstepSession`, a transport-free state machine over those enablers: it consumes and produces lockstep messages as byte spans (input frames, cumulative acks and resend requests, scheduled checkpoint hashes, the handshake, post-desync diagnostics) and opens no sockets, starts no threads and reads no wall clock. The Game owns the transport and the loop: it hands received bytes to `Receive`, asks `NextMessage(peer)` for what to send each peer, and Ticks when `TryBeginTick` releases the shared Tick gate. Per-peer input delay is fixed or adaptive; a missing frame stalls at the gate; a checkpoint disagreement raises `Desynced` with the checkpoint Tick, then `DesyncLocalised` with the first diverging Tick, Phase and System from the exchanged hash trails and, when both peers kept the tree, the hash-tree localisation. Join-in-progress uses `JoinPackage` plus the frames the session retains. See `docs/guides/lockstep-networking.md` and the `samples/HelloLockstep` loopback sample. The Framework still ships no transport, no NAT traversal, no matchmaking, no encryption and no peer-drop policy.
 
 ## 8. Extension: Plugins, Definitions, C ABI
 
@@ -196,7 +205,8 @@ A CPU service providing:
 - **Layered repair:** per-chunk dirty marking, lazy repair on read, a per-Tick work budget with a staleness bound, and an up-front rebuild-vs-incremental threshold (prototype: CPU incremental repair can cost more than a rebuild).
 - **Queries:** `Reachable(from, to, movement class)` in constant time; approximate path cost; budgeted deferred path request/result; and a "next step toward goal" query.
 - **Request queue** processed in canonical order (priority class, then request ID) under a budget counted in work units (nodes expanded), results delivered N Ticks later; a missed deadline fails with a deterministic event. A request through an Unloaded chunk fails with "needs loading" carrying the chunk coordinate.
-- Tier 1 deterministic (integer costs, ties by neighbour index). Caches are not saved.
+- Flow Fields never cross an Unloaded chunk: such a Field reports `NeedsLoading` with the first missing chunk, and a step into or toward one returns `FlowStepStatus.NeedsLoading`.
+- Tier 1 deterministic (integer costs, ties by neighbour index). Caches are not saved, except the flow Field store (section 7.1).
 
 Games own unit movement; a path-follow helper is provided.
 
@@ -286,6 +296,15 @@ for (int tick = 0; tick < 1000; tick++) world.Tick();
 world.Save("colony.save", SaveOptions.Default);
 Console.WriteLine(world.Hash());               // identical on every machine
 ```
+
+The sketch as it compiles is `samples/HelloColony/Sketch.cs`; `SpecSketchDocTests` diffs the two line by line and fails on any drift beyond these exact deviations:
+
+- **Fields:** there is no `[Field]` attribute; `Heat` is a plain `public struct`, registered by name on the Fields builder: `builder.AddFields(new WorldSize(64, 64, 1)).AddField<Heat>("heat")` replaces `.AddField<Heat>()`.
+- **Phase in attributes:** `[System(NamedPhase.Simulate, Every = 1)]`, since an attribute argument must be a constant and `Phase` is not one.
+- **Systems:** the generator emits `ColonySystems.AddSystems(builder)`, a statement, so the chain breaks into `var builder = ...;`, `ColonySystems.AddSystems(builder);` and `var schema = builder.Build();` in place of `.AddSystems<ColonySystems>()`.
+- **Seed:** a World option, `schema.CreateWorld(new WorldOptions { Seed = 12345 })`, not `.Seed(12345)` on the builder (the seed is per World, the schema is shared).
+- **Creating Entities:** through a command buffer: `var commands = world.CreateCommandBuffer();`, `commands.Create(ComponentMask.Of(schema.Component<Hunger>()))` in the loop, then `world.Playback(commands);`. There is no `world.Create(new Hunger())`.
+- The compiled sketch also ends with `return world.Hash();` so the doc test can check the run.
 
 ## 12. GPU: deferred, with a seam
 

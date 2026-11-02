@@ -1,0 +1,6 @@
+<Project>
+  <!-- Prototypes keep their own package versions; the Framework's central package management stops here. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>

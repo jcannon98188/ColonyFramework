@@ -1,0 +1,65 @@
+# Colony Framework code style. Enforced in the build (EnforceCodeStyleInBuild + TreatWarningsAsErrors).
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{xml,csproj,props,targets,slnx,json,yml,yaml}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.cs]
+# Style
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_var_for_built_in_types = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_prefer_braces = true:warning
+csharp_style_prefer_primary_constructors = false:none
+dotnet_style_qualification_for_field = false:warning
+dotnet_style_qualification_for_property = false:warning
+dotnet_style_qualification_for_method = false:warning
+dotnet_style_qualification_for_event = false:warning
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+dotnet_style_require_accessibility_modifiers = always:warning
+csharp_style_implicit_object_creation_when_type_is_apparent = true:suggestion
+dotnet_style_prefer_collection_expression = when_types_loosely_match:suggestion
+
+# Naming: private fields _camelCase, constants PascalCase, interfaces IPascalCase
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+dotnet_naming_rule.private_fields_underscore.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+dotnet_naming_style.underscore_camel.required_prefix = _
+
+# Formatting (IDE0055) is enforced in build
+dotnet_diagnostic.IDE0055.severity = warning
+csharp_new_line_before_open_brace = all
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_space_after_keywords_in_control_flow_statements = true
+
+# Quality rules the Framework cares about from day one (spec sections 2 and 6).
+# CA1062: validate public arguments. Public API is safe by default (spec section 3).
+dotnet_diagnostic.CA1062.severity = warning
+# CA1305/CA1307/CA1309/CA1310: culture- and ordinal-explicit string handling (determinism, InvariantGlobalization).
+dotnet_diagnostic.CA1305.severity = warning
+dotnet_diagnostic.CA1307.severity = warning
+dotnet_diagnostic.CA1309.severity = warning
+dotnet_diagnostic.CA1310.severity = warning
+# CA1814/CA1815/CA1819: struct and array hygiene for Component-style data.
+dotnet_diagnostic.CA1815.severity = warning
+# CA2007: ConfigureAwait is irrelevant for a library without a SynchronizationContext; leave it off.
+dotnet_diagnostic.CA2007.severity = none
+# CA1848: LoggerMessage delegates; the Framework has its own logging drain (spec section 10.1).
+dotnet_diagnostic.CA1848.severity = none

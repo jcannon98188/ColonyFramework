@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Core: Entity/Component storage, memory model, scheduler, command buffers, Resources,
+    events, Relations, World/Tick API, math layer, fixed-point, RNG, hashing (spec section 3).
+    Depends only on the BCL: no ProjectReference, no PackageReference (enforced by tools/Colony.DependencyCheck).
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework core: Entities, Components, Systems, scheduler, World and Tick.</Description>
+    <!-- Hot data is unmanaged; unsafe is confined to internal code (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Core.Tests" />
+    <!-- The debug-validation failing-on-purpose scenarios rent and poke native memory directly (TASK-10). -->
+    <InternalsVisibleTo Include="Colony.Testing.Tests" />
+    <!-- Additive seam (TASK-14): Persistence reads and restores chunk memory, the Entity index, Resources and tables. -->
+    <InternalsVisibleTo Include="Colony.Persistence" />
+    <!-- Additive seam (TASK-28): the C ABI host registers Components by layout and reads chunk columns, Resources and inputs as raw bytes. -->
+    <InternalsVisibleTo Include="Colony.Plugins" />
+  </ItemGroup>
+
+</Project>

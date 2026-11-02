@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.ProcGen: procedural generation (spec section 9.3). Fixed-point noise utilities (value, gradient,
+    simplex, cellular, fBm, domain warping, region-keyed spot sampling) keyed by (seed, stage, coordinate, use index)
+    so any chunk is a pure function of (seed, coordinate). The stage pipeline, ChunkProvider and validation tooling live in
+    Generation/ and Validation/. Depends on Colony.Core and Colony.Fields; enforced by tools/Colony.DependencyCheck.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework procedural generation: deterministic fixed-point noise and generation pipeline.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+    <ProjectReference Include="..\Colony.Fields\Colony.Fields.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.ProcGen.Tests" />
+  </ItemGroup>
+
+</Project>

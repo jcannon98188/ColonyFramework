@@ -1,0 +1,24 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- Everything under tests/ is a test project; the shared test settings live in the root Directory.Build.targets. -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <!--
+      Zero-allocation gates measure GC.GetAllocatedBytesForCurrentThread over a window; tiered recompilation
+      (OSR, PGO instrumentation) inside that window allocates and made them flake under the parallel
+      whole-solution run. Every test project runs fully optimised code from the first call (TASK-42; it used to
+      be set per project and Colony.Testing.Tests, Fields, Generated and ProcGen lacked it).
+    -->
+    <TieredCompilation>false</TieredCompilation>
+    <TieredPGO>false</TieredPGO>
+  </PropertyGroup>
+
+  <!-- Allocation- and timing-gated tests run serially via this xUnit collection (every xUnit test project; the AOT host has none). -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'Colony.Testing.AotHost'">
+    <Compile Include="$(MSBuildThisFileDirectory)AllocationSensitiveGroup.cs" Link="AllocationSensitiveGroup.cs" />
+  </ItemGroup>
+
+</Project>

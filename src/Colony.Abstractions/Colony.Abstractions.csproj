@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Abstractions: only the contracts a Plugin or a separately versioned package compiles against without
+    taking a Core reference (spec section 3): the Plugin manifest, the C# API version and the Definition source
+    contract. Depends only on the BCL; enforced by tools/Colony.DependencyCheck. The Register surface itself is
+    Core-typed (Components, Systems, Resources) and lives in Colony.Plugins.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework abstractions: Plugin manifest, API version and Definition source contracts.</Description>
+    <RootNamespace>Colony.Plugins</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Plugins.Tests" />
+  </ItemGroup>
+
+</Project>

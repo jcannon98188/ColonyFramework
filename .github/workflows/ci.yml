@@ -1,0 +1,67 @@
+# PR matrix from spec section 10.3: Windows x64 and Linux x64 on JIT.
+# Nightly Native AOT, ISA variants, ARM64 and soak jobs are later tickets.
+#
+# Linux verification status (TASK-42 AC #4, recorded 2026-11-01): this workflow has never run (0 workflow runs on
+# origin; the work is developed on Windows and not pushed), and no Linux toolchain exists locally (the WSL distro has
+# no dotnet or cc). So none of the following has been executed on Linux x64 yet; the first green ubuntu-latest run
+# of this job (it triggers on pushes to main and on pull requests only) is what verifies them:
+#   - the Release build and the dependency check on Linux;
+#   - Native AOT publish for linux-x64 of Colony.Testing.AotHost, samples/HelloColony and src/Colony.Native (.so);
+#   - the C ABI conformance host built by tests/Colony.Native.Tests/CCompiler.cs through cc/gcc/clang
+#     (-std=c11 -fPIC -shared, -ldl), and the AotTests/NativePlugin loading of Colony.Native.so;
+#   - PublishedHost's extensionless host lookup and every AOT-vs-JIT comparison test;
+#   - cross-OS Tier 1: the golden-hash files (accepted on Windows) compared on Linux, e.g. Colony.Testing.Tests
+#     ColonistScenarioTests, Pathfinding PathfindingGolden, ProcGen GoldenHashTests, Persistence GoldenSaveTests.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} x64 JIT
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET (version pinned by global.json)
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore Colony.slnx
+
+      - name: Build
+        run: dotnet build Colony.slnx --configuration Release --no-restore
+
+      - name: Dependency check
+        run: dotnet run --project tools/Colony.DependencyCheck --configuration Release --no-build -- .
+
+      # The benchmark projects (benchmarks/) are part of the solution build above; they are never run on shared
+      # runners (spec section 10.3: performance is tracked on the dedicated machine, not gated here).
+      - name: Publish Native AOT hosts
+        # The AOT comparison tests (Colony.Testing.Tests, Colony.Colony.Tests, Colony.Pathfinding.Tests, Colony.ProcGen.Tests, HelloColony.Tests, Colony.Native.Tests) skip unless these are published.
+        # Colony.Native is the C ABI shared library (spec section 8); the C conformance host is compiled by the tests
+        # with the runner's C compiler (MSVC Build Tools on Windows, cc on Linux) and loads this library.
+        run: |
+          dotnet publish tests/Colony.Testing.AotHost --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
+          dotnet publish samples/HelloColony --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
+          dotnet publish src/Colony.Native --configuration Release --runtime ${{ runner.os == 'Windows' && 'win-x64' || 'linux-x64' }}
+
+      - name: Test
+        run: dotnet test Colony.slnx --configuration Release --no-build

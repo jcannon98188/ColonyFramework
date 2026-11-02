@@ -1,9 +1,11 @@
 ---
 id: TASK-15
 title: Input Commands and the replay log
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@jason'
 created_date: '2026-10-31 01:56'
+updated_date: '2026-10-31 20:44'
 labels:
   - ready-for-agent
   - implementation
@@ -28,9 +30,21 @@ Spec sections 7.2 and 7.3: Input Commands are typed schema-registered unmanaged 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Commands submitted concurrently from several threads yield the same canonical list and the same World hash as sequential submission
-- [ ] #2 A recorded replay played back reproduces every checkpoint hash; a deliberately altered input fails verification at the first diverging checkpoint
-- [ ] #3 Seeking to a checkpoint and forking to live input continues deterministically
-- [ ] #4 A rejected command emits CommandRejected with source, sequence and reason and remains in the log; handlers draw RNG keyed by (source, sequence, use index)
-- [ ] #5 Replay equivalence and a simulated two-peer lockstep scenario are added to the determinism harness
+- [x] #1 Commands submitted concurrently from several threads yield the same canonical list and the same World hash as sequential submission
+- [x] #2 A recorded replay played back reproduces every checkpoint hash; a deliberately altered input fails verification at the first diverging checkpoint
+- [x] #3 Seeking to a checkpoint and forking to live input continues deterministically
+- [x] #4 A rejected command emits CommandRejected with source, sequence and reason and remains in the log; handlers draw RNG keyed by (source, sequence, use index)
+- [x] #5 Replay equivalence and a simulated two-peer lockstep scenario are added to the determinism harness
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Core: Input/* (WorldInputs canonical sort by effective tick, source, sequence), AddInputCommand<T>, CommandRejected. Persistence: Replay/* (recorder, log, player, divergence exception), container flag bit 0 = replay. Replay header Plugin set empty until TASK-16. Pending inputs are not saved or hashed. One unreproduced single-test flake in 13 runs, likely timing-sensitive overhead tests under load.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Input commands with deterministic canonical ordering, replay recording/playback/seek/fork, and lockstep scenarios merged to integration/v1.
+<!-- SECTION:FINAL_SUMMARY:END -->

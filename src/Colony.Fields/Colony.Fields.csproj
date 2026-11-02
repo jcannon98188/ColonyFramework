@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Fields: Field chunks, stencils, the World change feed and the spatial index over grid Entities (spec
+    section 5.1 and 5.2); later tickets add ChunkProvider and the streaming residency manager (TASK-25/26).
+    Depends on Colony.Core only; enforced by tools/Colony.DependencyCheck.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework Fields: chunked tile grids, stencils and the World change feed.</Description>
+    <!-- Cell storage is native memory; unsafe is confined to internal code (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Fields.Tests" />
+    <!-- TASK-44: the streaming scenario (shared with the AOT host) holds loads back through ChunkResidencyManager.LoadStalled. -->
+    <InternalsVisibleTo Include="Colony.Testing.Tests" />
+    <InternalsVisibleTo Include="Colony.Testing.AotHost" />
+  </ItemGroup>
+
+</Project>

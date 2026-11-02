@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Colony.Persistence: the sectioned save container, World save/load, per-Component migrations and the
+    background (snapshot) save (spec section 7.1). Depends on Colony.Core only (spec section 3; enforced by
+    tools/Colony.DependencyCheck): Field chunks and other extension state travel through the
+    IWorldExtension.Save/Load hooks, never through a reference to Colony.Fields.
+  -->
+
+  <PropertyGroup>
+    <Description>Colony Framework persistence: sectioned save container, World save/load and Component migrations.</Description>
+    <!-- Chunk memory is native; unsafe is confined to internal code (spec section 2). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Colony.Core\Colony.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Colony.Persistence.Tests" />
+  </ItemGroup>
+
+</Project>

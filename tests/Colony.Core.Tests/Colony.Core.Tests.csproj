@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Alignment tests take the address of column spans. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Colony.Core\Colony.Core.csproj" />
+    <!-- The generator runs against this project as an analyzer (AC #5): it must produce no diagnostics. -->
+    <ProjectReference Include="..\..\src\Colony.Generators\Colony.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>
