@@ -185,6 +185,9 @@ internal sealed class WorkerPool : IDisposable
         int seen = 0;
         var clock = Clocks[index];
         bool timing = Timing;
+        // The first wait on a thread allocates its wait state once (observed on Linux). Pay it here, not in the first
+        // Tick whose spin window a loaded machine overruns, so a steady-state Tick never allocates on a worker.
+        worker.Event.WaitOne(0);
         while (true)
         {
             long spinStart = Stopwatch.GetTimestamp();
