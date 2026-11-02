@@ -7,14 +7,17 @@ namespace Colony.Fields;
 /// World's worker pool through <see cref="World.RunParallel"/> from the System's serial hook, with jobs
 /// keyed by chunk ordinal, so results are bit-identical for any thread count.
 /// <list type="bullet">
-/// <item><see cref="DoubleBuffered{T}"/>: every chunk is computed from the previous state into a back buffer,
+/// <item><c>DoubleBuffered</c>: every chunk is computed from the previous state into a back buffer,
 /// then chunks whose cells actually changed are copied back and stamped; unchanged chunks keep their storage
 /// (a uniform chunk stays uniform).</item>
-/// <item><see cref="InPlace{T}"/>: ordered mode for cellular automata. Chunks are coloured by coordinate parity
+/// <item><c>InPlace</c>: ordered mode for cellular automata. Chunks are coloured by coordinate parity
 /// (8 colours, no two adjacent chunks alike) and processed colour by colour, in place: a kernel sees its own
 /// earlier cells and lower-coloured neighbours already updated, higher-coloured ones not yet. Every visited
 /// chunk is stamped as written.</item>
 /// </list>
+/// Each mode takes either kernel shape: <see cref="StencilKernel{T}"/> reads cell by cell anywhere in the 3x3x3 chunk
+/// neighbourhood (<see cref="StencilInput{T}.Read"/>); <see cref="StencilHaloKernel{T}"/> walks rows of the gathered
+/// one-cell halo (<see cref="StencilHalo{T}"/>) and is the fast path for 6- and 26-neighbour kernels.
 /// Stencil Systems have no Component access set; order them against other Systems with After/Before.
 /// </summary>
 public static class Stencil
@@ -28,7 +31,19 @@ public static class Stencil
         IReadOnlyList<string>? after = null,
         IReadOnlyList<string>? before = null)
         where T : unmanaged
-        => Define(name, new StencilRunner<T>(field, kernel, boundary, inPlace: false), phase, after, before);
+        => Define(name, new StencilRunner<T>(field, kernel, null, boundary, inPlace: false), phase, after, before);
+
+    /// <summary>A double-buffered stencil whose kernel walks halo rows (<see cref="StencilHalo{T}"/>) instead of reading cell by cell.</summary>
+    public static SystemDefinition DoubleBuffered<T>(
+        string name,
+        Field<T> field,
+        StencilHaloKernel<T> kernel,
+        T boundary = default,
+        Phase? phase = null,
+        IReadOnlyList<string>? after = null,
+        IReadOnlyList<string>? before = null)
+        where T : unmanaged
+        => Define(name, new StencilRunner<T>(field, null, kernel, boundary, inPlace: false), phase, after, before);
 
     public static SystemDefinition InPlace<T>(
         string name,
@@ -39,7 +54,19 @@ public static class Stencil
         IReadOnlyList<string>? after = null,
         IReadOnlyList<string>? before = null)
         where T : unmanaged
-        => Define(name, new StencilRunner<T>(field, kernel, boundary, inPlace: true), phase, after, before);
+        => Define(name, new StencilRunner<T>(field, kernel, null, boundary, inPlace: true), phase, after, before);
+
+    /// <summary>An in-place ordered stencil whose kernel walks halo rows (<see cref="StencilHalo{T}"/>); output rows alias the halo, so the kernel sees its own earlier writes.</summary>
+    public static SystemDefinition InPlace<T>(
+        string name,
+        Field<T> field,
+        StencilHaloKernel<T> kernel,
+        T boundary = default,
+        Phase? phase = null,
+        IReadOnlyList<string>? after = null,
+        IReadOnlyList<string>? before = null)
+        where T : unmanaged
+        => Define(name, new StencilRunner<T>(field, null, kernel, boundary, inPlace: true), phase, after, before);
 
     private static SystemDefinition Define<T>(string name, StencilRunner<T> runner, Phase? phase, IReadOnlyList<string>? after, IReadOnlyList<string>? before)
         where T : unmanaged
@@ -61,16 +88,22 @@ internal sealed class StencilRunner<T>
     where T : unmanaged
 {
     private readonly Field<T> _field;
-    private readonly StencilKernel<T> _kernel;
+    private readonly StencilKernel<T>? _kernel;
+    private readonly StencilHaloKernel<T>? _haloKernel;
     private readonly T _boundary;
     private readonly bool _inPlace;
     private readonly List<State> _states = [];
 
-    public StencilRunner(Field<T> field, StencilKernel<T> kernel, T boundary, bool inPlace)
+    public StencilRunner(Field<T> field, StencilKernel<T>? kernel, StencilHaloKernel<T>? haloKernel, T boundary, bool inPlace)
     {
-        ArgumentNullException.ThrowIfNull(kernel);
+        if (kernel is null && haloKernel is null)
+        {
+            throw new ArgumentNullException(nameof(kernel));
+        }
+
         _field = field;
         _kernel = kernel;
+        _haloKernel = haloKernel;
         _boundary = boundary;
         _inPlace = inPlace;
     }
@@ -106,7 +139,7 @@ internal sealed class StencilRunner<T>
         }
 
         var fields = world.Fields();
-        var created = new State(fields, _field.Id, fields.StorageOf(_field), _inPlace ? null : fields.CreateScratchStorage(_field), _kernel, _boundary);
+        var created = new State(fields, _field.Id, fields.StorageOf(_field), _inPlace ? null : fields.CreateScratchStorage(_field), _kernel, _haloKernel, _boundary);
         _states.Add(created);
         return created;
     }
@@ -123,10 +156,11 @@ internal sealed class StencilRunner<T>
         private readonly FieldStorage _front;
         private readonly FieldStorage? _back;
         private readonly byte[] _changed;
-        private readonly StencilKernel<T> _kernel;
+        private readonly StencilKernel<T>? _kernel;
+        private readonly StencilHaloKernel<T>? _haloKernel;
         private readonly T _boundary;
 
-        public State(FieldSet fields, int fieldId, FieldStorage front, FieldStorage? back, StencilKernel<T> kernel, T boundary)
+        public State(FieldSet fields, int fieldId, FieldStorage front, FieldStorage? back, StencilKernel<T>? kernel, StencilHaloKernel<T>? haloKernel, T boundary)
         {
             Fields = fields;
             Layout = fields.Layout;
@@ -135,6 +169,7 @@ internal sealed class StencilRunner<T>
             _back = back;
             _changed = new byte[Layout.ChunkCount];
             _kernel = kernel;
+            _haloKernel = haloKernel;
             _boundary = boundary;
         }
 
@@ -170,11 +205,22 @@ internal sealed class StencilRunner<T>
                 return;
             }
 
+            var coord = Layout.CoordOf(ordinal);
+            if (_haloKernel is not null)
+            {
+                // The halo is the working buffer: gather (centre included) first, run, then copy the centre back.
+                var gathered = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false);
+                var cells = MemoryMarshal.Cast<byte, T>(_front.WriteCells(ordinal));
+                Fields.MarkWritten(_fieldId, ordinal);
+                RunHalo(in gathered, coord, cells, inPlace: true);
+                return;
+            }
+
             // Materialise first so the input's centre aliases the output.
             var output = _front.WriteCells(ordinal);
             Fields.MarkWritten(_fieldId, ordinal);
-            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary, aliasCentre: true);
-            _kernel(in input, MemoryMarshal.Cast<byte, T>(output));
+            var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: true);
+            _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
         }
 
         private void Compute(int ordinal)
@@ -185,10 +231,60 @@ internal sealed class StencilRunner<T>
                 return;
             }
 
-            var input = new StencilInput<T>(Layout, _front, Layout.CoordOf(ordinal), _boundary, aliasCentre: false);
+            var coord = Layout.CoordOf(ordinal);
+            var input = new StencilInput<T>(Layout, _front, coord, _boundary, aliasCentre: false);
             var output = _back!.WriteCells(ordinal);
-            _kernel(in input, MemoryMarshal.Cast<byte, T>(output));
+            if (_haloKernel is not null)
+            {
+                RunHalo(in input, coord, MemoryMarshal.Cast<byte, T>(output), inPlace: false);
+            }
+            else
+            {
+                _kernel!(in input, MemoryMarshal.Cast<byte, T>(output));
+            }
+
             _changed[ordinal] = _front.CellsEqual(ordinal, output) ? (byte)0 : (byte)1;
+        }
+
+        /// <summary>Runs the halo kernel over a gathered input; <paramref name="cells"/> is the chunk's storage-order output.</summary>
+        private unsafe void RunHalo(in StencilInput<T> input, ChunkCoord coord, Span<T> cells, bool inPlace)
+        {
+            var size = Layout.Size;
+            var origin = coord.Origin;
+            int extentX = Math.Min(FieldChunk.Size, size.X - origin.X);
+            int extentY = Math.Min(FieldChunk.Size, size.Y - origin.Y);
+            int extentZ = Math.Min(FieldChunk.Size, size.Z - origin.Z);
+            T* halo = input.HaloPointer;
+            fixed (T* output = cells)
+            {
+                var view = new StencilHalo<T>(halo, inPlace ? null : output, coord, _boundary, extentX, extentY, extentZ);
+                _haloKernel!(in view);
+            }
+
+            if (inPlace)
+            {
+                for (int z = 0; z < FieldChunk.Size; z++)
+                {
+                    for (int y = 0; y < FieldChunk.Size; y++)
+                    {
+                        new ReadOnlySpan<T>(halo + StencilHalo.IndexOf(0, y, z), FieldChunk.Size)
+                            .CopyTo(cells.Slice(FieldChunk.CellIndex(0, y, z), FieldChunk.Size));
+                    }
+                }
+            }
+
+            if ((extentX & extentY & extentZ) != FieldChunk.Size)
+            {
+                // Storage-only cells past the World bound always hold the boundary after a halo stencil.
+                for (int i = 0; i < FieldChunk.CellCount; i++)
+                {
+                    var (x, y, z) = FieldChunk.CellCoordinates(i);
+                    if (x >= extentX || y >= extentY || z >= extentZ)
+                    {
+                        cells[i] = _boundary;
+                    }
+                }
+            }
         }
 
         private void Commit(int ordinal)

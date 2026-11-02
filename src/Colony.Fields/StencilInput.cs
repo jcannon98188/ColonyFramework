@@ -106,6 +106,9 @@ public readonly ref struct StencilInput<T>
     private const nint Outside = -1;
     private const nint Uniform = 0;
 
+    /// <summary>The gathered 18x18x18 halo (boundary baked in), for <see cref="StencilHalo{T}"/>; always present when the centre is not aliased.</summary>
+    internal unsafe T* HaloPointer => _halo;
+
     /// <summary>The chunk whose cells the kernel is computing.</summary>
     public ChunkCoord Chunk { get; }
 
@@ -255,32 +258,69 @@ public readonly ref struct StencilInput<T>
 /// <summary>
 /// Per-thread native scratch for stencil halos (TASK-38). A job gathers its halo here before running the kernel;
 /// the block is thread-local only as scratch (results never depend on which worker ran the job), is reused by
-/// every job the thread runs afterwards, grows only when a wider cell type shows up, and lives as long as the
-/// thread, so steady-state Ticks allocate nothing.
+/// every job the thread runs afterwards and grows only when a wider cell type shows up, so steady-state Ticks
+/// allocate nothing.
 /// </summary>
+/// <remarks>
+/// Freed with its thread (TASK-43): the native block is owned by a small finalizable holder referenced only from
+/// the thread-static slot, so when a World's worker threads exit (World disposed) the GC finalizes the holders and
+/// releases the blocks. Before, every disposed World leaked one block per worker thread.
+/// </remarks>
 internal static unsafe class StencilScratch
 {
     private const int Alignment = 64;
 
     [ThreadStatic]
-    private static void* _block;
+    private static Block? _block;
 
-    [ThreadStatic]
-    private static nuint _blockBytes;
+    private static long _liveBlocks;
 
     public static void* Rent(nuint bytes)
     {
-        if (_blockBytes < bytes)
+        var block = _block;
+        if (block is null || block.Bytes < bytes)
         {
-            if (_block is not null)
-            {
-                NativeMemory.AlignedFree(_block);
-            }
-
-            _block = NativeMemory.AlignedAlloc(bytes, Alignment);
-            _blockBytes = bytes;
+            block?.Dispose();
+            block = new Block(bytes);
+            _block = block;
         }
 
-        return _block;
+        return block.Pointer;
+    }
+
+    /// <summary>Native blocks currently allocated across all threads; test seam for the free-with-thread rule.</summary>
+    internal static long LiveBlocks => Interlocked.Read(ref _liveBlocks);
+
+    private sealed class Block : IDisposable
+    {
+        public Block(nuint bytes)
+        {
+            Pointer = NativeMemory.AlignedAlloc(bytes, Alignment);
+            Bytes = bytes;
+            Interlocked.Increment(ref _liveBlocks);
+        }
+
+        ~Block() => Free();
+
+        public void* Pointer { get; private set; }
+
+        public nuint Bytes { get; private set; }
+
+        public void Dispose()
+        {
+            Free();
+            GC.SuppressFinalize(this);
+        }
+
+        private void Free()
+        {
+            if (Pointer is not null)
+            {
+                NativeMemory.AlignedFree(Pointer);
+                Pointer = null;
+                Bytes = 0;
+                Interlocked.Decrement(ref _liveBlocks);
+            }
+        }
     }
 }
